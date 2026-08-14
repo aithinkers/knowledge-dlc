@@ -12,7 +12,12 @@
   "scripts": {
     "check:governance": "node scripts/verify-governance.mjs",
     "test:governance": "node --test tests/governance/*.test.mjs",
-    "test": "npm run check:governance && npm run test:governance"
+    "test:core": "node --test tests/core/*.test.mjs",
+    "test": "npm run check:governance && npm run test:governance && npm run test:core"
+  },
+  "dependencies": {
+    "canonicalize": "4.0.0",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "ajv": "8.20.0"

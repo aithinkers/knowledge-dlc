@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
+import { parseDocument } from "yaml";
 
 const moduleRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -52,6 +53,24 @@ export async function createContractValidator(root = moduleRoot) {
       };
     }
   };
+}
+
+export function parseYamlArtifact(text) {
+  const document = parseDocument(text, {
+    version: "1.2", schema: "core", strict: true, uniqueKeys: true
+  });
+  if (document.errors.length) throw new SyntaxError(`invalid YAML artifact: ${document.errors[0].message}`);
+  return document.toJS({ mapAsMap: false });
+}
+
+export function parseJsonArtifact(text) {
+  return JSON.parse(text);
+}
+
+export async function parseAndValidateContract(name, text, { format = "yaml", root = moduleRoot } = {}) {
+  const value = format === "json" ? parseJsonArtifact(text) : parseYamlArtifact(text);
+  const validator = await createContractValidator(root);
+  return { ...validator.validate(name, value), value };
 }
 
 export function validateProjectSemantics(project) {

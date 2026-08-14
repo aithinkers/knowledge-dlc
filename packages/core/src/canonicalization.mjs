@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 
+import canonicalize from "canonicalize";
+import { parseDocument } from "yaml";
+
 import { fail } from "./errors.mjs";
 
 export const CANONICALIZATION_ID = "kdlc-c14n-1";
@@ -73,16 +76,10 @@ function normalizeJson(value, seen = new Set()) {
   }
 }
 
-function encodeCanonical(value) {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(encodeCanonical).join(",")}]`;
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${encodeCanonical(value[key])}`).join(",")}}`;
-}
-
 export function canonicalJson(value) {
-  return encodeCanonical(normalizeJson(value));
+  const encoded = canonicalize(normalizeJson(value));
+  if (encoded === undefined) fail("KDLC_CANONICAL_INVALID", "Value cannot be represented by RFC 8785");
+  return encoded;
 }
 
 export function canonicalText(value) {
@@ -95,6 +92,39 @@ export function canonicalMarkdownProjection({ frontmatter, body }) {
     fail("KDLC_CANONICAL_INVALID", "Markdown frontmatter must be a mapping");
   }
   return canonicalJson({ frontmatter, body: canonicalText(body) });
+}
+
+export function parseMarkdownConcept(bytes) {
+  let text;
+  try {
+    text = typeof bytes === "string" ? bytes : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    fail("KDLC_MARKDOWN_INVALID", "Markdown must be strict UTF-8");
+  }
+  const normalized = text.replace(/\r\n?/g, "\n");
+  if (!normalized.startsWith("---\n")) fail("KDLC_MARKDOWN_INVALID", "Markdown must begin with YAML frontmatter");
+  const end = normalized.indexOf("\n---\n", 4);
+  if (end < 0) fail("KDLC_MARKDOWN_INVALID", "Markdown frontmatter is not terminated");
+  const document = parseDocument(normalized.slice(4, end), {
+    version: "1.2", schema: "core", strict: true, uniqueKeys: true
+  });
+  if (document.errors.length) fail("KDLC_MARKDOWN_INVALID", `Invalid YAML frontmatter: ${document.errors[0].message}`);
+  const frontmatter = document.toJS({ mapAsMap: false });
+  if (!frontmatter || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
+    fail("KDLC_MARKDOWN_INVALID", "Markdown frontmatter must be a mapping");
+  }
+  return Object.freeze({ frontmatter, body: normalized.slice(end + 5) });
+}
+
+export function markdownHashes(bytes, reviewFields = BASE_REVIEW_FIELDS) {
+  const parsed = parseMarkdownConcept(bytes);
+  return Object.freeze({
+    byte_hash: byteHash(bytes),
+    artifact_hash: markdownArtifactHash(parsed),
+    review_hash: reviewHash(parsed, reviewFields),
+    canonicalization: CANONICALIZATION_ID,
+    review_projection: REVIEW_PROJECTION_ID
+  });
 }
 
 export function sha256(bytes) {

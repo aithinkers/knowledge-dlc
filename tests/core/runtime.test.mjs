@@ -17,6 +17,8 @@ import {
   generateHierarchicalIndexes,
   markdownArtifactHash,
   materializeScaffold,
+  markdownHashes,
+  parseMarkdownConcept,
   parseKbReference,
   resolveContainedPath,
   resolveKbReference,
@@ -39,6 +41,14 @@ test("FEAT-001 kdlc-c14n-1 canonical JSON and text are byte deterministic", () =
   assert.equal(canonicalText("alpha\nbeta\n\n"), hashFixture.canonical_text);
   assert.equal(canonicalMarkdownProjection({ frontmatter: { title: "e\u0301", type: "Policy" }, body: "line\r\n" }),
     '{"body":"line\\n","frontmatter":{"title":"é","type":"Policy"}}');
+});
+
+test("FEAT-001 Markdown parsing uses strict UTF-8 and unique YAML keys", () => {
+  const parsed = parseMarkdownConcept("---\ntype: Policy\ntitle: Café\n---\nBody\r\n");
+  assert.equal(parsed.frontmatter.type, "Policy");
+  assert.equal(markdownHashes("---\ntype: Policy\ntitle: Café\n---\nBody\n").canonicalization, "kdlc-c14n-1");
+  assert.throws(() => parseMarkdownConcept("---\ntype: Policy\ntype: Decision\n---\nBody\n"), expectCode("KDLC_MARKDOWN_INVALID"));
+  assert.throws(() => parseMarkdownConcept(Uint8Array.from([0xff, 0xfe])), expectCode("KDLC_MARKDOWN_INVALID"));
 });
 
 test("FEAT-001 byte, artifact, Markdown, and review hashes match stable fixtures", () => {

@@ -5,12 +5,46 @@ import test from "node:test";
 import {
   createContractValidator,
   loadContractSchemas,
+  parseAndValidateContract,
+  parseYamlArtifact,
   validateProjectSemantics,
   validateResolvedMountIds
 } from "../../packages/contracts/index.mjs";
 import { OKF_REFERENCE, verifyOkfReference } from "../../scripts/verify-okf-reference.mjs";
 
 const digest = `sha256:${"a".repeat(64)}`;
+
+test("FEAT-001 YAML 1.2 parsing rejects duplicate keys and validates contracts", async () => {
+  assert.throws(() => parseYamlArtifact("kind: Project\nkind: KnowledgeBase\n"), /Map keys must be unique/);
+  const result = await parseAndValidateContract("project", [
+    "api_version: kdlc.dev/v1alpha1",
+    "kind: Project",
+    "metadata:",
+    "  name: demo",
+    "purpose: ./purpose.md",
+    "profile: personal@1",
+    "knowledge_bases:",
+    "  - name: demo",
+    "    uri: ./knowledge/demo",
+    "    mode: read-only",
+    "    role: dependency",
+    "    priority: 1",
+    "workflow:",
+    "  scope: audit",
+    "  knowledge_depth: summary",
+    "  trust_level: personal",
+    "  autonomy: read-only",
+    "  approval_policy: publish-only",
+    "retrieval:",
+    "  mode: filesystem",
+    "  default_bases: []",
+    "  minimum_trust: unverified",
+    "  stale_behavior: warn",
+    "  citation_format: qualified",
+    ""
+  ].join("\n"));
+  assert.equal(result.valid, true, JSON.stringify(result.errors));
+});
 
 const validProject = {
   api_version: "kdlc.dev/v1alpha1",
