@@ -20,6 +20,24 @@ export class LifecycleError extends Error {
   }
 }
 
+export function fromNativeError(error, {
+  code = "KDLC_INTERNAL_ERROR",
+  category = "internal-engine-error",
+  message = "Lifecycle operation failed",
+  retryable = false,
+  details
+} = {}) {
+  if (error instanceof LifecycleError) return error;
+  const nativeCode = typeof error?.code === "string" && /^[A-Z0-9_]{1,64}$/.test(error.code) ? error.code : undefined;
+  return new LifecycleError(code, category, message, {
+    retryable,
+    details: {
+      ...(details ?? {}),
+      ...(nativeCode === undefined ? {} : { native_code: nativeCode })
+    }
+  });
+}
+
 export function conflict(message, details) {
   return new LifecycleError("KDLC_HASH_CONFLICT", "concurrency-conflict", message, { details });
 }
