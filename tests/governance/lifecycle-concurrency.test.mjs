@@ -159,6 +159,33 @@ test("FEAT-002 finalizing publication recovers forward after audit without rollb
   assert.equal(events.filter(({ action }) => action === "publication.committed").length, 1);
 });
 
+test("FEAT-002 finalizing crash recovery reacquires dead target leases durably", async (context) => {
+  const f = await fixture(context); await f.store.writeTextAtomic("knowledge/crash.md", "before");
+  const auditWriter = new AuditWriter({ ...f, ids: new IDs("recovery-audit") }); let failPublication = true;
+  const audit = { append: async (workflowId, event) => {
+    if (failPublication && event.action === "publication.committed") { failPublication = false; throw new Error("audit crashed"); }
+    return auditWriter.append(workflowId, event);
+  } };
+  const original = new TransactionManager({ ...f, audit, ids: new IDs("recovery-old"), token: sha256Token, transactionLeaseMs: 100 });
+  const prepared = await original.prepare({ workflowId: "wf", targets: [{ path: "knowledge/crash.md", expectedToken: sha256Token("before"), content: "canonical" }] });
+  await assert.rejects(original.commit("wf", prepared.transaction_id), (error) => error.code === "KDLC_TRANSACTION_FINALIZATION_PENDING");
+  const oldLeaseId = prepared.targets[0].lock_lease_id;
+  const resource = await original.resource("knowledge/crash.md");
+  const recordPath = original.locks.recordPath(resource); const dead = await f.store.readJson(recordPath);
+  dead.process_id = 2_147_483_647; dead.expires_at = new Date(f.clock.millis() - 1).toISOString();
+  await f.store.writeJsonAtomic(recordPath, dead);
+
+  const recovery = new TransactionManager({ ...f, audit, ids: new IDs("recovery-new"), token: sha256Token, transactionLeaseMs: 100 });
+  await recovery.locks.breakStale(resource, { actor: "process:kdlc-engine", reason: "confirmed dead publication owner", workflowId: "wf" });
+  assert.equal(await f.store.exists(recordPath), false);
+  const committed = await recovery.recover("wf", prepared.transaction_id);
+  assert.equal(committed.state, "committed"); assert.equal(await f.store.readText("knowledge/crash.md"), "canonical");
+  assert.notEqual((await f.store.readJson(recovery.path("wf", prepared.transaction_id))).targets[0].lock_lease_id, oldLeaseId);
+  const events = (await f.store.readText("workflow/runs/wf/audit.jsonl")).trim().split("\n").map(JSON.parse);
+  assert.equal(events.filter(({ action }) => action === "lock.broken").length, 1);
+  assert.equal(events.filter(({ action }) => action === "publication.committed").length, 1);
+});
+
 test("FEAT-002 audit idempotency conflicts when the same key carries another payload", async (context) => {
   const f = await fixture(context); const audit = new AuditWriter({ ...f, ids: new IDs("audit") });
   const first = await audit.append("wf", { actor: "process:test", action: "publication.committed", subject: "txn", result: "committed", idempotency_key: "publication:txn" });

@@ -47,6 +47,45 @@ export class LeaseLockManager {
       return record;
     });
   }
+  async reacquire(resource, { owner, priorLeaseId, process, leaseMs, recovery = {}, actor, reason, workflowId }) {
+    return this.coordinated(resource, "recover", async () => {
+      const lockPath = this.path(resource); const recordPath = this.recordPath(resource);
+      let prior = null;
+      if (await this.store.exists(recordPath)) {
+        const firstToken = await this.store.tokenOf(recordPath); prior = await this.store.readJson(recordPath);
+        const belongsToRecovery = prior.owner === owner
+          && prior.lease_id === priorLeaseId
+          && prior.recovery?.workflow_id === recovery.workflow_id
+          && prior.recovery?.transaction_id === recovery.transaction_id;
+        if (!belongsToRecovery) throw conflict("Recovery cannot take another lock owner's reservation", { resource, owner: prior.owner });
+        if (Date.parse(prior.expires_at) > this.clock.millis() || this.store.processIsAlive(prior.process_id) !== false) {
+          throw conflict("Recovery cannot take a live or unverifiable reservation", { resource, owner: prior.owner });
+        }
+        if (firstToken !== await this.store.tokenOf(recordPath)) throw conflict("Lock changed during recovery", { resource });
+        await this.store.remove(recordPath); await this.store.removeDirectory(lockPath);
+      } else if (await this.store.exists(lockPath)) {
+        const metadata = await stat(await this.store.safePath(lockPath));
+        const graceMs = this.coordination.emptyGraceMs ?? 30_000;
+        if (this.clock.millis() - metadata.mtimeMs < graceMs) throw conflict("Empty lock is within recovery grace period", { resource });
+        await this.store.removeDirectory(lockPath);
+      }
+      const processId = Number(process);
+      if (!Number.isSafeInteger(processId) || processId <= 0) throw conflict("Lock requires a valid local process ID", { resource });
+      await this.store.createDirectoryExclusive(lockPath);
+      const acquired = this.clock.now();
+      const record = {
+        resource, owner, process_id: processId,
+        lease_id: this.ids?.next?.("lease") ?? `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        acquired_at: acquired, heartbeat_at: acquired, expires_at: new Date(this.clock.millis() + leaseMs).toISOString(), lease_ms: leaseMs, recovery
+      };
+      try { await this.store.writeJsonAtomic(recordPath, record); }
+      catch (error) { await this.store.removeDirectory(lockPath).catch(() => {}); throw error; }
+      if (prior && this.audit && workflowId) await this.audit.append(workflowId, {
+        actor, action: "lock.broken", subject: resource, result: "stale", reason, prior_owner: prior.owner
+      });
+      return record;
+    });
+  }
   async release(resource, owner, leaseId) {
     return this.coordinated(resource, "release", async () => {
       if (!(await this.store.exists(this.recordPath(resource)))) return null;

@@ -4,7 +4,7 @@ import { LeaseLockManager } from "./locks.mjs";
 export class TransactionManager {
   constructor({ store, clock, ids, token, audit, fault = () => {}, coordination = {}, transactionLeaseMs = 300_000 }) {
     Object.assign(this, { store, clock, ids, token, audit, fault, transactionLeaseMs });
-    this.locks = new LeaseLockManager({ store, clock, ids, coordination });
+    this.locks = new LeaseLockManager({ store, clock, audit, ids, coordination });
   }
   path(workflowId, id) { return `workflow/runs/${assertIdentifier(workflowId, "workflow ID")}/transactions/${assertIdentifier(id, "transaction ID")}.json`; }
   async resource(targetPath) { return `transaction-target:${await this.store.identity(targetPath)}`; }
@@ -49,6 +49,31 @@ export class TransactionManager {
     const result = await action();
     await this.verifyTargetsHeld(journal);
     return result;
+  }
+  async recoverTargetReservations(journal, path) {
+    const replacements = []; const updatedTargets = journal.targets.map((target) => ({ ...target }));
+    try {
+      for (const target of updatedTargets) {
+        const actual = await this.store.exists(target.path) ? this.token(await this.store.readText(target.path)) : null;
+        if (actual !== this.token(target.next_content)) throw conflict("Finalizing recovery target does not contain the published content", { path: target.path, actual });
+        const resource = await this.resource(target.path);
+        try { await this.locks.validate(resource, journal.transaction_id, target.lock_lease_id); continue; }
+        catch (error) { if (error?.code !== "KDLC_HASH_CONFLICT" && error?.code !== "ENOENT") throw error; }
+        const lease = await this.locks.reacquire(resource, {
+          owner: journal.transaction_id, priorLeaseId: target.lock_lease_id, process: process.pid,
+          leaseMs: this.transactionLeaseMs,
+          recovery: { workflow_id: journal.workflow_id, transaction_id: journal.transaction_id },
+          actor: "process:kdlc-engine", reason: "authorized transaction crash recovery", workflowId: journal.workflow_id
+        });
+        replacements.push({ resource, leaseId: lease.lease_id }); target.lock_lease_id = lease.lease_id;
+      }
+      journal.targets = updatedTargets; journal.updated_at = this.clock.now();
+      await this.fencedMutation(journal, () => this.store.writeJsonAtomic(path, journal));
+      return journal;
+    } catch (error) {
+      for (const replacement of replacements.reverse()) await this.locks.release(replacement.resource, journal.transaction_id, replacement.leaseId).catch(() => {});
+      throw error;
+    }
   }
   async prepare({ workflowId, targets }) {
     const id = this.ids.next("txn"); const now = this.clock.now(); const prepared = []; const acquired = [];
@@ -123,7 +148,7 @@ export class TransactionManager {
   async recover(workflowId, id, strategy = "rollback") {
     const path = this.path(workflowId, id); const journal = await this.store.readJson(path);
     if (journal.state === "committed") { await this.releaseTargets(journal); return journal; }
-    if (journal.state === "finalizing") return this.finalize(journal, path);
+    if (journal.state === "finalizing") { await this.recoverTargetReservations(journal, path); return this.finalize(journal, path); }
     if (journal.state === "rolled_back") return journal;
     if (strategy === "rollforward") { journal.state = "applying"; await this.store.writeJsonAtomic(path, journal); return this.commit(workflowId, id); }
     journal.state = "rolling_back"; await this.store.writeJsonAtomic(path, journal);
