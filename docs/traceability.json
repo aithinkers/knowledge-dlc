@@ -48,7 +48,7 @@
       "status": "implemented",
       "evidence": {
         "implementation": ["core/profiles/kdlc-base/profile.json", "core/schemas/okf-0.2/reference.json", "packages/contracts/index.mjs", "packages/core/index.mjs", "scripts/verify-okf-reference.mjs"],
-        "tests": ["tests/core/contracts.test.mjs", "tests/core/runtime.test.mjs"]
+        "tests": ["tests/governance/core-contracts.test.mjs", "tests/governance/core-runtime.test.mjs"]
       }
     },
     {
