@@ -56,8 +56,8 @@ test("ADR-001 pins the accepted runtime and package manager", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   assert.equal((await readFile(".nvmrc", "utf8")).trim(), "24.5.0");
   assert.equal(packageJson.packageManager, "npm@11.5.1");
-  assert.equal(packageJson.engines.node, "24.5.0");
-  assert.equal(packageJson.engines.npm, "11.5.1");
+  assert.equal(packageJson.engines.node, ">=22.23.2 <25");
+  assert.equal(packageJson.engines.npm, ">=10.9.8 <12");
   assert.match(
     await readFile("docs/decisions/0001-foundational-architecture.md", "utf8"),
     /Status: accepted/

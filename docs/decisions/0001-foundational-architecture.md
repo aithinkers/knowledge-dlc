@@ -16,9 +16,10 @@ reference implementation. Git integration must preserve explicit user control.
 
 ### Runtime and repository
 
-The reference implementation is an ESM TypeScript workspace targeting Node.js
-24.5.0 and npm 11.5.1. `.nvmrc`, `package.json#packageManager`, the lock file,
-and CI pin the executable toolchain. Production packages use the `@kdlc/*`
+The reference implementation is an ESM TypeScript workspace with its controlled
+development and release toolchain pinned to Node.js 24.5.0 and npm 11.5.1 by
+`.nvmrc` and `package.json#packageManager`. The supported CI/runtime window is
+Node.js 22.23.2 through 24.x and npm 10.9.8 through 11.x. Production packages use the `@kdlc/*`
 namespace and separate portable contracts, engine behavior, normalizers,
 adapters, and transports. The deterministic core does not call a live model.
 
@@ -61,18 +62,18 @@ disabled:
 
 | Profile | Component and boundary |
 |---|---|
-| Markdown, text, CSV | Core parsers; RFC 4180-compatible streaming CSV parser |
+| Markdown, text | Core line and UTF-8 parsers |
+| CSV | `csv-parse`, configured for bounded streaming and explicit dialects |
 | PDF | Mozilla PDF.js worker; structural text, page, outline, and link extraction |
-| DOCX, XLSX, PPTX, VSDX | ZIP container reader plus SAX XML parser; allowlisted OOXML/OPC parts only |
-| Draw.io | SAX XML parser; compressed diagram payload decoded under expansion limits |
-| GIF | Pure JavaScript GIF block parser; metadata and bounded frame sampling |
+| DOCX, XLSX, PPTX, VSDX | `fflate` ZIP reader plus `saxes`; allowlisted OOXML/OPC parts only |
+| Draw.io | `saxes`; compressed payloads decoded by `fflate` under expansion limits |
+| GIF | `gifuct-js`; metadata and bounded frame sampling |
 | OCR | Tesseract.js restricted worker, opt-in and always labeled probabilistic |
 
 Macros, embedded scripts, external relationships, automatic conversions, and
 network fetches are never executed. Encrypted, malformed, unsupported, or
-over-limit inputs are quarantined. Library names and exact versions become
-release claims only when locked by the normalization slice and proven by its
-format fixtures.
+over-limit inputs are quarantined. Exact library versions become release claims
+only when locked by the normalization slice and proven by its format fixtures.
 
 ## Alternatives considered
 

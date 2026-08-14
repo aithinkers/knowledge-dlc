@@ -33,7 +33,7 @@
       "id": "ADR-001",
       "title": "Resolve foundational implementation choices",
       "issue": 2,
-      "specification_sections": ["32.6", "38"],
+      "specification_sections": ["32.6", "37", "38"],
       "status": "implemented",
       "evidence": {
         "implementation": [".nvmrc", ".npmrc", "docs/decisions/0001-foundational-architecture.md", "package.json"],
