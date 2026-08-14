@@ -56,8 +56,11 @@
       "title": "Deterministic lifecycle engine",
       "issue": 4,
       "specification_sections": ["15", "16", "17", "28", "29", "30", "34", "35"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "implemented",
+      "evidence": {
+        "implementation": ["core/schemas/lifecycle/stage.schema.json", "packages/lifecycle/src/index.mjs"],
+        "tests": ["tests/governance/lifecycle.test.mjs"]
+      }
     },
     {
       "id": "FEAT-003",

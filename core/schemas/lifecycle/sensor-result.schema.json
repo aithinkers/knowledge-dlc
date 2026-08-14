@@ -6,7 +6,18 @@
   "properties": {
     "sensor_id": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "blocking": {"type": "boolean"},
     "status": {"enum": ["passed", "failed", "warning", "error"]}, "blocks": {"type": "boolean"},
-    "finding": {}, "waiver": {"type": "object", "required": ["id", "authority", "reason", "expires_at"]}
+    "finding": {},
+    "waiver": {
+      "type": "object",
+      "required": ["id", "authority", "reason", "expires_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "authority": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 1},
+        "expires_at": {"type": "string", "format": "date-time"}
+      }
+    }
   },
   "additionalProperties": true
 }

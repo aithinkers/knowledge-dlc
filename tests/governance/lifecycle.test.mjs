@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import {
   AuditWriter, JobRegistry, LeaseLockManager, LifecycleError, NodeFileStore, SensorRunner,
   StageGraph, TransactionManager, WorkflowEngine, sha256Token
 } from "../../packages/lifecycle/src/index.mjs";
+import { createContractValidator } from "../../packages/contracts/index.mjs";
 
 class Clock {
   constructor(value = Date.parse("2026-08-14T15:30:00Z")) { this.value = value; }
@@ -118,11 +119,20 @@ test("FEAT-002 transaction recovery can roll forward a journaled mid-write crash
 
 test("FEAT-002 storage rejects traversal outside the injected project root", async (context) => {
   const f = await fixture(); context.after(f.cleanup); assert.throws(() => f.store.path("../../escape"), (error) => error instanceof LifecycleError && error.code === "KDLC_INPUT_INVALID");
+  const outside = await mkdtemp(join(tmpdir(), "kdlc-lifecycle-outside-"));
+  context.after(() => rm(outside, { recursive: true, force: true }));
+  await writeFile(join(outside, "secret"), "secret");
+  await mkdir(join(f.root, "workflow"));
+  await symlink(outside, join(f.root, "workflow", "escape"));
+  await assert.rejects(f.store.readText("workflow/escape/secret"), (error) => error.code === "KDLC_INPUT_INVALID");
 });
 
 test("FEAT-002 lifecycle JSON schemas are valid JSON with stable identifiers", async () => {
+  const contracts = await createContractValidator();
   for (const name of ["stage", "workflow", "checkpoint", "job", "transaction", "audit-event", "lease-lock", "sensor-result"]) {
     const schema = JSON.parse(await readFile(new URL(`../../core/schemas/lifecycle/${name}.schema.json`, import.meta.url), "utf8"));
     assert.match(schema.$id, /^https:\/\/kdlc\.dev\/schemas\/lifecycle\//);
   }
+  assert.equal(contracts.validate("lifecycleStage", stages().get("normalize")).valid, true);
+  assert.equal(contracts.validate("lifecycleStage", { ...stages().get("normalize"), phase: "unknown" }).valid, false);
 });
