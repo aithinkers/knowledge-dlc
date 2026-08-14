@@ -1,4 +1,9 @@
 import { assertIdentifier, conflict } from "./errors.mjs";
+import { artifactHash } from "../../core/index.mjs";
+
+function payloadOf(event) {
+  return Object.fromEntries(Object.entries(event).filter(([field]) => !["event_id", "sequence", "timestamp", "workflow_id"].includes(field)));
+}
 
 export class AuditWriter {
   constructor({ store, clock, ids, coordination = {} }) { this.store = store; this.clock = clock; this.ids = ids; this.coordination = coordination; }
@@ -21,7 +26,12 @@ export class AuditWriter {
           try { record = JSON.parse(line); } catch { throw conflict("Audit log contains an incomplete or invalid event"); }
           if (!Number.isSafeInteger(record.sequence) || record.sequence !== logSequence + 1) throw conflict("Audit log sequence is not contiguous");
           logSequence = record.sequence;
-          if (event.idempotency_key && record.idempotency_key === event.idempotency_key) return record;
+          if (event.idempotency_key && record.idempotency_key === event.idempotency_key) {
+            if (artifactHash(payloadOf(record)) !== artifactHash(payloadOf(event))) {
+              throw conflict("Audit idempotency key reused with a different payload", { idempotency_key: event.idempotency_key });
+            }
+            return record;
+          }
         }
       }
       const checkpoint = (await this.store.exists(sequencePath)) ? Number(await this.store.readText(sequencePath)) : 0;

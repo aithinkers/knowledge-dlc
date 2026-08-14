@@ -1,8 +1,9 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { lstat, mkdir, open, readFile, realpath, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { byteHash } from "../../core/index.mjs";
-import { invalid } from "./errors.mjs";
+import { conflict, invalid } from "./errors.mjs";
 
 export const sha256Token = byteHash;
 
@@ -10,6 +11,8 @@ export class NodeFileStore {
   constructor(root, { token = sha256Token } = {}) {
     this.root = resolve(root);
     this.token = token;
+    this.fence = new AsyncLocalStorage();
+    this.behavior = undefined;
   }
 
   path(relativePath) {
@@ -20,9 +23,47 @@ export class NodeFileStore {
     return target;
   }
 
-  identity(relativePath) {
-    const target = this.path(relativePath);
-    return relative(this.root, target).split(sep).join("/");
+  async filesystemBehavior() {
+    if (!this.behavior) this.behavior = (async () => {
+      const root = await realpath(this.root);
+      const name = `.kdlc-fs-probe-${process.pid}-${Math.random().toString(16).slice(2)}-é-a`;
+      const probe = join(root, name);
+      try {
+        await mkdir(probe);
+        const exists = async (candidate) => { try { await lstat(candidate); return true; } catch (error) { if (error?.code === "ENOENT") return false; throw error; } };
+        return {
+          caseInsensitive: await exists(join(root, name.slice(0, -1) + "A")),
+          normalizationInsensitive: await exists(join(root, name.normalize("NFD")))
+        };
+      } finally { await rmdir(probe).catch(() => {}); }
+    })();
+    return this.behavior;
+  }
+
+  async identity(relativePath) {
+    const lexical = this.path(relativePath);
+    const canonicalRoot = await realpath(this.root);
+    const rooted = resolve(canonicalRoot, relative(this.root, lexical));
+    let candidate;
+    try { candidate = await realpath(rooted); }
+    catch (error) { if (error?.code !== "ENOENT") throw error; candidate = rooted; }
+    let identity = relative(canonicalRoot, candidate).split(sep).join("/");
+    if (identity === ".." || identity.startsWith("../") || isAbsolute(identity)) throw invalid("Storage identity escapes configured root");
+    const behavior = await this.filesystemBehavior();
+    if (behavior.normalizationInsensitive) identity = identity.normalize("NFC");
+    if (behavior.caseInsensitive) identity = identity.toLowerCase();
+    return identity;
+  }
+
+  async assertFence() {
+    const fence = this.fence.getStore();
+    if (!fence) return;
+    let content;
+    try { content = await readFile(this.path(fence.leasePath), "utf8"); }
+    catch (error) { if (error?.code === "ENOENT") throw conflict("Filesystem mutex lease was lost"); throw error; }
+    if (this.token(content) !== fence.token || Date.parse(JSON.parse(content).expires_at) <= fence.clock.millis()) {
+      throw conflict("Filesystem mutex lease was lost");
+    }
   }
 
   async safePath(relativePath) {
@@ -52,34 +93,37 @@ export class NodeFileStore {
     return target;
   }
 
-  async ensureDir(relativePath) { await mkdir(await this.safePath(relativePath), { recursive: true }); }
+  async ensureDir(relativePath) { await this.assertFence(); await mkdir(await this.safePath(relativePath), { recursive: true }); }
   async exists(relativePath) { try { await stat(await this.safePath(relativePath)); return true; } catch (error) { if (error.code === "ENOENT") return false; throw error; } }
   async readText(relativePath) { return readFile(await this.safePath(relativePath), "utf8"); }
   async readJson(relativePath) { return JSON.parse(await this.readText(relativePath)); }
   async tokenOf(relativePath) { return this.exists(relativePath) ? this.token(await this.readText(relativePath)) : null; }
 
   async writeTextAtomic(relativePath, content) {
+    await this.assertFence();
     const target = await this.safePath(relativePath);
     await mkdir(dirname(target), { recursive: true });
     const temporary = `${target}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
-    try { await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o600 }); await rename(temporary, target); }
+    try { await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o600 }); await this.assertFence(); await rename(temporary, target); }
     finally { await rm(temporary, { force: true }).catch(() => {}); }
   }
 
   async writeJsonAtomic(relativePath, value) { await this.writeTextAtomic(relativePath, `${JSON.stringify(value, null, 2)}\n`); }
   async appendExclusive(relativePath, content) {
+    await this.assertFence();
     const target = await this.safePath(relativePath);
     await mkdir(dirname(target), { recursive: true });
     const handle = await open(target, "a", 0o600);
-    try { await handle.write(content); await handle.sync(); } finally { await handle.close(); }
+    try { await this.assertFence(); await handle.write(content); await handle.sync(); } finally { await handle.close(); }
   }
-  async remove(relativePath) { await rm(await this.safePath(relativePath), { force: true }); }
+  async remove(relativePath) { await this.assertFence(); await rm(await this.safePath(relativePath), { force: true }); }
   async createDirectoryExclusive(relativePath) {
+    await this.assertFence();
     const target = await this.safePath(relativePath);
     await mkdir(dirname(target), { recursive: true });
     await mkdir(target);
   }
-  async removeDirectory(relativePath) { await rmdir(await this.safePath(relativePath)); }
+  async removeDirectory(relativePath) { await this.assertFence(); await rmdir(await this.safePath(relativePath)); }
 
   async withMutex(relativePath, { owner, clock, leaseMs = 30_000, timeoutMs = 2_000, retryMs = 2 }, action) {
     if (!owner || !clock?.millis) throw invalid("Filesystem mutex requires owner and clock");
@@ -98,11 +142,7 @@ export class NodeFileStore {
             const firstToken = await this.tokenOf(leasePath);
             const record = await this.readJson(leasePath);
             const secondToken = await this.tokenOf(leasePath);
-            let ownerAlive = false;
-            if (Number.isSafeInteger(record.process_id)) {
-              try { process.kill(record.process_id, 0); ownerAlive = true; } catch (signalError) { if (signalError?.code === "EPERM") ownerAlive = true; }
-            }
-            stale = firstToken === secondToken && !ownerAlive && Date.parse(record.expires_at) <= clock.millis();
+            stale = firstToken === secondToken && Date.parse(record.expires_at) <= clock.millis();
           } catch (readError) {
             if (readError?.code === "ENOENT") continue;
             throw readError;
@@ -126,12 +166,21 @@ export class NodeFileStore {
             if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(recoveryError?.code)) throw recoveryError;
           }
         }
-        if (Date.now() - started >= timeoutMs) throw invalid(`Filesystem mutex timed out: ${relativePath}`);
+        if (Date.now() - started >= timeoutMs) throw conflict(`Filesystem mutex timed out: ${relativePath}`);
         await new Promise((resolveDelay) => setTimeout(resolveDelay, retryMs));
       }
     }
     const acquiredToken = await this.tokenOf(leasePath);
-    try { return await action(); }
+    try {
+      return await this.fence.run({ leasePath, token: acquiredToken, clock }, async () => {
+        const result = await action();
+        await this.assertFence();
+        return result;
+      });
+    } catch (error) {
+      if (error?.code === "ENOENT") throw conflict("Coordinated resource changed while the mutex was held");
+      throw error;
+    }
     finally {
       try {
         if (await this.tokenOf(leasePath) === acquiredToken) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -100,13 +100,56 @@ test("FEAT-002 transaction reservations canonicalize paths and finalization is r
   assert.equal(next.state, "prepared");
 });
 
-test("FEAT-002 active same-process mutex owners cannot be reclaimed after lease time", async (context) => {
-  const f = await fixture(context); let release;
-  const held = new Promise((resolve) => { release = resolve; });
-  const first = f.store.withMutex("workflow/test-mutex", { owner: "one", clock: f.clock, leaseMs: 10, timeoutMs: 100 }, () => held);
-  await new Promise((resolve) => setTimeout(resolve, 5)); f.clock.advance(11);
-  await assert.rejects(f.store.withMutex("workflow/test-mutex", { owner: "two", clock: f.clock, leaseMs: 10, timeoutMs: 20 }, async () => {}), /timed out/);
-  release(); await first;
+test("FEAT-002 filesystem identities follow volume case and Unicode normalization behavior", async (context) => {
+  const f = await fixture(context); await mkdir(join(f.root, "knowledge"));
+  await writeFile(join(f.root, "knowledge/Café.md"), "existing");
+  const behavior = await f.store.filesystemBehavior();
+  const canonical = await f.store.identity("knowledge/Café.md");
+  const decomposed = await f.store.identity("knowledge/Cafe\u0301.md");
+  assert.equal(canonical === decomposed, behavior.normalizationInsensitive);
+  const upper = await f.store.identity("knowledge/Café.md");
+  const lower = await f.store.identity("KNOWLEDGE/cAFÉ.MD");
+  assert.equal(upper === lower, behavior.caseInsensitive);
+  const futureUpper = await f.store.identity("knowledge/RÉSUMÉ.md");
+  const futureLowerNfd = await f.store.identity("KNOWLEDGE/re\u0301sume\u0301.md");
+  assert.equal(futureUpper === futureLowerNfd, behavior.caseInsensitive && behavior.normalizationInsensitive);
+});
+
+test("FEAT-002 finalizing publication recovers forward after audit without rollback", async (context) => {
+  const f = await fixture(context); await f.store.writeTextAtomic("knowledge/final.md", "before");
+  const ids = new IDs("publication"); const audit = new AuditWriter({ ...f, ids });
+  const manager = new TransactionManager({ ...f, ids, audit, token: sha256Token });
+  const journal = await manager.prepare({ workflowId: "wf", targets: [{ path: "knowledge/final.md", expectedToken: sha256Token("before"), content: "published" }] });
+  const originalWrite = f.store.writeJsonAtomic.bind(f.store); let failCommittedJournal = true;
+  f.store.writeJsonAtomic = async (path, value) => {
+    if (failCommittedJournal && path === manager.path("wf", journal.transaction_id) && value.state === "committed") { failCommittedJournal = false; throw new Error("journal disk unavailable"); }
+    return originalWrite(path, value);
+  };
+  await assert.rejects(manager.commit("wf", journal.transaction_id), /journal disk unavailable/);
+  assert.equal((await f.store.readJson(manager.path("wf", journal.transaction_id))).state, "finalizing");
+  assert.equal(await f.store.readText("knowledge/final.md"), "published");
+  const recovered = await manager.recover("wf", journal.transaction_id, "rollback");
+  assert.equal(recovered.state, "committed"); assert.equal(await f.store.readText("knowledge/final.md"), "published");
+  const events = (await f.store.readText("workflow/runs/wf/audit.jsonl")).trim().split("\n").map(JSON.parse);
+  assert.equal(events.filter(({ action }) => action === "publication.committed").length, 1);
+});
+
+test("FEAT-002 audit idempotency conflicts when the same key carries another payload", async (context) => {
+  const f = await fixture(context); const audit = new AuditWriter({ ...f, ids: new IDs("audit") });
+  const first = await audit.append("wf", { actor: "process:test", action: "publication.committed", subject: "txn", result: "committed", idempotency_key: "publication:txn" });
+  assert.equal((await audit.append("wf", { idempotency_key: "publication:txn", result: "committed", subject: "txn", action: "publication.committed", actor: "process:test" })).event_id, first.event_id);
+  await assert.rejects(audit.append("wf", { actor: "process:test", action: "publication.committed", subject: "other", result: "committed", idempotency_key: "publication:txn" }), (error) => error.code === "KDLC_HASH_CONFLICT");
+});
+
+test("FEAT-002 expired same-process mutex holders are fenced from later writes", async (context) => {
+  const f = await fixture(context); let releaseOld; const wait = new Promise((resolve) => { releaseOld = resolve; });
+  const old = f.store.withMutex("workflow/fenced", { owner: "old", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, async () => {
+    await wait; await f.store.writeTextAtomic("state/value", "stale");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5)); f.clock.advance(21);
+  await f.store.withMutex("workflow/fenced", { owner: "successor", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () => f.store.writeTextAtomic("state/value", "successor"));
+  releaseOld(); await assert.rejects(old, /lease was lost/);
+  assert.equal(await f.store.readText("state/value"), "successor");
 });
 
 test("FEAT-002 stale lock recovery is serialized and can recover an abandoned empty lock", async (context) => {
