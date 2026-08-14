@@ -56,13 +56,14 @@ export class NodeFileStore {
   }
 
   async assertFence() {
-    const fence = this.fence.getStore();
-    if (!fence) return;
-    let content;
-    try { content = await readFile(this.path(fence.leasePath), "utf8"); }
-    catch (error) { if (error?.code === "ENOENT") throw conflict("Filesystem mutex lease was lost"); throw error; }
-    if (this.token(content) !== fence.token || Date.parse(JSON.parse(content).expires_at) <= fence.clock.millis()) {
-      throw conflict("Filesystem mutex lease was lost");
+    const fences = this.fence.getStore() ?? [];
+    for (const fence of fences) {
+      let content;
+      try { content = await readFile(this.path(fence.leasePath), "utf8"); }
+      catch (error) { if (error?.code === "ENOENT") throw conflict("Filesystem mutex lease was lost"); throw error; }
+      if (this.token(content) !== fence.token || Date.parse(JSON.parse(content).expires_at) <= fence.clock.millis()) {
+        throw conflict("Filesystem mutex lease was lost");
+      }
     }
   }
 
@@ -206,7 +207,8 @@ export class NodeFileStore {
     const acquiredToken = await this.tokenOf(leasePath);
     let releaseOwned = false;
     try {
-      return await this.fence.run({ leasePath, token: acquiredToken, clock }, async () => {
+      const enclosingFences = this.fence.getStore() ?? [];
+      return await this.fence.run([...enclosingFences, { leasePath, token: acquiredToken, clock }], async () => {
         try {
           const result = await action();
           await this.assertFence();

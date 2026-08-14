@@ -152,6 +152,22 @@ test("FEAT-002 expired same-process mutex holders are fenced from later writes",
   assert.equal(await f.store.readText("state/value"), "successor");
 });
 
+test("FEAT-002 nested mutexes preserve enclosing fences after outer takeover", async (context) => {
+  const f = await fixture(context);
+  let innerEntered; const entered = new Promise((resolve) => { innerEntered = resolve; });
+  let resumeInner; const gate = new Promise((resolve) => { resumeInner = resolve; });
+  const old = f.store.withMutex("workflow/outer", { owner: "old-outer", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
+    f.store.withMutex("workflow/inner", { owner: "old-inner", clock: f.clock, leaseMs: 100, timeoutMs: 100 }, async () => {
+      innerEntered(); await gate; await f.store.writeTextAtomic("state/nested", "stale");
+    }));
+  await entered; f.clock.advance(21);
+  await f.store.withMutex("workflow/outer", { owner: "successor", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
+    f.store.writeTextAtomic("state/nested", "successor"));
+  resumeInner();
+  await assert.rejects(old, (error) => error.code === "KDLC_HASH_CONFLICT" && /lease was lost/.test(error.message));
+  assert.equal(await f.store.readText("state/nested"), "successor");
+});
+
 test("FEAT-002 delayed old-owner cleanup cannot remove or release a successor lease", async (context) => {
   const f = await fixture(context);
   const originalMark = f.store.markMutexReleased.bind(f.store);
