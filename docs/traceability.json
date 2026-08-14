@@ -34,8 +34,11 @@
       "title": "Resolve foundational implementation choices",
       "issue": 2,
       "specification_sections": ["32.6", "38"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "implemented",
+      "evidence": {
+        "implementation": [".nvmrc", ".npmrc", "docs/decisions/0001-foundational-architecture.md", "package.json"],
+        "tests": ["tests/governance/governance.test.mjs"]
+      }
     },
     {
       "id": "FEAT-001",

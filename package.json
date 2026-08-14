@@ -4,8 +4,10 @@
   "private": true,
   "description": "K-DLC development and governance tooling",
   "type": "module",
+  "packageManager": "npm@11.5.1",
   "engines": {
-    "node": ">=22"
+    "node": "24.5.0",
+    "npm": "11.5.1"
   },
   "scripts": {
     "check:governance": "node scripts/verify-governance.mjs",
