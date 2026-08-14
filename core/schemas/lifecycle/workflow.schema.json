@@ -7,7 +7,14 @@
     "version": {"const": 1}, "workflow_id": {"type": "string"}, "project_id": {"type": "string"},
     "state": {"enum": ["planned", "running", "awaiting_approval", "completed", "rejected", "failed", "retrying", "cancelled", "parked"]},
     "revision": {"type": "integer", "minimum": 0}, "created_at": {"type": "string", "format": "date-time"},
-    "updated_at": {"type": "string", "format": "date-time"}, "current_stage": {"type": ["string", "null"]}
+    "updated_at": {"type": "string", "format": "date-time"}, "current_stage": {"type": ["string", "null"]},
+    "audit_pending": {
+      "type": "object", "required": ["actor", "action", "result", "idempotency_key"], "additionalProperties": true,
+      "properties": {
+        "actor": {"type": "string"}, "action": {"type": "string"}, "result": {"type": "string"},
+        "idempotency_key": {"type": "string"}, "project": {"type": "string"}
+      }
+    }
   },
   "additionalProperties": false
 }

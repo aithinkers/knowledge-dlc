@@ -36,10 +36,12 @@ export class LeaseLockManager {
   }
   async release(resource, owner) {
     return this.coordinated(resource, "release", async () => {
+      if (!(await this.store.exists(this.recordPath(resource)))) return null;
       const record = await this.store.readJson(this.recordPath(resource)); if (record.owner !== owner) throw denied("Only lock owner may release");
       const token = await this.store.tokenOf(this.recordPath(resource));
       if (token !== await this.store.tokenOf(this.recordPath(resource))) throw conflict("Lock changed during release", { resource });
       await this.store.remove(this.recordPath(resource)); await this.store.removeDirectory(this.path(resource));
+      return record;
     });
   }
   async breakStale(resource, { actor, reason, workflowId }) {

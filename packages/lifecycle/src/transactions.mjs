@@ -1,4 +1,4 @@
-import { conflict, LifecycleError } from "./errors.mjs";
+import { assertIdentifier, conflict, LifecycleError } from "./errors.mjs";
 import { LeaseLockManager } from "./locks.mjs";
 
 export class TransactionManager {
@@ -6,8 +6,8 @@ export class TransactionManager {
     Object.assign(this, { store, clock, ids, token, audit, fault, transactionLeaseMs });
     this.locks = new LeaseLockManager({ store, clock, ids, coordination });
   }
-  path(workflowId, id) { return `workflow/runs/${workflowId}/transactions/${id}.json`; }
-  resource(targetPath) { return `transaction-target:${targetPath}`; }
+  path(workflowId, id) { return `workflow/runs/${assertIdentifier(workflowId, "workflow ID")}/transactions/${assertIdentifier(id, "transaction ID")}.json`; }
+  resource(targetPath) { return `transaction-target:${this.store.identity(targetPath)}`; }
   async releaseTargets(journal) {
     for (const target of [...journal.targets].sort((left, right) => right.path.localeCompare(left.path))) {
       await this.locks.release(this.resource(target.path), journal.transaction_id);
@@ -19,7 +19,7 @@ export class TransactionManager {
   async prepare({ workflowId, targets }) {
     const id = this.ids.next("txn"); const now = this.clock.now(); const prepared = []; const acquired = [];
     if (await this.store.exists(this.path(workflowId, id))) throw conflict("Generated transaction ID already exists", { id });
-    const ordered = [...targets].sort((left, right) => left.path.localeCompare(right.path));
+    const ordered = targets.map((target) => ({ ...target, path: this.store.identity(target.path) })).sort((left, right) => left.path.localeCompare(right.path));
     if (new Set(ordered.map(({ path }) => path)).size !== ordered.length) throw conflict("Transaction target paths must be unique");
     try {
       for (const target of ordered) {
@@ -40,6 +40,7 @@ export class TransactionManager {
   }
   async commit(workflowId, id) {
     const path = this.path(workflowId, id); const journal = await this.store.readJson(path); if (journal.state === "committed") return journal;
+    if (journal.state === "finalizing") return this.finalize(journal, path);
     await this.verifyTargetsHeld(journal);
     for (const target of journal.targets) {
       const actual = await this.store.exists(target.path) ? this.token(await this.store.readText(target.path)) : null;
@@ -56,13 +57,23 @@ export class TransactionManager {
         await this.fault({ phase: "after-write-before-journal", index, journal: structuredClone(journal) });
         target.applying = false; target.applied = true; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); await this.fault({ phase: "applied", index, journal: structuredClone(journal) });
       }
-      journal.state = "committed"; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal);
-      if (this.audit) await this.audit.append(workflowId, { actor: "process:kdlc-engine", action: "publication.committed", subject: id, result: "committed" });
-      await this.releaseTargets(journal); return journal;
+      journal.state = "finalizing"; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal);
+      return await this.finalize(journal, path);
     } catch (error) {
       if (journal.state === "committed") throw error;
-      journal.state = "failed"; journal.error = error.message; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); throw new LifecycleError("KDLC_TRANSACTION_FAILED", "publication-transaction-failure", "Publication transaction failed", { retryable: true, details: { transaction_id: id } });
+      if (journal.state === "finalizing") throw new LifecycleError("KDLC_TRANSACTION_FINALIZATION_PENDING", "publication-transaction-failure", "Publication transaction finalization is pending", { retryable: true, details: { transaction_id: id } });
+      journal.state = "failed"; journal.error = "KDLC_TRANSACTION_FAILED"; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); throw new LifecycleError("KDLC_TRANSACTION_FAILED", "publication-transaction-failure", "Publication transaction failed", { retryable: true, details: { transaction_id: id } });
     }
+  }
+  async finalize(journal, path = this.path(journal.workflow_id, journal.transaction_id)) {
+    if (this.audit) await this.audit.append(journal.workflow_id, {
+      actor: "process:kdlc-engine", action: "publication.committed", subject: journal.transaction_id,
+      result: "committed", idempotency_key: `publication:${journal.transaction_id}`
+    });
+    await this.releaseTargets(journal);
+    journal.state = "committed"; journal.updated_at = this.clock.now(); delete journal.error;
+    await this.store.writeJsonAtomic(path, journal);
+    return journal;
   }
   async recover(workflowId, id, strategy = "rollback") {
     const path = this.path(workflowId, id); const journal = await this.store.readJson(path);

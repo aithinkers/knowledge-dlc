@@ -1,11 +1,11 @@
-import { conflict, denied, invalid } from "./errors.mjs";
+import { assertIdentifier, conflict, denied, invalid } from "./errors.mjs";
 import { jsonEqual } from "./store.mjs";
 
 const transitions = { queued: ["running", "cancelled"], running: ["completed", "failed", "cancelled", "parked", "awaiting_input"], awaiting_input: ["queued", "cancelled"], parked: ["queued", "cancelled"], completed: [], failed: [], cancelled: [] };
 
 export class JobRegistry {
   constructor({ store, clock, ids, audit, coordination = {} }) { Object.assign(this, { store, clock, ids, audit }); this.coordination = coordination; }
-  path(id) { return `workflow/jobs/${id}.json`; }
+  path(id) { return `workflow/jobs/${assertIdentifier(id, "job ID")}.json`; }
   indexPath() { return "workflow/jobs/idempotency.json"; }
   async get(id) { return this.store.readJson(this.path(id)); }
   coordinate(scope, action) {
@@ -19,14 +19,22 @@ export class JobRegistry {
       const index = await this.store.exists(this.indexPath()) ? await this.store.readJson(this.indexPath()) : {};
       const identity = `${input.principal}\u0000${input.projectId}\u0000${input.operation}\u0000${input.idempotencyKey}`;
       if (index[identity]) {
-        const existing = await this.get(index[identity]);
+        const entry = index[identity];
+        const jobId = typeof entry === "string" ? entry : entry.job_id;
+        if (typeof entry === "object" && !(await this.store.exists(this.path(jobId)))) await this.store.writeJsonAtomic(this.path(jobId), entry.job);
+        const existing = await this.get(jobId);
         if (!jsonEqual(existing.input_hashes, input.inputHashes)) throw conflict("Idempotency key reused with changed inputs");
+        if (typeof entry === "object") { index[identity] = jobId; await this.store.writeJsonAtomic(this.indexPath(), index); }
         return { job: existing, reused: true };
       }
       const now = this.clock.now(); const jobId = this.ids.next("job");
       if (await this.store.exists(this.path(jobId))) throw conflict("Generated job ID already exists", { jobId });
       const job = { version: 1, job_id: jobId, principal: input.principal, project_id: input.projectId, workflow_id: input.workflowId, operation: input.operation, idempotency_key: input.idempotencyKey, input_hashes: input.inputHashes, dependencies: input.dependencies ?? {}, state: "queued", progress: { completed: 0, total: input.total ?? 0 }, checkpoints: [], resource_budget: input.resourceBudget ?? {}, created_at: now, updated_at: now, error: null, cancellation_requested: false };
-      await this.store.writeJsonAtomic(this.path(jobId), job); index[identity] = jobId; await this.store.writeJsonAtomic(this.indexPath(), index);
+      index[identity] = { job_id: jobId, job };
+      await this.store.writeJsonAtomic(this.indexPath(), index);
+      await this.store.writeJsonAtomic(this.path(jobId), job);
+      index[identity] = jobId;
+      await this.store.writeJsonAtomic(this.indexPath(), index);
       return { job, reused: false };
     });
   }

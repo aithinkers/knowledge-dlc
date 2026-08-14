@@ -20,6 +20,11 @@ export class NodeFileStore {
     return target;
   }
 
+  identity(relativePath) {
+    const target = this.path(relativePath);
+    return relative(this.root, target).split(sep).join("/");
+  }
+
   async safePath(relativePath) {
     this.path(relativePath);
     const canonicalRoot = await realpath(this.root);
@@ -83,7 +88,7 @@ export class NodeFileStore {
     while (true) {
       try {
         await this.createDirectoryExclusive(relativePath);
-        await this.writeJsonAtomic(leasePath, { owner, acquired_at: clock.now(), expires_at: new Date(clock.millis() + leaseMs).toISOString() });
+        await this.writeJsonAtomic(leasePath, { owner, process_id: process.pid, acquired_at: clock.now(), expires_at: new Date(clock.millis() + leaseMs).toISOString() });
         break;
       } catch (error) {
         if (error?.code !== "EEXIST") throw error;
@@ -93,7 +98,11 @@ export class NodeFileStore {
             const firstToken = await this.tokenOf(leasePath);
             const record = await this.readJson(leasePath);
             const secondToken = await this.tokenOf(leasePath);
-            stale = firstToken === secondToken && Date.parse(record.expires_at) <= clock.millis();
+            let ownerAlive = false;
+            if (Number.isSafeInteger(record.process_id)) {
+              try { process.kill(record.process_id, 0); ownerAlive = true; } catch (signalError) { if (signalError?.code === "EPERM") ownerAlive = true; }
+            }
+            stale = firstToken === secondToken && !ownerAlive && Date.parse(record.expires_at) <= clock.millis();
           } catch (readError) {
             if (readError?.code === "ENOENT") continue;
             throw readError;

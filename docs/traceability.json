@@ -58,8 +58,8 @@
       "specification_sections": ["15", "16", "17", "28", "29", "30", "34", "35"],
       "status": "implemented",
       "evidence": {
-        "implementation": ["core/schemas/lifecycle/stage.schema.json", "packages/lifecycle/src/index.mjs"],
-        "tests": ["tests/governance/lifecycle.test.mjs"]
+        "implementation": ["core/schemas/lifecycle/stage.schema.json", "core/schemas/lifecycle/transaction.schema.json", "packages/lifecycle/src/index.mjs", "packages/lifecycle/src/store.mjs", "packages/lifecycle/src/workflows.mjs", "packages/lifecycle/src/transactions.mjs"],
+        "tests": ["tests/governance/lifecycle.test.mjs", "tests/governance/lifecycle-concurrency.test.mjs", "tests/governance/lifecycle-policy.test.mjs"]
       }
     },
     {

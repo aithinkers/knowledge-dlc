@@ -35,13 +35,14 @@ function equivalent(left, right) {
 }
 
 export class SensorRunner {
-  constructor({ sensors, clock, audit }) {
+  constructor({ sensors, clock, audit, waiverAuthorities = [] }) {
     if (!Array.isArray(sensors)) throw invalid("Sensors must be an array");
     const seen = new Set();
     for (const sensor of sensors) validateSensor(sensor, seen);
     this.sensors = new Map(sensors.map((sensor) => [sensor.id, sensor]));
     this.clock = clock;
     this.audit = audit;
+    this.waiverAuthorities = new Set(waiverAuthorities);
   }
 
   async #evaluate(sensor, context) {
@@ -80,7 +81,7 @@ export class SensorRunner {
           && candidate.sensor_id === id
           && typeof candidate.scope === "string"
           && candidate.scope === context.scope
-          && typeof candidate.authority === "string" && candidate.authority.length > 0
+          && typeof candidate.authority === "string" && this.waiverAuthorities.has(candidate.authority)
           && typeof candidate.reason === "string" && candidate.reason.length > 0
           && typeof candidate.expires_at === "string"
           && Number.isFinite(Date.parse(candidate.expires_at))
@@ -88,6 +89,10 @@ export class SensorRunner {
         if (waiver) {
           result.waiver = { id: waiver.id, authority: waiver.authority, reason: waiver.reason, expires_at: waiver.expires_at };
           result.blocks = false;
+          if (this.audit) await this.audit.append(context.workflow_id, {
+            actor: waiver.authority, stage: context.stage, action: "sensor.waived", subject: id,
+            result: "waived", reason: waiver.reason, waiver_id: waiver.id, policy_version: context.policy_version
+          });
         }
       }
       results.push(result);

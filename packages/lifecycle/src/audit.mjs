@@ -1,9 +1,10 @@
-import { conflict } from "./errors.mjs";
+import { assertIdentifier, conflict } from "./errors.mjs";
 
 export class AuditWriter {
   constructor({ store, clock, ids, coordination = {} }) { this.store = store; this.clock = clock; this.ids = ids; this.coordination = coordination; }
 
   append(workflowId, event) {
+    assertIdentifier(workflowId, "workflow ID");
     for (const field of ["event_id", "sequence", "timestamp", "workflow_id"]) {
       if (Object.hasOwn(event, field)) throw conflict(`Audit caller cannot set reserved field: ${field}`);
     }
@@ -20,6 +21,7 @@ export class AuditWriter {
           try { record = JSON.parse(line); } catch { throw conflict("Audit log contains an incomplete or invalid event"); }
           if (!Number.isSafeInteger(record.sequence) || record.sequence !== logSequence + 1) throw conflict("Audit log sequence is not contiguous");
           logSequence = record.sequence;
+          if (event.idempotency_key && record.idempotency_key === event.idempotency_key) return record;
         }
       }
       const checkpoint = (await this.store.exists(sequencePath)) ? Number(await this.store.readText(sequencePath)) : 0;

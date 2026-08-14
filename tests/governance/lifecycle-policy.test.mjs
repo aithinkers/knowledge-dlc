@@ -37,6 +37,14 @@ class Audit {
   async append(workflowId, event) { this.events.push({ workflowId, ...structuredClone(event) }); }
 }
 
+class FlakyAudit extends Audit {
+  failures = 0;
+  async append(workflowId, event) {
+    if (this.failures > 0) { this.failures -= 1; throw new Error("audit unavailable"); }
+    return super.append(workflowId, event);
+  }
+}
+
 function stage(name = "normalize", overrides = {}) {
   return {
     name,
@@ -129,6 +137,15 @@ test("FEAT-002 sensors preserve trusted identity and fail closed for failed and 
     waiver: report.results[0].waiver
   }, { sensor_id: "required", version: 7, blocking: true, blocks: true, waiver: undefined });
 
+  const governed = new SensorRunner({
+    clock, audit, waiverAuthorities: ["security"],
+    sensors: [{ id: "governed", version: 1, blocking: true, evaluate: async () => ({ status: "failed" }) }]
+  });
+  const waiver = (authority) => [{ id: "w1", sensor_id: "governed", scope: "kb:a", authority, reason: "bounded", expires_at: "2099-01-01T00:00:00Z" }];
+  assert.equal((await governed.run(["governed"], context, waiver("attacker"))).allowed, false);
+  assert.equal((await governed.run(["governed"], context, waiver("security"))).allowed, true);
+  assert.equal(audit.events.some(({ action, actor }) => action === "sensor.waived" && actor === "security"), true);
+
   const errorRunner = new SensorRunner({ clock, audit, sensors: [{ id: "broken", version: 1, blocking: true, evaluate: async () => ({ status: "error" }) }] });
   const errorReport = await errorRunner.run(["broken"], context, [{ id: "w", sensor_id: "broken", scope: "kb:a", authority: "admin", reason: "ignore", expires_at: "2099-01-01T00:00:00Z" }]);
   assert.equal(errorReport.allowed, false);
@@ -158,6 +175,7 @@ test("FEAT-002 sensor failures are structured and redacted and nondeterminism is
 
 test("FEAT-002 deterministic checkpoint reuse binds every execution-context hash", async () => {
   const f = fixture(); const completion = baseCompletion();
+  await assert.rejects(f.engine.completeStage("wf", "normalize", { input_hashes: {}, output_hashes: {} }), (error) => error.code === "KDLC_INPUT_INVALID");
   const first = await f.engine.completeStage("wf", "normalize", completion);
   const reused = await f.engine.completeStage("wf", "normalize", structuredClone(completion));
   assert.equal(reused.attempt_id, first.attempt_id);
@@ -185,6 +203,24 @@ test("FEAT-002 workflow revision CAS is coordinated across engine instances", as
   const rejected = results.find(({ status }) => status === "rejected");
   assert.equal(rejected.reason.code, "KDLC_HASH_CONFLICT");
   assert.equal((await f.engine.get(workflow.workflow_id)).revision, 1);
+  await assert.rejects(f.engine.create({ projectId: "project", workflowId: "victim/../alias" }), (error) => error.code === "KDLC_INPUT_INVALID");
+});
+
+test("FEAT-002 workflow mutations recover durable pending audit events", async () => {
+  const f = fixture(); const audit = new FlakyAudit();
+  const engine = new WorkflowEngine({ ...f, audit, graph: f.graph });
+  audit.failures = 1;
+  await assert.rejects(engine.create({ projectId: "project", workflowId: "wf_audit" }), (error) => error.code === "KDLC_AUDIT_PENDING");
+  assert.equal((await engine.get("wf_audit")).audit_pending.action, "workflow.created");
+  const created = await engine.create({ projectId: "project", workflowId: "wf_audit" });
+  assert.equal(created.audit_pending, undefined);
+
+  audit.failures = 1;
+  await assert.rejects(engine.transition("wf_audit", "running", 0), (error) => error.code === "KDLC_AUDIT_PENDING");
+  assert.equal((await engine.get("wf_audit")).audit_pending.action, "workflow.running");
+  await assert.rejects(engine.transition("wf_audit", "cancelled", 0), (error) => error.code === "KDLC_HASH_CONFLICT");
+  assert.equal((await engine.get("wf_audit")).audit_pending, undefined);
+  assert.deepEqual(audit.events.map(({ action }) => action), ["workflow.created", "workflow.running"]);
 });
 
 test("FEAT-002 resume invalidates on every context drift and missing current input", async () => {

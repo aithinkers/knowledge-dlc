@@ -1,6 +1,6 @@
 import { canonicalJson } from "../../core/index.mjs";
 
-import { conflict, invalid } from "./errors.mjs";
+import { assertIdentifier, conflict, invalid, LifecycleError } from "./errors.mjs";
 
 const transitions = {
   planned: ["running", "cancelled"], running: ["awaiting_approval", "completed", "failed", "cancelled", "parked"],
@@ -92,10 +92,11 @@ function historicalAttempt(checkpoint, supersededAt, supersededBy) {
 
 export class WorkflowEngine {
   constructor({ store, clock, ids, graph, audit }) { Object.assign(this, { store, clock, ids, graph, audit }); this.queues = new Map(); this.mutexSequence = 0; }
-  path(id) { return `workflow/runs/${id}/state.json`; }
-  checkpointPath(id, stage) { return `workflow/runs/${id}/checkpoints/${stage}.json`; }
+  path(id) { return `workflow/runs/${assertIdentifier(id, "workflow ID")}/state.json`; }
+  checkpointPath(id, stage) { return `workflow/runs/${assertIdentifier(id, "workflow ID")}/checkpoints/${assertIdentifier(stage, "stage name")}.json`; }
 
   #withWorkflowMutex(id, operation, action) {
+    assertIdentifier(id, "workflow ID");
     if (typeof this.store.withMutex !== "function") throw invalid("Workflow store must support coordinated mutation");
     this.mutexSequence += 1;
     return this.store.withMutex(`workflow/locks/engine-${encodeURIComponent(id)}`, {
@@ -104,22 +105,43 @@ export class WorkflowEngine {
     }, action);
   }
 
+  async #flushAudit(state) {
+    if (!state.audit_pending) return state;
+    await this.audit.append(state.workflow_id, state.audit_pending);
+    const updated = { ...state };
+    delete updated.audit_pending;
+    await this.store.writeJsonAtomic(this.path(state.workflow_id), updated);
+    return updated;
+  }
+
   async create({ projectId, workflowId = this.ids.next("wf") }) {
     return this.#withWorkflowMutex(workflowId, "create", async () => {
-      const path = this.path(workflowId); if (await this.store.exists(path)) throw conflict(`Workflow already exists: ${workflowId}`);
-      const now = this.clock.now(); const state = { version: 1, workflow_id: workflowId, project_id: projectId, state: "planned", revision: 0, created_at: now, updated_at: now, current_stage: null };
-      await this.store.writeJsonAtomic(path, state); await this.audit.append(workflowId, { project: projectId, actor: "process:kdlc-engine", action: "workflow.created", result: "planned" }); return state;
+      const path = this.path(workflowId);
+      if (await this.store.exists(path)) {
+        const existing = await this.store.readJson(path);
+        if (existing.project_id === projectId && existing.audit_pending?.action === "workflow.created") return this.#flushAudit(existing);
+        throw conflict(`Workflow already exists: ${workflowId}`);
+      }
+      const now = this.clock.now();
+      const event = { project: projectId, actor: "process:kdlc-engine", action: "workflow.created", result: "planned", idempotency_key: `workflow:${workflowId}:created` };
+      const state = { version: 1, workflow_id: workflowId, project_id: projectId, state: "planned", revision: 0, created_at: now, updated_at: now, current_stage: null, audit_pending: event };
+      await this.store.writeJsonAtomic(path, state);
+      try { return await this.#flushAudit(state); }
+      catch { throw new LifecycleError("KDLC_AUDIT_PENDING", "audit-failure", "Workflow creation audit is pending", { retryable: true }); }
     });
   }
   async get(id) { return this.store.readJson(this.path(id)); }
   transition(id, next, expectedRevision) {
     const prior = this.queues.get(id) ?? Promise.resolve();
     const running = prior.then(() => this.#withWorkflowMutex(id, "transition", async () => {
-      const state = await this.get(id);
+      const state = await this.#flushAudit(await this.get(id));
       if (state.revision !== expectedRevision) throw conflict("Workflow revision changed", { expectedRevision, actualRevision: state.revision });
       if (!(transitions[state.state] ?? []).includes(next)) throw invalid(`Invalid workflow transition ${state.state} -> ${next}`);
-      const updated = { ...state, state: next, revision: state.revision + 1, updated_at: this.clock.now() };
-      await this.store.writeJsonAtomic(this.path(id), updated); await this.audit.append(id, { project: state.project_id, actor: "process:kdlc-engine", action: `workflow.${next}`, result: next }); return updated;
+      const event = { project: state.project_id, actor: "process:kdlc-engine", action: `workflow.${next}`, result: next, idempotency_key: `workflow:${id}:revision:${state.revision + 1}` };
+      const updated = { ...state, state: next, revision: state.revision + 1, updated_at: this.clock.now(), audit_pending: event };
+      await this.store.writeJsonAtomic(this.path(id), updated);
+      try { return await this.#flushAudit(updated); }
+      catch { throw new LifecycleError("KDLC_AUDIT_PENDING", "audit-failure", "Workflow transition audit is pending", { retryable: true, details: { workflow_id: id, revision: updated.revision } }); }
     }));
     this.queues.set(id, running.catch(() => {}));
     return running;
@@ -133,6 +155,9 @@ export class WorkflowEngine {
     const stage = this.graph.get(stageName);
     if (!isRecord(completion) || !isRecord(completion.input_hashes) || !isRecord(completion.output_hashes)) {
       throw invalid(`Stage ${stageName} completion requires input_hashes and output_hashes objects`);
+    }
+    if (typeof (completion.project_hash ?? completion.project_version) !== "string" || !isRecord(completion.agent) || typeof completion.agent.id !== "string") {
+      throw invalid(`Stage ${stageName} completion requires project context and an agent identity`);
     }
     const path = this.checkpointPath(id, stage.name);
     const existing = await this.store.exists(path) ? await this.store.readJson(path) : null;

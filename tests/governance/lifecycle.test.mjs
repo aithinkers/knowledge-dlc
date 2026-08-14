@@ -50,6 +50,8 @@ test("FEAT-002 checkpoints are idempotent and changed inputs invalidate dependen
   const f = await fixture(); context.after(f.cleanup); const engine = new WorkflowEngine({ ...f, graph: stages() }); await engine.create({ projectId: "p", workflowId: "wf" });
   const completion = (input, output) => ({ project_id: "p", project_version: "rev1", input_hashes: { source: input }, output_hashes: { evidence: output }, agent: { id: "kdlc-source-analyst/0.2.0" } });
   const first = await engine.completeStage("wf", "normalize", completion("a", "b"));
+  const contracts = await createContractValidator();
+  assert.equal(contracts.validate("lifecycleCheckpoint", first).valid, true);
   assert.deepEqual(await engine.completeStage("wf", "normalize", completion("a", "b")), first);
   await assert.rejects(engine.completeStage("wf", "normalize", completion("a", "different")), (error) => error.code === "KDLC_HASH_CONFLICT");
   await engine.completeStage("wf", "extract-claims", { ...completion("b", "c"), attempt_id: "attempt_model_1" });
@@ -89,7 +91,7 @@ test("FEAT-002 lease locks reject contenders and require audited stale recovery"
 
 test("FEAT-002 sensors fail closed, constrain waivers, and reject nondeterminism", async (context) => {
   const f = await fixture(); context.after(f.cleanup);
-  const runner = new SensorRunner({ ...f, sensors: [{ id: "required", version: 1, blocking: true, evaluate: async () => ({ status: "failed", finding: "missing" }) }] });
+  const runner = new SensorRunner({ ...f, waiverAuthorities: ["security"], sensors: [{ id: "required", version: 1, blocking: true, evaluate: async () => ({ status: "failed", finding: "missing" }) }] });
   const ctx = { workflow_id: "wf", actor: "tester", stage: "validate", scope: "kb:a", policy_version: "policy@1" };
   const denied = await runner.run(["required"], ctx); assert.equal(denied.allowed, false); assert.throws(() => runner.assertAllowed(denied), (error) => error.code === "KDLC_POLICY_DENIED");
   const waived = await runner.run(["required"], ctx, [{ id: "waiver-1", sensor_id: "required", scope: "kb:a", authority: "security", reason: "bounded", expires_at: new Date(f.clock.millis() + 1000).toISOString() }]); assert.equal(waived.allowed, true);

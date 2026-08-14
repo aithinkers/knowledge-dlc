@@ -49,3 +49,8 @@ export function invalid(message, details) {
 export function denied(message, details) {
   return new LifecycleError("KDLC_POLICY_DENIED", "policy-denial", message, { details });
 }
+
+export function assertIdentifier(value, label = "identifier") {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) throw invalid(`${label} must be a safe canonical identifier`);
+  return value;
+}
