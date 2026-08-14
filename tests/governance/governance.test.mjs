@@ -91,9 +91,26 @@ test("REQ-GOV-002 rejects untraceable commit subjects", () => {
   assert.ok(result.failures.some((failure) => failure.startsWith("commit subject must contain #14")));
 });
 
+test("REQ-GOV-002 rejects commit identifiers that only share a prefix", () => {
+  for (const subject of [
+    "fix: wrong issue (#140 REQ-GOV-002)",
+    "fix: wrong requirement (#14 REQ-GOV-0020)"
+  ]) {
+    const result = validatePullRequest({
+      head: "fix/14-traceability-validation",
+      body: validBody,
+      traceability: traceabilityFixture,
+      commitSubjects: [subject]
+    });
+    assert.ok(result.failures.some((failure) => failure.startsWith("commit subject must contain #14")));
+  }
+});
+
 test("REQ-GOV-002 validates the linked GitHub issue contract", () => {
   assert.deepEqual(validateIssueBody({ number: 14, body: "## Requirement\nX\n## Specification trace\n§5\n## Acceptance criteria\n- [ ] X" }, 14), []);
   assert.ok(validateIssueBody({ number: 14, body: "## Requirement\nX" }, 14).length > 0);
+  assert.ok(validateIssueBody({ number: 14, body: "## Requirement\n\n## Specification trace\n\n## Acceptance criteria\n" }, 14).length > 0);
+  assert.ok(validateIssueBody({ number: 14, pull_request: {}, body: "## Requirement\nX\n## Specification trace\n§5\n## Acceptance criteria\n- [ ] X" }, 14).length > 0);
 });
 
 test("REQ-GOV-002 enforces committed JSON Schema constraints", async () => {
@@ -107,5 +124,19 @@ test("REQ-GOV-002 reports missing evidence paths", async () => {
   const failures = await validateEvidencePaths({
     requirements: [{ id: "REQ-GOV-002", evidence: { implementation: ["not/a/real/path"], tests: [] } }]
   });
-  assert.deepEqual(failures, ["REQ-GOV-002: evidence.implementation path does not exist: not/a/real/path"]);
+  assert.deepEqual(failures, ["REQ-GOV-002: evidence.implementation path must be a tracked repository file: not/a/real/path"]);
+});
+
+test("REQ-GOV-002 rejects evidence outside Git-tracked regular files", async () => {
+  const failures = await validateEvidencePaths({
+    requirements: [{
+      id: "REQ-GOV-002",
+      evidence: { implementation: ["/etc/passwd", "node_modules/ajv", ".github"], tests: [] }
+    }]
+  });
+  assert.deepEqual(failures, [
+    "REQ-GOV-002: evidence.implementation path must stay within the repository: /etc/passwd",
+    "REQ-GOV-002: evidence.implementation path must be a regular file: node_modules/ajv",
+    "REQ-GOV-002: evidence.implementation path must be a regular file: .github"
+  ]);
 });

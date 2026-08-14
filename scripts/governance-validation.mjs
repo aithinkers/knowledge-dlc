@@ -1,5 +1,6 @@
-import { access, readFile } from "node:fs/promises";
-import { constants } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
 
@@ -19,15 +20,29 @@ export async function validateJsonFile(documentPath, schemaPath) {
   return { document, failures: validateAgainstSchema(document, schema) };
 }
 
-export async function validateEvidencePaths(traceability) {
+export async function validateEvidencePaths(traceability, repositoryRoot = process.cwd()) {
   const failures = [];
   for (const requirement of traceability.requirements ?? []) {
     for (const kind of ["implementation", "tests"]) {
       for (const path of requirement.evidence?.[kind] ?? []) {
+        const resolvedPath = resolve(repositoryRoot, path);
+        const relativePath = relative(repositoryRoot, resolvedPath);
+        if (isAbsolute(path) || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+          failures.push(`${requirement.id}: evidence.${kind} path must stay within the repository: ${path}`);
+          continue;
+        }
         try {
-          await access(path, constants.R_OK);
+          const metadata = await stat(resolvedPath);
+          if (!metadata.isFile()) {
+            failures.push(`${requirement.id}: evidence.${kind} path must be a regular file: ${path}`);
+            continue;
+          }
+          execFileSync("git", ["ls-files", "--error-unmatch", "--", relativePath], {
+            cwd: repositoryRoot,
+            stdio: "ignore"
+          });
         } catch {
-          failures.push(`${requirement.id}: evidence.${kind} path does not exist: ${path}`);
+          failures.push(`${requirement.id}: evidence.${kind} path must be a tracked repository file: ${path}`);
         }
       }
     }

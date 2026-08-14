@@ -7,6 +7,14 @@ import process from "node:process";
 
 const requirementPattern = /\b(?:REQ-[A-Z]+-\d{3}|FEAT-\d{3}|ADR-\d{3}|REL-\d{3})\b/g;
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsExactToken(subject, token) {
+  return new RegExp(`(^|[^A-Za-z0-9-])${escapeRegExp(token)}(?=$|[^A-Za-z0-9-])`).test(subject);
+}
+
 export function validatePullRequest({ body, head, traceability, commitSubjects }) {
   const failures = [];
   const branchMatch = head.match(/^(?:feat|fix|docs|chore|test|refactor|security|release)\/(\d+)-[a-z0-9-]+$/);
@@ -48,7 +56,7 @@ export function validatePullRequest({ body, head, traceability, commitSubjects }
     failures.push("PR must contain at least one commit subject for validation");
   } else if (branchIssue !== null && primaryIds.length > 0) {
     for (const subject of commitSubjects) {
-      if (!subject.includes(`#${branchIssue}`) || !primaryIds.some((id) => subject.includes(id))) {
+      if (!containsExactToken(subject, `#${branchIssue}`) || !primaryIds.some((id) => containsExactToken(subject, id))) {
         failures.push(`commit subject must contain #${branchIssue} and a mapped Requirement ID: ${subject}`);
       }
     }
@@ -60,10 +68,14 @@ export function validatePullRequest({ body, head, traceability, commitSubjects }
 export function validateIssueBody(issue, expectedNumber) {
   const failures = [];
   if (issue.number !== expectedNumber) failures.push(`GitHub issue #${expectedNumber} could not be resolved`);
+  if (issue.pull_request) failures.push(`#${expectedNumber} resolves to a pull request, not an issue`);
   const body = issue.body ?? "";
   for (const heading of ["Requirement", "Specification trace", "Acceptance criteria"]) {
-    if (!new RegExp(`^## ${heading}$`, "mi").test(body)) failures.push(`issue #${expectedNumber} is missing heading: ${heading}`);
+    const content = body.match(new RegExp(`^## ${heading}\\s*$([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`, "mi"))?.[1]?.trim();
+    if (!content) failures.push(`issue #${expectedNumber} has a missing or empty section: ${heading}`);
   }
+  const acceptance = body.match(/^## Acceptance criteria\s*$([\s\S]*?)(?=^## |$(?![\s\S]))/mi)?.[1] ?? "";
+  if (!/^- \[[ xX]\] \S.*$/m.test(acceptance)) failures.push(`issue #${expectedNumber} must contain at least one acceptance criterion`);
   return failures;
 }
 
