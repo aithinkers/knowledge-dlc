@@ -125,6 +125,17 @@ export class NodeFileStore {
   }
   async removeDirectory(relativePath) { await this.assertFence(); await rmdir(await this.safePath(relativePath)); }
 
+  releaseMarker(relativePath, token) {
+    return `${relativePath}.released-${encodeURIComponent(token)}`;
+  }
+
+  async markMutexReleased(relativePath, token, _owner) {
+    const marker = await this.safePath(this.releaseMarker(relativePath, token));
+    await mkdir(dirname(marker), { recursive: true });
+    try { await writeFile(marker, "", { flag: "wx", mode: 0o600 }); }
+    catch (error) { if (error?.code !== "EEXIST") throw error; }
+  }
+
   async withMutex(relativePath, { owner, clock, leaseMs = 30_000, timeoutMs = 2_000, retryMs = 2 }, action) {
     if (!owner || !clock?.millis) throw invalid("Filesystem mutex requires owner and clock");
     const started = Date.now();
@@ -135,14 +146,18 @@ export class NodeFileStore {
         await this.writeJsonAtomic(leasePath, { owner, process_id: process.pid, acquired_at: clock.now(), expires_at: new Date(clock.millis() + leaseMs).toISOString() });
         break;
       } catch (error) {
+        if (error?.code === "ENOENT") continue;
         if (error?.code !== "EEXIST") throw error;
         let stale = false;
+        let staleToken = null;
         if (await this.exists(leasePath)) {
           try {
             const firstToken = await this.tokenOf(leasePath);
             const record = await this.readJson(leasePath);
             const secondToken = await this.tokenOf(leasePath);
-            stale = firstToken === secondToken && Date.parse(record.expires_at) <= clock.millis();
+            const released = firstToken === secondToken && await this.exists(this.releaseMarker(relativePath, firstToken));
+            stale = firstToken === secondToken && (released || Date.parse(record.expires_at) <= clock.millis());
+            if (stale) staleToken = firstToken;
           } catch (readError) {
             if (readError?.code === "ENOENT") continue;
             throw readError;
@@ -157,13 +172,31 @@ export class NodeFileStore {
           }
         }
         if (stale) {
+          const claimPath = `${relativePath}.reclaim`;
           const recovery = `${relativePath}.recovery-${encodeURIComponent(owner)}`;
+          let ownsClaim = false;
           try {
+            const claim = await this.safePath(claimPath);
+            try { await writeFile(claim, JSON.stringify({ owner, created_at: clock.now() }), { flag: "wx", mode: 0o600 }); ownsClaim = true; }
+            catch (claimError) {
+              if (claimError?.code !== "EEXIST") throw claimError;
+              const claimMetadata = await stat(claim);
+              if (clock.millis() - claimMetadata.mtimeMs >= leaseMs) await rm(claim, { force: true });
+              continue;
+            }
+            const currentToken = await this.tokenOf(leasePath);
+            if ((staleToken && currentToken !== staleToken) || (!staleToken && currentToken !== null)) continue;
             await rename(await this.safePath(relativePath), await this.safePath(recovery));
+            if (staleToken && await this.tokenOf(`${recovery}/owner.json`) !== staleToken) {
+              throw conflict("Mutex owner changed during stale reclaim");
+            }
             await rm(await this.safePath(recovery), { recursive: true, force: true });
+            if (staleToken) await this.remove(this.releaseMarker(relativePath, staleToken)).catch(() => {});
             continue;
           } catch (recoveryError) {
             if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(recoveryError?.code)) throw recoveryError;
+          } finally {
+            if (ownsClaim) await rm(await this.safePath(claimPath), { force: true }).catch(() => {});
           }
         }
         if (Date.now() - started >= timeoutMs) throw conflict(`Filesystem mutex timed out: ${relativePath}`);
@@ -171,25 +204,25 @@ export class NodeFileStore {
       }
     }
     const acquiredToken = await this.tokenOf(leasePath);
+    let releaseOwned = false;
     try {
       return await this.fence.run({ leasePath, token: acquiredToken, clock }, async () => {
-        const result = await action();
-        await this.assertFence();
-        return result;
+        try {
+          const result = await action();
+          await this.assertFence();
+          releaseOwned = true;
+          return result;
+        } catch (error) {
+          try { await this.assertFence(); releaseOwned = true; } catch {}
+          throw error;
+        }
       });
     } catch (error) {
       if (error?.code === "ENOENT") throw conflict("Coordinated resource changed while the mutex was held");
       throw error;
     }
     finally {
-      try {
-        if (await this.tokenOf(leasePath) === acquiredToken) {
-          await this.remove(leasePath);
-          await this.removeDirectory(relativePath);
-        }
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
+      if (releaseOwned) await this.markMutexReleased(relativePath, acquiredToken, owner);
     }
   }
 }

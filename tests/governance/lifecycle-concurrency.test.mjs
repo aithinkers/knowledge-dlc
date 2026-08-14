@@ -152,6 +152,33 @@ test("FEAT-002 expired same-process mutex holders are fenced from later writes",
   assert.equal(await f.store.readText("state/value"), "successor");
 });
 
+test("FEAT-002 delayed old-owner cleanup cannot remove or release a successor lease", async (context) => {
+  const f = await fixture(context);
+  const originalMark = f.store.markMutexReleased.bind(f.store);
+  let cleanupReached; const atCleanup = new Promise((resolve) => { cleanupReached = resolve; });
+  let resumeCleanup; const cleanupGate = new Promise((resolve) => { resumeCleanup = resolve; });
+  f.store.markMutexReleased = async (path, token, owner) => {
+    if (owner === "old") { cleanupReached(); await cleanupGate; }
+    return originalMark(path, token, owner);
+  };
+
+  const old = f.store.withMutex("workflow/cleanup-race", { owner: "old", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, async () => "old-result");
+  await atCleanup; f.clock.advance(21);
+  let successorEntered; const entered = new Promise((resolve) => { successorEntered = resolve; });
+  let releaseSuccessor; const successorGate = new Promise((resolve) => { releaseSuccessor = resolve; });
+  const successor = f.store.withMutex("workflow/cleanup-race", { owner: "successor", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, async () => {
+    successorEntered(); await successorGate; return "successor-result";
+  });
+  await entered;
+  resumeCleanup(); assert.equal(await old, "old-result");
+  await assert.rejects(
+    f.store.withMutex("workflow/cleanup-race", { owner: "third", clock: f.clock, leaseMs: 20, timeoutMs: 20 }, async () => "incorrect"),
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /timed out/.test(error.message)
+  );
+  releaseSuccessor(); assert.equal(await successor, "successor-result");
+  assert.equal(await f.store.withMutex("workflow/cleanup-race", { owner: "third", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, async () => "third-result"), "third-result");
+});
+
 test("FEAT-002 stale lock recovery is serialized and can recover an abandoned empty lock", async (context) => {
   const f = await fixture(context); const locks = new LeaseLockManager({ ...f, ids: new IDs("locks"), coordination: { emptyGraceMs: 100, timeoutMs: 1000 } });
   const emptyResource = "empty"; await f.store.createDirectoryExclusive(locks.path(emptyResource)); f.clock.value = Date.now(); f.clock.advance(101);
