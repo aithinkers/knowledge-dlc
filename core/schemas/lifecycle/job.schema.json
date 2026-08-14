@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/job-1.json",
+  "type": "object",
+  "required": ["version", "job_id", "principal", "project_id", "workflow_id", "operation", "idempotency_key", "input_hashes", "dependencies", "state", "progress", "checkpoints", "resource_budget", "created_at", "updated_at", "cancellation_requested"],
+  "properties": {
+    "version": {"const": 1}, "job_id": {"type": "string"}, "principal": {"type": "string"},
+    "project_id": {"type": "string"}, "workflow_id": {"type": "string"}, "operation": {"type": "string"},
+    "idempotency_key": {"type": "string", "minLength": 1}, "input_hashes": {"type": "object"}, "dependencies": {"type": "object"},
+    "state": {"enum": ["queued", "running", "completed", "failed", "cancelled", "parked", "awaiting_input"]},
+    "progress": {"type": "object"}, "checkpoints": {"type": "array"}, "resource_budget": {"type": "object"},
+    "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"},
+    "result": {}, "error": {"type": ["object", "null"]}, "cancellation_requested": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}

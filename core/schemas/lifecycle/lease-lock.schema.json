@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/lease-lock-1.json",
+  "type": "object",
+  "required": ["resource", "owner", "process", "acquired_at", "heartbeat_at", "expires_at", "lease_ms", "recovery"],
+  "properties": {
+    "resource": {"type": "string"}, "owner": {"type": "string"}, "process": {"type": "string"},
+    "acquired_at": {"type": "string", "format": "date-time"}, "heartbeat_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"}, "lease_ms": {"type": "integer", "minimum": 1},
+    "recovery": {"type": "object"}
+  },
+  "additionalProperties": false
+}

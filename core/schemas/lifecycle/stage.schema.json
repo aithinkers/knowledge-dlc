@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/stage-1.json",
+  "title": "K-DLC stage definition",
+  "type": "object",
+  "required": ["name", "phase", "version", "lead_agent", "consumes", "produces", "permissions", "sensors", "gates", "retry"],
+  "properties": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "phase": {"enum": ["define", "acquire", "understand", "integrate", "govern", "maintain"]},
+    "version": {"type": "integer", "minimum": 1},
+    "lead_agent": {"type": "string", "minLength": 1},
+    "consumes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "produces": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "depends_on": {"type": "array", "items": {"type": "string"}, "uniqueItems": true, "default": []},
+    "permissions": {
+      "type": "object", "required": ["read", "write"], "additionalProperties": false,
+      "properties": {"read": {"type": "array", "items": {"type": "string"}}, "write": {"type": "array", "items": {"type": "string"}}}
+    },
+    "sensors": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "gates": {"type": "object", "required": ["before", "after"]},
+    "retry": {"type": "object", "required": ["safe"], "properties": {"safe": {"type": "boolean"}}},
+    "deterministic": {"type": "boolean", "default": true}
+  },
+  "additionalProperties": false
+}

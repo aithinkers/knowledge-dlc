@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/sensor-result-1.json",
+  "type": "object",
+  "required": ["sensor_id", "version", "blocking", "status"],
+  "properties": {
+    "sensor_id": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "blocking": {"type": "boolean"},
+    "status": {"enum": ["passed", "failed", "warning", "error"]}, "blocks": {"type": "boolean"},
+    "finding": {}, "waiver": {"type": "object", "required": ["id", "authority", "reason", "expires_at"]}
+  },
+  "additionalProperties": true
+}

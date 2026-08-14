@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/workflow-1.json",
+  "type": "object",
+  "required": ["version", "workflow_id", "project_id", "state", "revision", "created_at", "updated_at"],
+  "properties": {
+    "version": {"const": 1}, "workflow_id": {"type": "string"}, "project_id": {"type": "string"},
+    "state": {"enum": ["planned", "running", "awaiting_approval", "completed", "rejected", "failed", "retrying", "cancelled", "parked"]},
+    "revision": {"type": "integer", "minimum": 0}, "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}, "current_stage": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
