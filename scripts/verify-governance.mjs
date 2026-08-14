@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { constants } from "node:fs";
+import { resolve } from "node:path";
 import process from "node:process";
+
+import { validateEvidencePaths, validateHarnessIntegrity, validateJsonFile } from "./governance-validation.mjs";
+
+if (process.env.KDLC_CANDIDATE_ROOT) process.chdir(resolve(process.env.KDLC_CANDIDATE_ROOT));
 
 const requiredFiles = [
   "AGENTS.md",
@@ -17,6 +22,10 @@ const requiredFiles = [
   ".github/ISSUE_TEMPLATE/decision.yml",
   ".github/ISSUE_TEMPLATE/security.yml",
   ".github/workflows/governance.yml",
+  ".github/workflows/candidate-tests.yml",
+  "package.json",
+  "package-lock.json",
+  "scripts/governance-validation.mjs",
   "development/agent-workflow.json",
   "development/agent-workflow.schema.json",
   "docs/knowledge-development-lifecycle-specification.md",
@@ -37,9 +46,14 @@ for (const file of requiredFiles) {
 
 let agentWorkflow;
 try {
-  agentWorkflow = JSON.parse(await readFile("development/agent-workflow.json", "utf8"));
+  const result = await validateJsonFile(
+    "development/agent-workflow.json",
+    "development/agent-workflow.schema.json"
+  );
+  agentWorkflow = result.document;
+  failures.push(...result.failures.map((failure) => `agent workflow schema: ${failure}`));
 } catch (error) {
-  failures.push(`agent workflow is not valid JSON: ${error.message}`);
+  failures.push(`agent workflow validation failed: ${error.message}`);
 }
 
 if (agentWorkflow) {
@@ -57,9 +71,12 @@ if (agentWorkflow) {
 
 let traceability;
 try {
-  traceability = JSON.parse(await readFile("docs/traceability.json", "utf8"));
+  const result = await validateJsonFile("docs/traceability.json", "docs/traceability.schema.json");
+  traceability = result.document;
+  failures.push(...result.failures.map((failure) => `traceability schema: ${failure}`));
+  failures.push(...await validateEvidencePaths(traceability));
 } catch (error) {
-  failures.push(`traceability index is not valid JSON: ${error.message}`);
+  failures.push(`traceability validation failed: ${error.message}`);
 }
 
 if (traceability) {
@@ -101,6 +118,11 @@ if (traceability) {
     }
   }
 }
+
+failures.push(...await validateHarnessIntegrity(
+  process.cwd(),
+  process.env.KDLC_TRUSTED_ROOT ? resolve(process.env.KDLC_TRUSTED_ROOT) : undefined
+));
 
 if (failures.length) {
   console.error(failures.map((failure) => `ERROR: ${failure}`).join("\n"));

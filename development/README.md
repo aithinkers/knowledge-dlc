@@ -20,3 +20,10 @@ grant permissions, approve itself, or weaken repository policy.
 The machine verifier checks the gate order and required governance artifacts.
 GitHub branch protection supplies the independent approval and required-check
 boundary that cannot be safely self-attested by a local agent.
+
+The repository bootstrap owner may use the documented PR-only ruleset bypass in
+`AGENTS.md`. This preserves the PR and audit trail but does not create or claim
+an approving review. The one-time reporter bootstrap applies only to PR #15 and
+issue #14. The present CI boundary trusts repository writers and configured
+GitHub Actions; stronger writer-independent attestation requires a separate
+GitHub App or organization-controlled workflow.

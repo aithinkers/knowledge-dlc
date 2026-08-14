@@ -56,6 +56,29 @@ when practical.
 One person or agent may perform multiple roles during early development, but
 the pull-request approval required by branch protection must be independent.
 
+### Audited owner bypass
+
+GitHub ruleset `K-DLC main protection` grants the one-member `k-dlc-bypass`
+team, currently `shasti421`, a pull-request-only bypass. A bypass is never
+represented as self-approval. It may be used only when required checks pass, an
+independent read-only agent review is attached to the pull request, no critical
+or high finding remains unresolved, and the bypass reason is recorded in the
+issue or pull request. Direct pushes to `main` remain prohibited.
+
+PR #15, linked to issue #14, may use a one-time bootstrap bypass because the
+trusted status reporters it installs cannot attach statuses until their
+workflow exists on `main`. The exception requires successful candidate tests,
+local simulation of the trusted checks, independent review of the final commit,
+and an explicit record of any accepted platform limitation. It expires when PR
+#15 is merged and does not apply to later reporter changes.
+
+Repository administrators, write collaborators, and repository-configured
+GitHub Actions are inside the current CI trust boundary. Bare commit-status
+contexts are therefore enforcement against ordinary candidate changes, not a
+cryptographically independent attestation from repository writers. A distinct
+GitHub App or organization-controlled required workflow is future hardening;
+bypass and status activity remain auditable in GitHub.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
