@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -54,5 +54,51 @@ export async function validateEvidencePaths(traceability, repositoryRoot = proce
       }
     }
   }
+  return failures;
+}
+
+export async function validateHarnessIntegrity(candidateRoot, trustedRoot) {
+  if (!trustedRoot) return [];
+  const failures = [];
+  const protectedFiles = [".github/workflows/candidate-tests.yml"];
+  for (const path of protectedFiles) {
+    try {
+      const [candidate, trusted] = await Promise.all([
+        readFile(resolve(candidateRoot, path), "utf8"),
+        readFile(resolve(trustedRoot, path), "utf8")
+      ]);
+      if (candidate !== trusted) failures.push(`protected harness file differs from trusted base: ${path}`);
+    } catch (error) {
+      failures.push(`protected harness file cannot be compared: ${path}: ${error.message}`);
+    }
+  }
+
+  try {
+    const [candidatePackage, trustedPackage] = await Promise.all([
+      readJson(resolve(candidateRoot, "package.json")),
+      readJson(resolve(trustedRoot, "package.json"))
+    ]);
+    for (const script of ["test", "check:governance", "test:governance"]) {
+      if (candidatePackage.scripts?.[script] !== trustedPackage.scripts?.[script]) {
+        failures.push(`protected npm script differs from trusted base: ${script}`);
+      }
+    }
+  } catch (error) {
+    failures.push(`protected npm scripts cannot be compared: ${error.message}`);
+  }
+
+  try {
+    const workflowDirectory = resolve(candidateRoot, ".github/workflows");
+    for (const entry of await readdir(workflowDirectory, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.name === "candidate-tests.yml") continue;
+      const content = await readFile(resolve(workflowDirectory, entry.name), "utf8");
+      if (/^\s*name:\s*Candidate tests\s*$/m.test(content)) {
+        failures.push(`reserved check name "Candidate tests" appears in another workflow: ${entry.name}`);
+      }
+    }
+  } catch (error) {
+    failures.push(`candidate workflow names cannot be inspected: ${error.message}`);
+  }
+
   return failures;
 }

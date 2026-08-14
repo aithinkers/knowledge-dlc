@@ -65,6 +65,14 @@ independent read-only agent review is attached to the pull request, no critical
 or high finding remains unresolved, and the bypass reason is recorded in the
 issue or pull request. Direct pushes to `main` remain prohibited.
 
+The initial pull request that installs or repairs trusted status reporters may
+use the same bypass when the prior reporter cannot attach required statuses to
+the PR head. That bootstrap exception additionally requires a successful local
+simulation of the trusted checks and an independent re-review of the final
+commit with no unresolved critical or high finding. The PR records which
+statuses were unavailable and why; the exception expires when the reporter is
+merged.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.

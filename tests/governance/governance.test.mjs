@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { validateAgainstSchema, validateEvidencePaths } from "../../scripts/governance-validation.mjs";
+import { validateAgainstSchema, validateEvidencePaths, validateHarnessIntegrity } from "../../scripts/governance-validation.mjs";
 import { validateIssueBody, validatePullRequest } from "../../scripts/verify-pr-traceability.mjs";
 
 const traceabilityFixture = {
@@ -159,6 +159,33 @@ test("REQ-GOV-002 rejects a tracked symlink as evidence", async () => {
     assert.deepEqual(failures, [
       "REQ-GOV-002: evidence.implementation path must be a regular file: linked.txt"
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("REQ-GOV-002 accepts an unchanged protected candidate-test harness", async () => {
+  assert.deepEqual(await validateHarnessIntegrity(process.cwd(), process.cwd()), []);
+});
+
+test("REQ-GOV-002 rejects no-op or duplicate candidate-test controls", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-harness-"));
+  const trusted = join(root, "trusted");
+  const candidate = join(root, "candidate");
+  try {
+    for (const directory of [trusted, candidate]) {
+      await mkdir(join(directory, ".github/workflows"), { recursive: true });
+    }
+    await writeFile(join(trusted, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\n");
+    await writeFile(join(candidate, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\njobs: {}\n");
+    await writeFile(join(candidate, ".github/workflows/spoof.yml"), "name: Candidate tests\n");
+    await writeFile(join(trusted, "package.json"), JSON.stringify({ scripts: { test: "npm run test:governance", "check:governance": "node check", "test:governance": "node test" } }));
+    await writeFile(join(candidate, "package.json"), JSON.stringify({ scripts: { test: "true", "check:governance": "node check", "test:governance": "node test" } }));
+
+    const failures = await validateHarnessIntegrity(candidate, trusted);
+    assert.ok(failures.includes("protected harness file differs from trusted base: .github/workflows/candidate-tests.yml"));
+    assert.ok(failures.includes("protected npm script differs from trusted base: test"));
+    assert.ok(failures.includes('reserved check name "Candidate tests" appears in another workflow: spoof.yml'));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

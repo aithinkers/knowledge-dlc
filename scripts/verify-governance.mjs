@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
 
-import { validateEvidencePaths, validateJsonFile } from "./governance-validation.mjs";
+import { validateEvidencePaths, validateHarnessIntegrity, validateJsonFile } from "./governance-validation.mjs";
 
 if (process.env.KDLC_CANDIDATE_ROOT) process.chdir(resolve(process.env.KDLC_CANDIDATE_ROOT));
 
@@ -118,6 +118,11 @@ if (traceability) {
     }
   }
 }
+
+failures.push(...await validateHarnessIntegrity(
+  process.cwd(),
+  process.env.KDLC_TRUSTED_ROOT ? resolve(process.env.KDLC_TRUSTED_ROOT) : undefined
+));
 
 if (failures.length) {
   console.error(failures.map((failure) => `ERROR: ${failure}`).join("\n"));

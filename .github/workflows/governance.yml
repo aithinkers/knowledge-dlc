@@ -11,9 +11,12 @@ permissions:
 
 jobs:
   repository-policy:
-    name: Repository policy
+    name: Repository policy reporter
     if: github.event_name == 'push' || github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - name: Check out trusted validator
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -32,20 +35,39 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate
           persist-credentials: false
-      - name: Validate candidate with trusted base code
+      - id: validate
+        name: Validate candidate with trusted base code
         if: github.event_name == 'pull_request_target'
+        continue-on-error: true
         env:
           KDLC_CANDIDATE_ROOT: ${{ github.workspace }}/candidate
+          KDLC_TRUSTED_ROOT: ${{ github.workspace }}/trusted
         run: node trusted/scripts/verify-governance.mjs
+      - name: Report repository policy on PR head
+        if: always() && github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          KDLC_REPOSITORY: ${{ github.repository }}
+          KDLC_VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
+        run: |
+          state=failure
+          if [ "$KDLC_VALIDATION_OUTCOME" = success ]; then state=success; fi
+          gh api "repos/$KDLC_REPOSITORY/statuses/$KDLC_HEAD_SHA" -f state="$state" -f context='Repository policy' -f description='Trusted base governance validation'
+          test "$state" = success
       - name: Validate main
         if: github.event_name == 'push'
         working-directory: trusted
         run: npm test
 
   pull-request-traceability:
-    name: Pull request traceability
+    name: Pull request traceability reporter
     if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      statuses: write
     steps:
       - name: Check out trusted validator
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -64,7 +86,9 @@ jobs:
           fetch-depth: 0
           path: candidate
           persist-credentials: false
-      - name: Validate traceability with trusted base code
+      - id: validate
+        name: Validate traceability with trusted base code
+        continue-on-error: true
         env:
           KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           KDLC_CANDIDATE_ROOT: ${{ github.workspace }}/candidate
@@ -73,3 +97,15 @@ jobs:
           KDLC_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node trusted/scripts/verify-pr-traceability.mjs
+      - name: Report traceability on PR head
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          KDLC_REPOSITORY: ${{ github.repository }}
+          KDLC_VALIDATION_OUTCOME: ${{ steps.validate.outcome }}
+        run: |
+          state=failure
+          if [ "$KDLC_VALIDATION_OUTCOME" = success ]; then state=success; fi
+          gh api "repos/$KDLC_REPOSITORY/statuses/$KDLC_HEAD_SHA" -f state="$state" -f context='Pull request traceability' -f description='Trusted base traceability validation'
+          test "$state" = success
