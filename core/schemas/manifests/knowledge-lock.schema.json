@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/manifests/knowledge-lock.schema.json",
+  "title": "K-DLC knowledge.lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "project", "resolved_at", "knowledge_bases"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/v1alpha1"},
+    "project": {"$ref": "../common.schema.json#/$defs/dnsName"},
+    "resolved_at": {"$ref": "../common.schema.json#/$defs/dateTime"},
+    "knowledge_bases": {
+      "type": "object",
+      "propertyNames": {"$ref": "../common.schema.json#/$defs/dnsName"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "uri", "manifest_hash", "tree_hash"],
+        "properties": {
+          "id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
+          "version": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "uri": {"$ref": "../common.schema.json#/$defs/resource"},
+          "requested_ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "resolved_ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "manifest_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+          "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+        }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "content_hash"],
+        "properties": {
+          "version": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "content_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "content_hash"],
+        "properties": {
+          "version": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "content_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+        }
+      }
+    }
+  }
+}

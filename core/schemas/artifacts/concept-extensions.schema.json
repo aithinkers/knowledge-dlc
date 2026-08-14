@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/concept-extensions.schema.json",
+  "title": "K-DLC managed concept extensions",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "target"],
+        "properties": {
+          "type": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "target": {"type": "string", "pattern": "^kb://[^/]+/.+$"}
+        }
+      }
+    },
+    "access": {"$ref": "../common.schema.json#/$defs/access"},
+    "source_exempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "policy_ref", "approved_by", "approved_at"],
+      "properties": {
+        "reason": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "policy_ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "approved_by": {"$ref": "../common.schema.json#/$defs/actor"},
+        "approved_at": {"$ref": "../common.schema.json#/$defs/dateTime"}
+      }
+    },
+    "claim_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "artifact_hash"],
+      "properties": {
+        "resource": {"type": "string", "pattern": "^/references/claims/.+\\.jsonl$"},
+        "artifact_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+      }
+    },
+    "review_receipts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource", "artifact_hash"],
+        "properties": {
+          "resource": {"type": "string", "pattern": "^(?:https://|/references/reviews/).+"},
+          "artifact_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+        }
+      }
+    },
+    "rights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "obligations", "policy_refs", "decision_refs", "target_scope"],
+      "properties": {
+        "disposition": {"enum": ["allowed", "restricted", "legal-review-required"]},
+        "obligations": {"type": "array", "items": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}},
+        "policy_refs": {"type": "array", "items": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}},
+        "decision_refs": {"type": "array", "items": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}},
+        "target_scope": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+      }
+    }
+  }
+}

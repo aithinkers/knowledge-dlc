@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/manifests/project.schema.json",
+  "title": "K-DLC Project manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "kind", "metadata", "purpose", "profile", "knowledge_bases"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/v1alpha1"},
+    "kind": {"const": "Project"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"$ref": "../common.schema.json#/$defs/dnsName"},
+        "title": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+      }
+    },
+    "purpose": {"$ref": "../common.schema.json#/$defs/resource"},
+    "profile": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+    "knowledge_bases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "uri", "mode", "priority"],
+        "properties": {
+          "name": {"$ref": "../common.schema.json#/$defs/dnsName"},
+          "uri": {"$ref": "../common.schema.json#/$defs/resource"},
+          "ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "mode": {"enum": ["read-only", "propose", "draft", "maintain", "publish"]},
+          "role": {"enum": ["primary", "dependency"]},
+          "priority": {"type": "integer"}
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_write_target": {"$ref": "../common.schema.json#/$defs/dnsName"},
+        "by_type": {
+          "type": "object",
+          "propertyNames": {"minLength": 1},
+          "additionalProperties": {"$ref": "../common.schema.json#/$defs/dnsName"}
+        }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "knowledge_depth", "trust_level", "autonomy", "approval_policy"],
+      "properties": {
+        "scope": {"enum": ["adopt", "ingest", "refresh", "curate", "audit"]},
+        "knowledge_depth": {"enum": ["summary", "standard", "comprehensive"]},
+        "trust_level": {"enum": ["personal", "team", "controlled"]},
+        "autonomy": {"enum": ["read-only", "propose", "draft", "execute-approved"]},
+        "approval_policy": {"enum": ["all-durable-writes", "publish-only", "risk-based"]}
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_model_cost_usd": {"type": "number", "minimum": 0},
+        "max_model_tokens": {"type": "integer", "minimum": 0},
+        "on_exceed": {"enum": ["park", "fail"]}
+      }
+    },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "default_bases", "minimum_trust", "stale_behavior", "citation_format"],
+      "properties": {
+        "mode": {"enum": ["filesystem", "indexed", "hybrid"]},
+        "default_bases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "../common.schema.json#/$defs/dnsName"}
+        },
+        "minimum_trust": {"enum": ["unverified", "machine-confirmed", "human-reviewed"]},
+        "stale_behavior": {"enum": ["warn", "exclude", "fail"]},
+        "citation_format": {"enum": ["qualified", "portable", "both"]}
+      }
+    }
+  }
+}

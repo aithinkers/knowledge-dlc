@@ -1,0 +1,17 @@
+{
+  "id": "kdlc-base",
+  "version": "0.2.0",
+  "okf_version": "0.2",
+  "canonicalization": "kdlc-c14n-1",
+  "stable_required_fields": [
+    "type",
+    "title",
+    "description",
+    "generated.by",
+    "generated.at",
+    "status"
+  ],
+  "stable_requires_source_or_exemption": true,
+  "stable_requires_freshness_or_timeless": true,
+  "classification_order": ["public", "internal", "confidential", "restricted"]
+}

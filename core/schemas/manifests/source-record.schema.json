@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/manifests/source-record.schema.json",
+  "title": "K-DLC SourceRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "kind", "id", "source_kind", "title", "resource", "source_class", "media_type", "retrieved_at", "normalizer", "rights", "access", "status"],
+  "oneOf": [
+    {
+      "required": ["content_hash"],
+      "properties": {"content_hash": true},
+      "not": {"required": ["digest_evidence"], "properties": {"digest_evidence": true}}
+    },
+    {
+      "required": ["digest_evidence"],
+      "properties": {"digest_evidence": true},
+      "not": {"required": ["content_hash"], "properties": {"content_hash": true}}
+    }
+  ],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/v1alpha1"},
+    "kind": {"const": "SourceRecord"},
+    "id": {"type": "string", "pattern": "^src_[a-z0-9]+$"},
+    "source_kind": {"enum": ["document", "dataset", "web", "media", "repository"]},
+    "title": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+    "resource": {"$ref": "../common.schema.json#/$defs/resource"},
+    "source_class": {"enum": ["authoritative", "official", "primary", "secondary", "observational", "user-authored", "unknown"]},
+    "media_type": {"type": "string", "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"},
+    "extension": {"type": "string", "pattern": "^\\.[A-Za-z0-9]+$"},
+    "language": {"type": "string", "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$"},
+    "retrieved_at": {"$ref": "../common.schema.json#/$defs/dateTime"},
+    "content_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "digest_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "value"],
+      "properties": {
+        "method": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "value": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+      }
+    },
+    "normalizer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "version": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+      }
+    },
+    "rights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["redistribution"],
+      "properties": {
+        "license": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "terms": {"$ref": "../common.schema.json#/$defs/resource"},
+        "attribution_required": {"type": "boolean"},
+        "redistribution": {"enum": ["allowed", "derived-only", "metadata-only", "prohibited", "unknown"]},
+        "derivative_use": {"enum": ["allowed", "prohibited", "unknown"]},
+        "commercial_use": {"enum": ["allowed", "prohibited", "unknown"]},
+        "confidentiality": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "territory": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "expires_at": {"$ref": "../common.schema.json#/$defs/dateTime"}
+      }
+    },
+    "access": {"$ref": "../common.schema.json#/$defs/access"},
+    "status": {"enum": ["active", "unavailable", "superseded", "revoked", "deleted", "access-restricted", "quarantined"]}
+  }
+}
