@@ -1,21 +1,46 @@
 import { conflict, LifecycleError } from "./errors.mjs";
+import { LeaseLockManager } from "./locks.mjs";
 
 export class TransactionManager {
-  constructor({ store, clock, ids, token, audit, fault = () => {} }) { Object.assign(this, { store, clock, ids, token, audit, fault }); }
+  constructor({ store, clock, ids, token, audit, fault = () => {}, coordination = {}, transactionLeaseMs = 300_000 }) {
+    Object.assign(this, { store, clock, ids, token, audit, fault, transactionLeaseMs });
+    this.locks = new LeaseLockManager({ store, clock, ids, coordination });
+  }
   path(workflowId, id) { return `workflow/runs/${workflowId}/transactions/${id}.json`; }
+  resource(targetPath) { return `transaction-target:${targetPath}`; }
+  async releaseTargets(journal) {
+    for (const target of [...journal.targets].sort((left, right) => right.path.localeCompare(left.path))) {
+      await this.locks.release(this.resource(target.path), journal.transaction_id);
+    }
+  }
+  async verifyTargetsHeld(journal) {
+    for (const target of journal.targets) await this.locks.heartbeat(this.resource(target.path), journal.transaction_id);
+  }
   async prepare({ workflowId, targets }) {
-    const id = this.ids.next("txn"); const now = this.clock.now(); const prepared = [];
-    for (const target of targets) {
-      const prior = await this.store.exists(target.path) ? await this.store.readText(target.path) : null;
-      const actual = prior === null ? null : this.token(prior);
-      if (actual !== target.expectedToken) throw conflict("Target changed before transaction preparation", { path: target.path, expected: target.expectedToken, actual });
-      prepared.push({ path: target.path, expected_token: target.expectedToken, next_content: target.content, prior_content: prior, applying: false, applied: false });
+    const id = this.ids.next("txn"); const now = this.clock.now(); const prepared = []; const acquired = [];
+    if (await this.store.exists(this.path(workflowId, id))) throw conflict("Generated transaction ID already exists", { id });
+    const ordered = [...targets].sort((left, right) => left.path.localeCompare(right.path));
+    if (new Set(ordered.map(({ path }) => path)).size !== ordered.length) throw conflict("Transaction target paths must be unique");
+    try {
+      for (const target of ordered) {
+        await this.locks.acquire(this.resource(target.path), { owner: id, process: `transaction:${workflowId}`, leaseMs: this.transactionLeaseMs, recovery: { workflow_id: workflowId, transaction_id: id } });
+        acquired.push(target);
+        const prior = await this.store.exists(target.path) ? await this.store.readText(target.path) : null;
+        const actual = prior === null ? null : this.token(prior);
+        if (actual !== target.expectedToken) throw conflict("Target changed before transaction preparation", { path: target.path, expected: target.expectedToken, actual });
+        prepared.push({ path: target.path, expected_token: target.expectedToken, next_content: target.content, prior_content: prior, applying: false, applied: false });
+      }
+    } catch (error) {
+      for (const target of acquired.reverse()) await this.locks.release(this.resource(target.path), id).catch(() => {});
+      throw error;
     }
     const journal = { version: 1, transaction_id: id, workflow_id: workflowId, state: "prepared", targets: prepared, created_at: now, updated_at: now };
-    await this.store.writeJsonAtomic(this.path(workflowId, id), journal); return journal;
+    try { await this.store.writeJsonAtomic(this.path(workflowId, id), journal); return journal; }
+    catch (error) { await this.releaseTargets(journal).catch(() => {}); throw error; }
   }
   async commit(workflowId, id) {
     const path = this.path(workflowId, id); const journal = await this.store.readJson(path); if (journal.state === "committed") return journal;
+    await this.verifyTargetsHeld(journal);
     for (const target of journal.targets) {
       const actual = await this.store.exists(target.path) ? this.token(await this.store.readText(target.path)) : null;
       if (target.applying && actual === this.token(target.next_content)) { target.applying = false; target.applied = true; }
@@ -32,8 +57,10 @@ export class TransactionManager {
         target.applying = false; target.applied = true; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); await this.fault({ phase: "applied", index, journal: structuredClone(journal) });
       }
       journal.state = "committed"; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal);
-      if (this.audit) await this.audit.append(workflowId, { actor: "process:kdlc-engine", action: "publication.committed", subject: id, result: "committed" }); return journal;
+      if (this.audit) await this.audit.append(workflowId, { actor: "process:kdlc-engine", action: "publication.committed", subject: id, result: "committed" });
+      await this.releaseTargets(journal); return journal;
     } catch (error) {
+      if (journal.state === "committed") throw error;
       journal.state = "failed"; journal.error = error.message; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); throw new LifecycleError("KDLC_TRANSACTION_FAILED", "publication-transaction-failure", "Publication transaction failed", { retryable: true, details: { transaction_id: id } });
     }
   }
@@ -51,6 +78,6 @@ export class TransactionManager {
       }
       target.applying = false; target.applied = false;
     }
-    journal.state = "rolled_back"; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); return journal;
+    journal.state = "rolled_back"; journal.updated_at = this.clock.now(); await this.store.writeJsonAtomic(path, journal); await this.releaseTargets(journal); return journal;
   }
 }

@@ -75,6 +75,65 @@ export class NodeFileStore {
     await mkdir(target);
   }
   async removeDirectory(relativePath) { await rmdir(await this.safePath(relativePath)); }
+
+  async withMutex(relativePath, { owner, clock, leaseMs = 30_000, timeoutMs = 2_000, retryMs = 2 }, action) {
+    if (!owner || !clock?.millis) throw invalid("Filesystem mutex requires owner and clock");
+    const started = Date.now();
+    const leasePath = `${relativePath}/owner.json`;
+    while (true) {
+      try {
+        await this.createDirectoryExclusive(relativePath);
+        await this.writeJsonAtomic(leasePath, { owner, acquired_at: clock.now(), expires_at: new Date(clock.millis() + leaseMs).toISOString() });
+        break;
+      } catch (error) {
+        if (error?.code !== "EEXIST") throw error;
+        let stale = false;
+        if (await this.exists(leasePath)) {
+          try {
+            const firstToken = await this.tokenOf(leasePath);
+            const record = await this.readJson(leasePath);
+            const secondToken = await this.tokenOf(leasePath);
+            stale = firstToken === secondToken && Date.parse(record.expires_at) <= clock.millis();
+          } catch (readError) {
+            if (readError?.code === "ENOENT") continue;
+            throw readError;
+          }
+        } else {
+          try {
+            const metadata = await stat(await this.safePath(relativePath));
+            stale = clock.millis() - metadata.mtimeMs >= leaseMs;
+          } catch (metadataError) {
+            if (metadataError?.code === "ENOENT") continue;
+            throw metadataError;
+          }
+        }
+        if (stale) {
+          const recovery = `${relativePath}.recovery-${encodeURIComponent(owner)}`;
+          try {
+            await rename(await this.safePath(relativePath), await this.safePath(recovery));
+            await rm(await this.safePath(recovery), { recursive: true, force: true });
+            continue;
+          } catch (recoveryError) {
+            if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(recoveryError?.code)) throw recoveryError;
+          }
+        }
+        if (Date.now() - started >= timeoutMs) throw invalid(`Filesystem mutex timed out: ${relativePath}`);
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, retryMs));
+      }
+    }
+    const acquiredToken = await this.tokenOf(leasePath);
+    try { return await action(); }
+    finally {
+      try {
+        if (await this.tokenOf(leasePath) === acquiredToken) {
+          await this.remove(leasePath);
+          await this.removeDirectory(relativePath);
+        }
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+    }
+  }
 }
 
 export function jsonEqual(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
