@@ -15,6 +15,7 @@
     "test": "npm run check:governance && npm run test:governance"
   },
   "dependencies": {
+    "ajv-formats": "3.0.1",
     "canonicalize": "4.0.0",
     "yaml": "2.9.0"
   },

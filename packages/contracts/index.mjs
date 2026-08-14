@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { parseDocument } from "yaml";
 
 const moduleRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -28,7 +29,8 @@ export async function loadContractSchemas(root = moduleRoot) {
 }
 
 export async function createContractValidator(root = moduleRoot) {
-  const ajv = new Ajv2020({ allErrors: true, strict: true, validateFormats: false });
+  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  addFormats(ajv);
   const schemas = await loadContractSchemas(root);
   for (const { schema } of schemas) ajv.addSchema(schema);
 

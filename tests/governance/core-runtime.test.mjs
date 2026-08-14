@@ -203,14 +203,30 @@ function validProvenance() {
     },
     body: "Tokens are short-lived.[^auth-standard]\n\n[^auth-standard]: Authentication Standard\n"
   };
-  return { concept, claims, sourceHash, sourceRecords: new Map([["src-auth", sourceHash]]) };
+  const fixture = {
+    concept,
+    claims,
+    sourceHash,
+    sourceRecords: new Map([["src-auth", sourceHash]]),
+    resources: new Map([["references/sources/src-auth.md", "durable source reference\n"]])
+  };
+  return bindClaims(fixture);
+}
+
+function bindClaims(fixture) {
+  fixture.concept.frontmatter.claim_provenance.artifact_hash = artifactHash(canonicalClaimSidecar(fixture.claims));
+  fixture.resources.set(
+    "references/claims/policies/authentication.jsonl",
+    `${fixture.claims.map((claim) => JSON.stringify(claim)).join("\n")}\n`
+  );
+  return fixture;
 }
 
 test("FEAT-001 published citations and governed claim sidecars validate exact provenance", () => {
   assert.equal(validatePublishedProvenance(validProvenance()), true);
   const fixture = validProvenance();
   fixture.claims.push({ ...fixture.claims[0], id: "clm-2", assertion_key: "policies/authentication#another" });
-  fixture.concept.frontmatter.claim_provenance.artifact_hash = artifactHash(canonicalClaimSidecar(fixture.claims));
+  bindClaims(fixture);
   assert.equal(validatePublishedProvenance(fixture), true);
   const codeExample = validProvenance();
   codeExample.concept.body += "\n```markdown\nnot attribution[^unknown]\n```\n`also[^unknown]`\n";
@@ -231,6 +247,15 @@ test("FEAT-001 provenance validation fails closed on citations, resources, hashe
   const traversal = validProvenance();
   traversal.concept.frontmatter.sources[0].resource = "../../secret.md";
   assert.throws(() => validatePublishedProvenance(traversal), expectCode("KDLC_PROVENANCE_NOT_DURABLE"));
+  const missingResource = validProvenance();
+  missingResource.resources.delete("references/sources/src-auth.md");
+  assert.throws(() => validatePublishedProvenance(missingResource), expectCode("KDLC_PROVENANCE_UNRESOLVED"));
+  for (const resource of ["javascript://evil", "file:///tmp/source"]) {
+    const unsafeScheme = validProvenance();
+    unsafeScheme.concept.frontmatter.sources[0].resource = resource;
+    unsafeScheme.resources.set(resource, "unsafe");
+    assert.throws(() => validatePublishedProvenance(unsafeScheme), expectCode("KDLC_PROVENANCE_NOT_DURABLE"));
+  }
 
   const sourceDrift = validProvenance();
   sourceDrift.sourceRecords.set("src-auth", byteHash("changed"));
@@ -240,11 +265,14 @@ test("FEAT-001 provenance validation fails closed on citations, resources, hashe
   assert.throws(() => validatePublishedProvenance(missingRecord), expectCode("KDLC_SOURCE_RECORD_MISSING"));
 
   const sidecarDrift = validProvenance();
-  sidecarDrift.claims[0].assertion = "Changed after hashing.";
+  sidecarDrift.resources.set("references/claims/policies/authentication.jsonl", `${JSON.stringify({ ...sidecarDrift.claims[0], assertion: "Changed after hashing." })}\n`);
   assert.throws(() => validatePublishedProvenance(sidecarDrift), expectCode("KDLC_CLAIM_SIDECAR_HASH"));
+  const missingSidecar = validProvenance();
+  missingSidecar.resources.delete("references/claims/policies/authentication.jsonl");
+  assert.throws(() => validatePublishedProvenance(missingSidecar), expectCode("KDLC_PROVENANCE_UNRESOLVED"));
   const badClaim = validProvenance();
   badClaim.claims[0].assertion_key = "position-1";
-  badClaim.concept.frontmatter.claim_provenance.artifact_hash = artifactHash(canonicalClaimSidecar(badClaim.claims));
+  bindClaims(badClaim);
   assert.throws(() => validatePublishedProvenance(badClaim), expectCode("KDLC_CLAIM_SIDECAR_INVALID"));
 
   const noSidecar = validProvenance();
@@ -254,10 +282,10 @@ test("FEAT-001 provenance validation fails closed on citations, resources, hashe
 
   const emptySidecar = validProvenance();
   emptySidecar.claims = [];
-  emptySidecar.concept.frontmatter.claim_provenance.artifact_hash = artifactHash([]);
+  bindClaims(emptySidecar);
   assert.throws(() => validatePublishedProvenance(emptySidecar), expectCode("KDLC_CLAIM_SIDECAR_INVALID"));
   const badExtraction = validProvenance();
   badExtraction.claims[0].extraction = "model-guessed";
-  badExtraction.concept.frontmatter.claim_provenance.artifact_hash = artifactHash(canonicalClaimSidecar(badExtraction.claims));
+  bindClaims(badExtraction);
   assert.throws(() => validatePublishedProvenance(badExtraction), expectCode("KDLC_CLAIM_SIDECAR_INVALID"));
 });

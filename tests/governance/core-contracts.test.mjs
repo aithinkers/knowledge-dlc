@@ -11,6 +11,7 @@ import {
   validateResolvedMountIds
 } from "../../packages/contracts/index.mjs";
 import { OKF_REFERENCE, verifyOkfReference } from "../../scripts/verify-okf-reference.mjs";
+import { scaffoldProject } from "../../packages/core/index.mjs";
 
 const digest = `sha256:${"a".repeat(64)}`;
 
@@ -181,7 +182,7 @@ test("FEAT-001 validates manifests, claims, extensions, packets, and receipts", 
   const claimSidecarEntry = {
     assertion_key: "policies/authentication#token-lifetime",
     assertion: "Tokens expire.",
-    source_key: "auth-standard",
+    source_entry_id: "auth-standard",
     source_record_id: "src_01j5",
     source_hash: digest,
     locator: { heading: "Lifetime" },
@@ -236,6 +237,22 @@ test("FEAT-001 validates manifests, claims, extensions, packets, and receipts", 
   const unboundReceipt = structuredClone(validReceipt);
   delete unboundReceipt.packet_hash;
   assert.equal(contracts.validate("reviewReceipt", unboundReceipt).valid, false);
+
+  const impossibleTime = structuredClone(validReceipt);
+  impossibleTime.reviewed_at = "2026-99-99T99:99:99+99:99";
+  assert.equal(contracts.validate("reviewReceipt", impossibleTime).valid, false);
+});
+
+test("FEAT-001 generated project and knowledge-base manifests satisfy their contracts", async () => {
+  const contracts = await createContractValidator();
+  const files = scaffoldProject({ name: "demo", title: "Demo", knowledgeBaseId: "example.demo" });
+  const project = parseYamlArtifact(files.get("knowledge-project.yaml"));
+  const knowledgeBase = parseYamlArtifact(files.get("knowledge/primary/knowledge-base.yaml"));
+  assert.equal(contracts.validate("project", project).valid, true);
+  assert.deepEqual(validateProjectSemantics(project), []);
+  assert.equal(contracts.validate("knowledgeBase", knowledgeBase).valid, true);
+  assert.equal(project.profile, "kdlc-base@0.2.0");
+  assert.equal(knowledgeBase.profile, "kdlc-base@0.2.0");
 });
 
 test("FEAT-001 base profile records stable publication requirements", async () => {

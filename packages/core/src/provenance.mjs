@@ -26,15 +26,35 @@ export function canonicalClaimSidecar(claims) {
   return [...claims].sort((left, right) => compare(String(left.assertion_key), String(right.assertion_key)) || compare(String(left.id ?? ""), String(right.id ?? "")));
 }
 
-function validatePublishedResource(resource) {
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(resource)) return;
+function resolvePublishedResource(resource, resources) {
+  if (typeof resource !== "string" || !resources || typeof resources.has !== "function") {
+    fail("KDLC_PROVENANCE_UNRESOLVED", "Published resources require an explicit resolved resource map");
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(resource)) {
+    if (!/^(?:https:\/\/|kb:\/\/|urn:)/i.test(resource)) {
+      fail("KDLC_PROVENANCE_NOT_DURABLE", `Unsupported published resource scheme: ${resource}`);
+    }
+    if (!resources.has(resource)) fail("KDLC_PROVENANCE_UNRESOLVED", `Published resource does not resolve: ${resource}`);
+    return resources.get(resource);
+  }
   const normalized = posix.normalize(resource.replace(/^\//, ""));
   if (!normalized || normalized === ".." || normalized.startsWith("../") || normalized.includes("\\") || normalized !== resource.replace(/^\//, "")) {
     fail("KDLC_PROVENANCE_NOT_DURABLE", `Unsafe published source resource: ${resource}`);
   }
+  if (!resources.has(normalized)) fail("KDLC_PROVENANCE_UNRESOLVED", `Published resource does not resolve: ${resource}`);
+  return resources.get(normalized);
 }
 
-export function validatePublishedProvenance({ concept, profile = "team", claims, sourceRecords = new Map() }) {
+function parseClaimSidecar(bytes) {
+  const text = typeof bytes === "string" ? bytes : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  try {
+    return text.split(/\r?\n/).filter((line) => line.trim()).map((line) => JSON.parse(line));
+  } catch {
+    fail("KDLC_CLAIM_SIDECAR_INVALID", "Claim sidecar must be valid UTF-8 JSON Lines");
+  }
+}
+
+export function validatePublishedProvenance({ concept, profile = "team", resources, sourceRecords = new Map() }) {
   if (!concept?.id || !concept?.frontmatter || typeof concept.body !== "string") {
     fail("KDLC_CONCEPT_INVALID", "Published concept id, parsed frontmatter, and body are required");
   }
@@ -50,7 +70,7 @@ export function validatePublishedProvenance({ concept, profile = "team", claims,
     if (/^sources\/records\//.test(source.resource.replace(/^(?:\.\/|\/)/, ""))) {
       fail("KDLC_PROVENANCE_NOT_DURABLE", `Project-local source record cannot be published: ${source.resource}`);
     }
-    validatePublishedResource(source.resource);
+    resolvePublishedResource(source.resource, resources);
     if (source.source_hash && !HASH_PATTERN.test(source.source_hash)) fail("KDLC_SOURCE_HASH_INVALID", `Invalid source hash: ${source.id}`);
     if (source.source_record_id) {
       if (!sourceRecords.has(source.source_record_id)) fail("KDLC_SOURCE_RECORD_MISSING", `Reviewed source record is unavailable: ${source.id}`);
@@ -71,6 +91,7 @@ export function validatePublishedProvenance({ concept, profile = "team", claims,
     if (pointer.resource.replace(/^\//, "") !== expectedPath) {
       fail("KDLC_CLAIM_SIDECAR_INVALID", `Claim sidecar must use portable path ${expectedPath}`);
     }
+    const claims = parseClaimSidecar(resolvePublishedResource(pointer.resource, resources));
     const canonical = canonicalClaimSidecar(claims);
     if (canonical.length === 0) fail("KDLC_CLAIM_SIDECAR_INVALID", "Governed claim sidecar must contain at least one claim");
     if (pointer.artifact_hash !== artifactHash(canonical)) fail("KDLC_CLAIM_SIDECAR_HASH", "Claim sidecar artifact hash does not match");
