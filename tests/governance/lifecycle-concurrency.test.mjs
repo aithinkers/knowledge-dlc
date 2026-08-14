@@ -84,6 +84,31 @@ test("FEAT-002 prepared transactions reserve targets across workflows until comm
   await second.commit("wf-two", next.transaction_id); assert.equal(await f.store.readText("knowledge/shared.md"), "second");
 });
 
+test("FEAT-002 live transaction target locks cannot be broken during a paused commit", async (context) => {
+  const f = await fixture(context); await f.store.writeTextAtomic("knowledge/race.md", "before");
+  let paused; const atPause = new Promise((resolve) => { paused = resolve; });
+  let resume; const gate = new Promise((resolve) => { resume = resolve; });
+  const first = new TransactionManager({
+    ...f, ids: new IDs("race-one"), token: sha256Token, transactionLeaseMs: 1000,
+    fault: async ({ phase }) => { if (phase === "before-write") { paused(); await gate; } }
+  });
+  const second = new TransactionManager({ ...f, ids: new IDs("race-two"), token: sha256Token, transactionLeaseMs: 1000 });
+  const prepared = await first.prepare({ workflowId: "wf-one", targets: [{ path: "knowledge/race.md", expectedToken: sha256Token("before"), content: "first" }] });
+  const committing = first.commit("wf-one", prepared.transaction_id);
+  await atPause; f.clock.advance(1001);
+  const resource = await first.resource("knowledge/race.md");
+  await assert.rejects(
+    first.locks.breakStale(resource, { actor: "admin", reason: "expired during commit" }),
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /Live or unverifiable/.test(error.message)
+  );
+  await assert.rejects(
+    second.prepare({ workflowId: "wf-two", targets: [{ path: "knowledge/race.md", expectedToken: sha256Token("before"), content: "second" }] }),
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /locked/.test(error.message)
+  );
+  resume(); await committing;
+  assert.equal(await f.store.readText("knowledge/race.md"), "first");
+});
+
 test("FEAT-002 transaction reservations canonicalize paths and finalization is retryable", async (context) => {
   const f = await fixture(context); await f.store.writeTextAtomic("knowledge/shared.md", "before");
   let auditFailures = 1;
@@ -221,11 +246,14 @@ test("FEAT-002 stale lock recovery is serialized and can recover an abandoned em
   const emptyResource = "empty"; await f.store.createDirectoryExclusive(locks.path(emptyResource)); f.clock.value = Date.now(); f.clock.advance(101);
   assert.equal(await locks.breakStale(emptyResource, { actor: "admin", reason: "creator crashed" }), null);
 
-  await locks.acquire("leased", { owner: "wf:a", process: "1", leaseMs: 100 }); f.clock.advance(101);
+  await locks.acquire("leased", { owner: "wf:a", process: process.pid, leaseMs: 100 }); f.clock.advance(101);
   const outcomes = await Promise.allSettled([
     locks.heartbeat("leased", "wf:a"),
     locks.breakStale("leased", { actor: "admin", reason: "expired" })
   ]);
   assert.equal(outcomes.filter(({ status }) => status === "fulfilled").length, 1);
   assert.equal(outcomes.find(({ status }) => status === "rejected").reason.code, "KDLC_HASH_CONFLICT");
+
+  await locks.acquire("dead", { owner: "wf:dead", process: 2_147_483_647, leaseMs: 100 }); f.clock.advance(101);
+  assert.equal((await locks.breakStale("dead", { actor: "admin", reason: "dead process" })).owner, "wf:dead");
 });

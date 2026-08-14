@@ -20,24 +20,38 @@ export class LeaseLockManager {
         const held = await this.store.exists(this.recordPath(resource)) ? await this.store.readJson(this.recordPath(resource)) : null;
         throw conflict("Resource is locked", { resource, owner: held?.owner, expires_at: held?.expires_at, empty: !held });
       }
+      const processId = Number(process);
+      if (!Number.isSafeInteger(processId) || processId <= 0) throw conflict("Lock requires a valid local process ID", { resource });
       const acquired = this.clock.now(); const expires = new Date(this.clock.millis() + leaseMs).toISOString();
-      const record = { resource, owner, process, acquired_at: acquired, heartbeat_at: acquired, expires_at: expires, lease_ms: leaseMs, recovery };
+      const record = { resource, owner, process_id: processId, lease_id: this.ids?.next?.("lease") ?? `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`, acquired_at: acquired, heartbeat_at: acquired, expires_at: expires, lease_ms: leaseMs, recovery };
       try { await this.store.writeJsonAtomic(this.recordPath(resource), record); }
       catch (error) { await this.store.removeDirectory(lockPath).catch(() => {}); throw error; }
       return record;
     });
   }
-  async heartbeat(resource, owner) {
+  async heartbeat(resource, owner, leaseId) {
     return this.coordinated(resource, "heartbeat", async () => {
       const record = await this.store.readJson(this.recordPath(resource)); if (record.owner !== owner) throw denied("Only lock owner may heartbeat");
-      if (Date.parse(record.expires_at) <= this.clock.millis()) throw conflict("Expired lock cannot be renewed", { resource, owner });
+      if (leaseId && record.lease_id !== leaseId) throw conflict("Lock lease identity changed", { resource, owner });
+      if (this.store.processIsAlive(record.process_id) !== true) throw conflict("Lock owner process is not live", { resource, owner });
       record.heartbeat_at = this.clock.now(); record.expires_at = new Date(this.clock.millis() + record.lease_ms).toISOString(); await this.store.writeJsonAtomic(this.recordPath(resource), record); return record;
     });
   }
-  async release(resource, owner) {
+  async validate(resource, owner, leaseId) {
+    return this.coordinated(resource, "validate", async () => {
+      const firstToken = await this.store.tokenOf(this.recordPath(resource));
+      const record = await this.store.readJson(this.recordPath(resource));
+      const secondToken = await this.store.tokenOf(this.recordPath(resource));
+      if (firstToken !== secondToken || record.owner !== owner || record.lease_id !== leaseId) throw conflict("Lock lease identity changed", { resource, owner });
+      if (this.store.processIsAlive(record.process_id) !== true) throw conflict("Lock owner process is not live", { resource, owner });
+      return record;
+    });
+  }
+  async release(resource, owner, leaseId) {
     return this.coordinated(resource, "release", async () => {
       if (!(await this.store.exists(this.recordPath(resource)))) return null;
       const record = await this.store.readJson(this.recordPath(resource)); if (record.owner !== owner) throw denied("Only lock owner may release");
+      if (leaseId && record.lease_id !== leaseId) throw conflict("Lock lease identity changed during release", { resource });
       const token = await this.store.tokenOf(this.recordPath(resource));
       if (token !== await this.store.tokenOf(this.recordPath(resource))) throw conflict("Lock changed during release", { resource });
       await this.store.remove(this.recordPath(resource)); await this.store.removeDirectory(this.path(resource));
@@ -51,6 +65,7 @@ export class LeaseLockManager {
       if (await this.store.exists(recordPath)) {
         const firstToken = await this.store.tokenOf(recordPath); record = await this.store.readJson(recordPath);
         if (Date.parse(record.expires_at) > this.clock.millis()) throw conflict("Lock lease is not stale");
+        if (this.store.processIsAlive(record.process_id) !== false) throw conflict("Live or unverifiable lock owner cannot be broken", { resource, owner: record.owner });
         const secondToken = await this.store.tokenOf(recordPath);
         if (firstToken !== secondToken) throw conflict("Lock changed during stale recovery", { resource });
         await this.store.remove(recordPath);
