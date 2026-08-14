@@ -2,9 +2,12 @@
 
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
+import { resolve } from "node:path";
 import process from "node:process";
 
 import { validateEvidencePaths, validateJsonFile } from "./governance-validation.mjs";
+
+if (process.env.KDLC_CANDIDATE_ROOT) process.chdir(resolve(process.env.KDLC_CANDIDATE_ROOT));
 
 const requiredFiles = [
   "AGENTS.md",
@@ -19,6 +22,10 @@ const requiredFiles = [
   ".github/ISSUE_TEMPLATE/decision.yml",
   ".github/ISSUE_TEMPLATE/security.yml",
   ".github/workflows/governance.yml",
+  ".github/workflows/candidate-tests.yml",
+  "package.json",
+  "package-lock.json",
+  "scripts/governance-validation.mjs",
   "development/agent-workflow.json",
   "development/agent-workflow.schema.json",
   "docs/knowledge-development-lifecycle-specification.md",

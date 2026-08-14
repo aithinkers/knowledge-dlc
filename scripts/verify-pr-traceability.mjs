@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 
@@ -12,7 +13,7 @@ function escapeRegExp(value) {
 }
 
 function containsExactToken(subject, token) {
-  return new RegExp(`(^|[^A-Za-z0-9-])${escapeRegExp(token)}(?=$|[^A-Za-z0-9-])`).test(subject);
+  return new RegExp(`(^|[^A-Za-z0-9_-])${escapeRegExp(token)}(?=$|[^A-Za-z0-9_-])`).test(subject);
 }
 
 export function validatePullRequest({ body, head, traceability, commitSubjects }) {
@@ -99,6 +100,7 @@ function loadCommitSubjects(baseSha) {
 }
 
 async function main() {
+  if (process.env.KDLC_CANDIDATE_ROOT) process.chdir(resolve(process.env.KDLC_CANDIDATE_ROOT));
   const traceability = JSON.parse(await readFile("docs/traceability.json", "utf8"));
   const result = validatePullRequest({
     body: process.env.KDLC_PR_BODY ?? "",

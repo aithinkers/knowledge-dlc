@@ -1,46 +1,75 @@
 name: Governance
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
 permissions:
   contents: read
-  issues: read
-  pull-requests: read
 
 jobs:
   repository-policy:
     name: Repository policy
+    if: github.event_name == 'push' || github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out trusted validator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - run: npm ci
-      - run: npm test
+      - run: npm ci --ignore-scripts --prefix trusted
+      - name: Check out candidate as untrusted data
+        if: github.event_name == 'pull_request_target'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Validate candidate with trusted base code
+        if: github.event_name == 'pull_request_target'
+        env:
+          KDLC_CANDIDATE_ROOT: ${{ github.workspace }}/candidate
+        run: node trusted/scripts/verify-governance.mjs
+      - name: Validate main
+        if: github.event_name == 'push'
+        working-directory: trusted
+        run: npm test
 
   pull-request-traceability:
     name: Pull request traceability
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    env:
-      KDLC_PR_TITLE: ${{ github.event.pull_request.title }}
-      KDLC_PR_BODY: ${{ github.event.pull_request.body }}
-      KDLC_PR_HEAD: ${{ github.event.pull_request.head.ref }}
-      KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      KDLC_REPOSITORY: ${{ github.repository }}
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out trusted validator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - run: npm ci
-      - run: node scripts/verify-pr-traceability.mjs
+      - run: npm ci --ignore-scripts --prefix trusted
+      - name: Check out candidate as untrusted data
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: candidate
+          persist-credentials: false
+      - name: Validate traceability with trusted base code
+        env:
+          KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          KDLC_CANDIDATE_ROOT: ${{ github.workspace }}/candidate
+          KDLC_PR_BODY: ${{ github.event.pull_request.body }}
+          KDLC_PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          KDLC_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node trusted/scripts/verify-pr-traceability.mjs

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { validateAgainstSchema, validateEvidencePaths } from "../../scripts/governance-validation.mjs";
@@ -94,7 +97,9 @@ test("REQ-GOV-002 rejects untraceable commit subjects", () => {
 test("REQ-GOV-002 rejects commit identifiers that only share a prefix", () => {
   for (const subject of [
     "fix: wrong issue (#140 REQ-GOV-002)",
-    "fix: wrong requirement (#14 REQ-GOV-0020)"
+    "fix: wrong requirement (#14 REQ-GOV-0020)",
+    "fix: wrong issue (#14_0 REQ-GOV-002)",
+    "fix: wrong requirement (#14 REQ-GOV-002_bad)"
   ]) {
     const result = validatePullRequest({
       head: "fix/14-traceability-validation",
@@ -139,4 +144,22 @@ test("REQ-GOV-002 rejects evidence outside Git-tracked regular files", async () 
     "REQ-GOV-002: evidence.implementation path must be a regular file: node_modules/ajv",
     "REQ-GOV-002: evidence.implementation path must be a regular file: .github"
   ]);
+});
+
+test("REQ-GOV-002 rejects a tracked symlink as evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-governance-"));
+  try {
+    execFileSync("git", ["init", "--quiet"], { cwd: root });
+    await writeFile(join(root, "outside.txt"), "evidence\n");
+    await symlink(join(root, "outside.txt"), join(root, "linked.txt"));
+    execFileSync("git", ["add", "linked.txt"], { cwd: root });
+    const failures = await validateEvidencePaths({
+      requirements: [{ id: "REQ-GOV-002", evidence: { implementation: ["linked.txt"], tests: [] } }]
+    }, root);
+    assert.deepEqual(failures, [
+      "REQ-GOV-002: evidence.implementation path must be a regular file: linked.txt"
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
