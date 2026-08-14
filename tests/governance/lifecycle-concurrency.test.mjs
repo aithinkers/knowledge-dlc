@@ -141,31 +141,51 @@ test("FEAT-002 audit idempotency conflicts when the same key carries another pay
   await assert.rejects(audit.append("wf", { actor: "process:test", action: "publication.committed", subject: "other", result: "committed", idempotency_key: "publication:txn" }), (error) => error.code === "KDLC_HASH_CONFLICT");
 });
 
-test("FEAT-002 expired same-process mutex holders are fenced from later writes", async (context) => {
+test("FEAT-002 expired live-process mutex holders remain exclusive until release", async (context) => {
   const f = await fixture(context); let releaseOld; const wait = new Promise((resolve) => { releaseOld = resolve; });
   const old = f.store.withMutex("workflow/fenced", { owner: "old", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, async () => {
-    await wait; await f.store.writeTextAtomic("state/value", "stale");
+    await wait; await f.store.writeTextAtomic("state/value", "owner");
   });
   await new Promise((resolve) => setTimeout(resolve, 5)); f.clock.advance(21);
-  await f.store.withMutex("workflow/fenced", { owner: "successor", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () => f.store.writeTextAtomic("state/value", "successor"));
-  releaseOld(); await assert.rejects(old, /lease was lost/);
-  assert.equal(await f.store.readText("state/value"), "successor");
+  await assert.rejects(
+    f.store.withMutex("workflow/fenced", { owner: "contender", clock: f.clock, leaseMs: 20, timeoutMs: 20 }, () => f.store.writeTextAtomic("state/value", "contender")),
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /timed out/.test(error.message)
+  );
+  releaseOld(); await old;
+  assert.equal(await f.store.readText("state/value"), "owner");
 });
 
-test("FEAT-002 nested mutexes preserve enclosing fences after outer takeover", async (context) => {
+test("FEAT-002 a live owner cannot be overtaken after its final fence assertion", async (context) => {
   const f = await fixture(context);
-  let innerEntered; const entered = new Promise((resolve) => { innerEntered = resolve; });
-  let resumeInner; const gate = new Promise((resolve) => { resumeInner = resolve; });
-  const old = f.store.withMutex("workflow/outer", { owner: "old-outer", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
-    f.store.withMutex("workflow/inner", { owner: "old-inner", clock: f.clock, leaseMs: 100, timeoutMs: 100 }, async () => {
-      innerEntered(); await gate; await f.store.writeTextAtomic("state/nested", "stale");
-    }));
-  await entered; f.clock.advance(21);
-  await f.store.withMutex("workflow/outer", { owner: "successor", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
-    f.store.writeTextAtomic("state/nested", "successor"));
-  resumeInner();
-  await assert.rejects(old, (error) => error.code === "KDLC_HASH_CONFLICT" && /lease was lost/.test(error.message));
-  assert.equal(await f.store.readText("state/nested"), "successor");
+  const originalReplace = f.store.replaceAtomic.bind(f.store);
+  let paused; const atPause = new Promise((resolve) => { paused = resolve; });
+  let resume; const gate = new Promise((resolve) => { resume = resolve; });
+  f.store.replaceAtomic = async (source, target) => {
+    if (target.endsWith("state/value")) { paused(); await gate; }
+    return originalReplace(source, target);
+  };
+  const owner = f.store.withMutex("workflow/final-assert", { owner: "owner", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
+    f.store.writeTextAtomic("state/value", "owner"));
+  await atPause; f.clock.advance(21);
+  await assert.rejects(
+    f.store.withMutex("workflow/final-assert", { owner: "successor", clock: f.clock, leaseMs: 20, timeoutMs: 20 }, () =>
+      f.store.writeTextAtomic("state/value", "successor")),
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /timed out/.test(error.message)
+  );
+  resume(); await owner;
+  assert.equal(await f.store.readText("state/value"), "owner");
+});
+
+test("FEAT-002 expired leases are recovered only when the recorded process is dead", async (context) => {
+  const f = await fixture(context);
+  await f.store.createDirectoryExclusive("workflow/dead");
+  await f.store.writeJsonAtomic("workflow/dead/owner.json", {
+    owner: "dead", process_id: 2_147_483_647, lease_id: "dead-lease",
+    acquired_at: f.clock.now(), expires_at: new Date(f.clock.millis() - 1).toISOString()
+  });
+  await f.store.withMutex("workflow/dead", { owner: "recovery", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
+    f.store.writeTextAtomic("state/recovered", "yes"));
+  assert.equal(await f.store.readText("state/recovered"), "yes");
 });
 
 test("FEAT-002 delayed old-owner cleanup cannot remove or release a successor lease", async (context) => {
@@ -174,8 +194,9 @@ test("FEAT-002 delayed old-owner cleanup cannot remove or release a successor le
   let cleanupReached; const atCleanup = new Promise((resolve) => { cleanupReached = resolve; });
   let resumeCleanup; const cleanupGate = new Promise((resolve) => { resumeCleanup = resolve; });
   f.store.markMutexReleased = async (path, token, owner) => {
+    const result = await originalMark(path, token, owner);
     if (owner === "old") { cleanupReached(); await cleanupGate; }
-    return originalMark(path, token, owner);
+    return result;
   };
 
   const old = f.store.withMutex("workflow/cleanup-race", { owner: "old", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, async () => "old-result");

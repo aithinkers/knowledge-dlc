@@ -15,6 +15,12 @@ export class NodeFileStore {
     this.behavior = undefined;
   }
 
+  processIsAlive(processId) {
+    if (!Number.isSafeInteger(processId) || processId <= 0) return null;
+    try { process.kill(processId, 0); return true; }
+    catch (error) { if (error?.code === "ESRCH") return false; return null; }
+  }
+
   path(relativePath) {
     if (isAbsolute(relativePath)) throw invalid("Storage path must be relative");
     const target = resolve(this.root, relativePath);
@@ -61,7 +67,7 @@ export class NodeFileStore {
       let content;
       try { content = await readFile(this.path(fence.leasePath), "utf8"); }
       catch (error) { if (error?.code === "ENOENT") throw conflict("Filesystem mutex lease was lost"); throw error; }
-      if (this.token(content) !== fence.token || Date.parse(JSON.parse(content).expires_at) <= fence.clock.millis()) {
+      if (JSON.parse(content).lease_id !== fence.leaseId) {
         throw conflict("Filesystem mutex lease was lost");
       }
     }
@@ -105,9 +111,11 @@ export class NodeFileStore {
     const target = await this.safePath(relativePath);
     await mkdir(dirname(target), { recursive: true });
     const temporary = `${target}.tmp-${process.pid}-${Math.random().toString(16).slice(2)}`;
-    try { await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o600 }); await this.assertFence(); await rename(temporary, target); }
+    try { await writeFile(temporary, content, { encoding: "utf8", flag: "wx", mode: 0o600 }); await this.assertFence(); await this.replaceAtomic(temporary, target); }
     finally { await rm(temporary, { force: true }).catch(() => {}); }
   }
+
+  async replaceAtomic(source, target) { await rename(source, target); }
 
   async writeJsonAtomic(relativePath, value) { await this.writeTextAtomic(relativePath, `${JSON.stringify(value, null, 2)}\n`); }
   async appendExclusive(relativePath, content) {
@@ -130,8 +138,8 @@ export class NodeFileStore {
     return `${relativePath}.released-${encodeURIComponent(token)}`;
   }
 
-  async markMutexReleased(relativePath, token, _owner) {
-    const marker = await this.safePath(this.releaseMarker(relativePath, token));
+  async markMutexReleased(relativePath, leaseId, _owner) {
+    const marker = await this.safePath(this.releaseMarker(relativePath, leaseId));
     await mkdir(dirname(marker), { recursive: true });
     try { await writeFile(marker, "", { flag: "wx", mode: 0o600 }); }
     catch (error) { if (error?.code !== "EEXIST") throw error; }
@@ -141,10 +149,12 @@ export class NodeFileStore {
     if (!owner || !clock?.millis) throw invalid("Filesystem mutex requires owner and clock");
     const started = Date.now();
     const leasePath = `${relativePath}/owner.json`;
+    let acquiredLease;
     while (true) {
       try {
         await this.createDirectoryExclusive(relativePath);
-        await this.writeJsonAtomic(leasePath, { owner, process_id: process.pid, acquired_at: clock.now(), expires_at: new Date(clock.millis() + leaseMs).toISOString() });
+        acquiredLease = { owner, process_id: process.pid, lease_id: `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`, acquired_at: clock.now(), expires_at: new Date(clock.millis() + leaseMs).toISOString() };
+        await this.writeJsonAtomic(leasePath, acquiredLease);
         break;
       } catch (error) {
         if (error?.code === "ENOENT") continue;
@@ -156,8 +166,9 @@ export class NodeFileStore {
             const firstToken = await this.tokenOf(leasePath);
             const record = await this.readJson(leasePath);
             const secondToken = await this.tokenOf(leasePath);
-            const released = firstToken === secondToken && await this.exists(this.releaseMarker(relativePath, firstToken));
-            stale = firstToken === secondToken && (released || Date.parse(record.expires_at) <= clock.millis());
+            const released = firstToken === secondToken && await this.exists(this.releaseMarker(relativePath, record.lease_id));
+            const dead = this.processIsAlive(record.process_id) === false;
+            stale = firstToken === secondToken && (released || (Date.parse(record.expires_at) <= clock.millis() && dead));
             if (stale) staleToken = firstToken;
           } catch (readError) {
             if (readError?.code === "ENOENT") continue;
@@ -192,7 +203,6 @@ export class NodeFileStore {
               throw conflict("Mutex owner changed during stale reclaim");
             }
             await rm(await this.safePath(recovery), { recursive: true, force: true });
-            if (staleToken) await this.remove(this.releaseMarker(relativePath, staleToken)).catch(() => {});
             continue;
           } catch (recoveryError) {
             if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(recoveryError?.code)) throw recoveryError;
@@ -204,11 +214,33 @@ export class NodeFileStore {
         await new Promise((resolveDelay) => setTimeout(resolveDelay, retryMs));
       }
     }
-    const acquiredToken = await this.tokenOf(leasePath);
+    const acquiredLeaseId = acquiredLease.lease_id;
     let releaseOwned = false;
+    let heartbeatStopped = false;
+    let wakeHeartbeat;
+    const heartbeat = async () => {
+      while (!heartbeatStopped) {
+        await new Promise((resolveDelay) => {
+          const timer = setTimeout(resolveDelay, Math.max(1, Math.floor(leaseMs / 3)));
+          wakeHeartbeat = () => { clearTimeout(timer); resolveDelay(); };
+        });
+        wakeHeartbeat = undefined;
+        if (heartbeatStopped) break;
+        try {
+          const current = await this.readJson(leasePath);
+          if (current.lease_id !== acquiredLeaseId) break;
+          current.expires_at = new Date(clock.millis() + leaseMs).toISOString();
+          const target = await this.safePath(leasePath);
+          const temporary = `${target}.heartbeat-${process.pid}-${Math.random().toString(16).slice(2)}`;
+          try { await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx", mode: 0o600 }); await this.replaceAtomic(temporary, target); }
+          finally { await rm(temporary, { force: true }).catch(() => {}); }
+        } catch (error) { if (error?.code !== "ENOENT") throw error; break; }
+      }
+    };
+    const heartbeatTask = heartbeat();
     try {
       const enclosingFences = this.fence.getStore() ?? [];
-      return await this.fence.run([...enclosingFences, { leasePath, token: acquiredToken, clock }], async () => {
+      return await this.fence.run([...enclosingFences, { leasePath, leaseId: acquiredLeaseId, clock }], async () => {
         try {
           const result = await action();
           await this.assertFence();
@@ -224,7 +256,10 @@ export class NodeFileStore {
       throw error;
     }
     finally {
-      if (releaseOwned) await this.markMutexReleased(relativePath, acquiredToken, owner);
+      heartbeatStopped = true;
+      wakeHeartbeat?.();
+      await heartbeatTask;
+      if (releaseOwned) await this.markMutexReleased(relativePath, acquiredLeaseId, owner);
     }
   }
 }
