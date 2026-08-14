@@ -1,0 +1,8 @@
+{
+  "canonical_json": "{\"a\":\"é\",\"nested\":{\"a\":1,\"b\":2},\"z\":[3,0,true,null]}",
+  "byte_input": "alpha\r\nbeta\r\n",
+  "canonical_text": "alpha\nbeta\n",
+  "byte_hash": "sha256:98ab4d3aeab1e120560e942e2df6a0db1147bf94bafcf1590000ffb3c2b6fc80",
+  "artifact_hash": "sha256:424ad51963efd41f0822d4a03025da6df7d3dc230b6c554fee8c79d1eebc51cd",
+  "review_hash": "sha256:476f90c48ba1d02377b12a5d0af94d7fc148b6abdae970a6ae6e5f833c7bcf3c"
+}

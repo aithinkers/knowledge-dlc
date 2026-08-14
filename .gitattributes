@@ -1,0 +1,2 @@
+# Preserve normative upstream bytes exactly; their hash is a conformance input.
+core/schemas/okf-0.2/SPEC.md whitespace=-trailing-space

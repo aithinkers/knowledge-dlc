@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/claim-sidecar-entry.schema.json",
+  "title": "K-DLC published claim sidecar JSONL entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assertion_key", "assertion", "source_entry_id", "source_hash", "locator", "extraction", "disposition"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^clm[-_][A-Za-z0-9._-]+$"},
+    "assertion_key": {"type": "string", "pattern": "^[^#\\s]+#[A-Za-z][A-Za-z0-9._-]*$"},
+    "assertion": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+    "source_entry_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "source_record_id": {"type": "string", "pattern": "^src[-_][A-Za-z0-9._-]+$"},
+    "source_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "locator": {"type": "object", "minProperties": 1, "additionalProperties": true},
+    "extraction": {"enum": ["explicit", "inferred", "computed"]},
+    "disposition": {"enum": ["accepted", "rejected", "merged", "superseded", "conflict"]},
+    "rationale": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+  }
+}

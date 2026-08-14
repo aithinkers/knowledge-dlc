@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/review-packet.schema.json",
+  "title": "K-DLC review packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "proposal", "target", "concept", "diff", "review", "claims", "evidence", "sensors", "impact", "resolved", "provenance", "budget", "reviewer_actions", "approval_consequences"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/review-packet/v1alpha1"},
+    "proposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "workflow_id"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^pr_[a-z0-9]+$"},
+        "workflow_id": {"type": "string", "pattern": "^wf_[a-z0-9]+$"}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["knowledge_base_id", "revision", "subject"],
+      "properties": {
+        "knowledge_base_id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
+        "revision": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "subject": {"type": "string", "pattern": "^kb://[^/]+/.+$"}
+      }
+    },
+    "concept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+        "after": {"anyOf": [{"type": "object"}, {"type": "null"}]}
+      }
+    },
+    "diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["structural", "textual"],
+      "properties": {"structural": {"type": "array"}, "textual": {"type": "string"}}
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "projection", "fields"],
+      "properties": {
+        "hash": {"$ref": "../common.schema.json#/$defs/digest"},
+        "projection": {"const": "kdlc-review-1"},
+        "fields": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}}
+      }
+    },
+    "claims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "rejected", "merged", "conflicting"],
+      "properties": {
+        "accepted": {"type": "array", "items": {"$ref": "./claim.schema.json"}},
+        "rejected": {"type": "array", "items": {"$ref": "./claim.schema.json"}},
+        "merged": {"type": "array", "items": {"$ref": "./claim.schema.json"}},
+        "conflicting": {"type": "array", "items": {"$ref": "./claim.schema.json"}}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "source_hash", "access", "rights", "extraction_quality"],
+        "properties": {
+          "source_id": {"type": "string", "pattern": "^src_[a-z0-9]+$"},
+          "source_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+          "locator": {"type": "object"},
+          "excerpt": {"type": "string"},
+          "safe_link": {"$ref": "../common.schema.json#/$defs/resource"},
+          "authority": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "access": {"type": "object"},
+          "rights": {"type": "object"},
+          "extraction_quality": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "warnings": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "result"],
+        "properties": {
+          "id": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "severity": {"enum": ["info", "warning", "error"]},
+          "result": {"enum": ["passed", "failed", "waived"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "impact": {
+      "type": "object",
+      "required": ["links", "dependents", "freshness_change", "unresolved_conflicts"],
+      "properties": {
+        "links": {"type": "array"},
+        "dependents": {"type": "array"},
+        "freshness_change": {},
+        "unresolved_conflicts": {"type": "array"}
+      },
+      "additionalProperties": true
+    },
+    "resolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "policies", "dependencies"],
+      "properties": {
+        "profile": {"$ref": "../common.schema.json#/$defs/versionedHash"},
+        "policies": {"type": "array", "items": {"$ref": "../common.schema.json#/$defs/versionedHash"}},
+        "dependencies": {"type": "object", "additionalProperties": {"type": "object", "required": ["version", "tree_hash"], "additionalProperties": false, "properties": {"version": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}, "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"}}}}
+      }
+    },
+    "provenance": {"type": "object", "required": ["models", "tools"], "additionalProperties": false, "properties": {"models": {"type": "array"}, "tools": {"type": "array"}}},
+    "budget": {"type": "object", "required": ["model_tokens", "model_cost_usd"], "additionalProperties": false, "properties": {"model_tokens": {"type": "integer", "minimum": 0}, "model_cost_usd": {"type": "number", "minimum": 0}}},
+    "reviewer_actions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["approve", "reject", "request-changes"]}},
+    "approval_consequences": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+  }
+}
