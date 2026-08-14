@@ -86,13 +86,14 @@ export class SensorRunner {
           && typeof candidate.expires_at === "string"
           && Number.isFinite(Date.parse(candidate.expires_at))
           && Date.parse(candidate.expires_at) > this.clock.millis());
-        if (waiver) {
+        if (waiver && typeof this.audit?.append === "function") {
+          await this.audit.append(context.workflow_id, {
+            actor: waiver.authority, stage: context.stage, action: "sensor.waived", subject: id,
+            result: "waived", reason: waiver.reason, waiver_id: waiver.id, policy_version: context.policy_version,
+            idempotency_key: `sensor-waiver:${context.workflow_id}:${context.stage}:${id}:${waiver.id}`
+          });
           result.waiver = { id: waiver.id, authority: waiver.authority, reason: waiver.reason, expires_at: waiver.expires_at };
           result.blocks = false;
-          if (this.audit) await this.audit.append(context.workflow_id, {
-            actor: waiver.authority, stage: context.stage, action: "sensor.waived", subject: id,
-            result: "waived", reason: waiver.reason, waiver_id: waiver.id, policy_version: context.policy_version
-          });
         }
       }
       results.push(result);

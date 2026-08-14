@@ -21,6 +21,16 @@
     "agent": {"type": "object"}, "model": {"type": ["object", "null"]},
     "sensors": {"type": "array"}, "approval_receipts": {"type": "array", "items": {"type": "string"}},
     "deterministic": {"type": "boolean"}, "completed_at": {"type": "string", "format": "date-time"},
+    "audit_pending": {
+      "type": "object",
+      "required": ["actor", "action", "result", "idempotency_key"],
+      "properties": {
+        "project": {"type": "string"}, "stage": {"type": "string"}, "actor": {"type": "string"},
+        "action": {"const": "stage.completed"}, "input_hash": {"type": "string"},
+        "result": {"const": "completed"}, "idempotency_key": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
     "invalidated_at": {"type": "string", "format": "date-time"}, "invalidation_reason": {"type": "string"}
   },
   "additionalProperties": false

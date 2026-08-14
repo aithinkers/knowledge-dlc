@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createContractValidator } from "../../packages/contracts/index.mjs";
 import { fromNativeError, SensorRunner, StageGraph, WorkflowEngine } from "../../packages/lifecycle/src/index.mjs";
 
 class MemoryStore {
@@ -9,6 +10,7 @@ class MemoryStore {
   async exists(path) { return this.values.has(path); }
   async readJson(path) { return structuredClone(this.values.get(path)); }
   async writeJsonAtomic(path, value) { this.values.set(path, structuredClone(value)); }
+  async remove(path) { this.values.delete(path); }
   async withMutex(path, _options, action) {
     const prior = this.mutexes.get(path) ?? Promise.resolve();
     let release;
@@ -34,7 +36,11 @@ class IDs {
 
 class Audit {
   events = [];
-  async append(workflowId, event) { this.events.push({ workflowId, ...structuredClone(event) }); }
+  async append(workflowId, event) {
+    const existing = event.idempotency_key && this.events.find((candidate) => candidate.idempotency_key === event.idempotency_key);
+    if (existing) return existing;
+    const record = { workflowId, ...structuredClone(event) }; this.events.push(record); return record;
+  }
 }
 
 class FlakyAudit extends Audit {
@@ -42,6 +48,15 @@ class FlakyAudit extends Audit {
   async append(workflowId, event) {
     if (this.failures > 0) { this.failures -= 1; throw new Error("audit unavailable"); }
     return super.append(workflowId, event);
+  }
+}
+
+class AfterAppendAudit extends Audit {
+  failures = 0;
+  async append(workflowId, event) {
+    const result = await super.append(workflowId, event);
+    if (this.failures > 0) { this.failures -= 1; throw new Error("crash after audit append"); }
+    return result;
   }
 }
 
@@ -146,6 +161,19 @@ test("FEAT-002 sensors preserve trusted identity and fail closed for failed and 
   assert.equal((await governed.run(["governed"], context, waiver("security"))).allowed, true);
   assert.equal(audit.events.some(({ action, actor }) => action === "sensor.waived" && actor === "security"), true);
 
+  const noAudit = new SensorRunner({
+    clock, waiverAuthorities: ["security"],
+    sensors: [{ id: "governed", version: 1, blocking: true, evaluate: async () => ({ status: "failed" }) }]
+  });
+  assert.equal((await noAudit.run(["governed"], context, waiver("security"))).allowed, false);
+
+  const unavailableAudit = new FlakyAudit(); unavailableAudit.failures = 1;
+  const auditRequired = new SensorRunner({
+    clock, audit: unavailableAudit, waiverAuthorities: ["security"],
+    sensors: [{ id: "governed", version: 1, blocking: true, evaluate: async () => ({ status: "failed" }) }]
+  });
+  await assert.rejects(auditRequired.run(["governed"], context, waiver("security")), /audit unavailable/);
+
   const errorRunner = new SensorRunner({ clock, audit, sensors: [{ id: "broken", version: 1, blocking: true, evaluate: async () => ({ status: "error" }) }] });
   const errorReport = await errorRunner.run(["broken"], context, [{ id: "w", sensor_id: "broken", scope: "kb:a", authority: "admin", reason: "ignore", expires_at: "2099-01-01T00:00:00Z" }]);
   assert.equal(errorReport.allowed, false);
@@ -192,6 +220,57 @@ test("FEAT-002 deterministic checkpoint reuse binds every execution-context hash
   assert.equal(upgraded.attempt_history.length, 2);
 });
 
+test("FEAT-002 stage checkpoints are never reusable until their durable audit recovers", async () => {
+  const f = fixture(); const audit = new AfterAppendAudit();
+  const engine = new WorkflowEngine({ ...f, audit, graph: f.graph });
+  const contracts = await createContractValidator(); const completion = baseCompletion();
+  audit.failures = 1;
+  await assert.rejects(engine.completeStage("wf", "normalize", completion), (error) => error.code === "KDLC_AUDIT_PENDING");
+  const path = "workflow/runs/wf/checkpoints/normalize.json";
+  const pending = await f.store.readJson(path);
+  assert.equal(pending.audit_pending.action, "stage.completed");
+  assert.equal(contracts.validate("lifecycleCheckpoint", pending).valid, true);
+  assert.equal(audit.events.filter(({ action }) => action === "stage.completed").length, 1);
+
+  audit.failures = 1;
+  await assert.rejects(engine.completeStage("wf", "normalize", completion), (error) => error.code === "KDLC_AUDIT_PENDING");
+  assert.equal((await f.store.readJson(path)).audit_pending.action, "stage.completed");
+
+  const recovered = await engine.completeStage("wf", "normalize", completion);
+  assert.equal(recovered.audit_pending, undefined);
+  assert.equal(contracts.validate("lifecycleCheckpoint", recovered).valid, true);
+  assert.equal(audit.events.filter(({ action }) => action === "stage.completed").length, 1);
+});
+
+test("FEAT-002 completion context is rejected before persistence unless checkpoint-schema safe", async () => {
+  const cases = [
+    ["project_id", "../escape"],
+    ["project_hash", 7],
+    ["dependency_hashes", { dependency: 7 }],
+    ["dependency_versions", []],
+    ["policy_hashes", [7]],
+    ["policy_versions", {}],
+    ["profile_hashes", [""]],
+    ["profile_versions", "profile"],
+    ["tool_hashes", { parser: false }],
+    ["tool_versions", []],
+    ["settings_hash", 42],
+    ["model", "model"],
+    ["sensors", {}],
+    ["approval_receipts", [7]],
+    ["attempt_id", "../attempt"]
+  ];
+  for (const [field, value] of cases) {
+    const f = fixture(); const completion = { ...baseCompletion(), [field]: value };
+    await assert.rejects(f.engine.completeStage("wf", "normalize", completion), (error) => error.code === "KDLC_INPUT_INVALID", field);
+    assert.equal(await f.store.exists("workflow/runs/wf/checkpoints/normalize.json"), false, field);
+  }
+
+  const f = fixture(); const nonJson = baseCompletion(); nonJson.input_hashes = { source: undefined };
+  await assert.rejects(f.engine.completeStage("wf", "normalize", nonJson), (error) => error.code === "KDLC_INPUT_INVALID");
+  assert.equal(await f.store.exists("workflow/runs/wf/checkpoints/normalize.json"), false);
+});
+
 test("FEAT-002 workflow revision CAS is coordinated across engine instances", async () => {
   const f = fixture(); const other = new WorkflowEngine({ ...f, graph: f.graph });
   const workflow = await f.engine.create({ projectId: "project", workflowId: "wf_cross_instance" });
@@ -221,6 +300,23 @@ test("FEAT-002 workflow mutations recover durable pending audit events", async (
   await assert.rejects(engine.transition("wf_audit", "cancelled", 0), (error) => error.code === "KDLC_HASH_CONFLICT");
   assert.equal((await engine.get("wf_audit")).audit_pending, undefined);
   assert.deepEqual(audit.events.map(({ action }) => action), ["workflow.created", "workflow.running"]);
+});
+
+test("FEAT-002 resume invalidations recover from the durable audit outbox", async () => {
+  const f = fixture(); await f.engine.completeStage("wf", "normalize", baseCompletion());
+  const audit = new AfterAppendAudit(); const engine = new WorkflowEngine({ ...f, audit, graph: f.graph });
+  audit.failures = 1;
+  const changed = currentInputs(); changed.input_hashes.source = "sha256:changed";
+  await assert.rejects(engine.resume("wf", { normalize: changed }), (error) => error.code === "KDLC_AUDIT_PENDING");
+  assert.equal(await f.store.exists("workflow/runs/wf/resume-audit.json"), true);
+  assert.equal((await f.store.readJson("workflow/runs/wf/checkpoints/normalize.json")).invalidated_at !== undefined, true);
+
+  const recovered = await engine.resume("wf", { normalize: changed });
+  assert.deepEqual(recovered.invalidated, ["normalize"]);
+  assert.equal(await f.store.exists("workflow/runs/wf/resume-audit.json"), false);
+  assert.equal(audit.events.filter(({ action }) => action === "workflow.resumed").length, 1);
+  const contracts = await createContractValidator();
+  assert.equal(contracts.validate("lifecycleCheckpoint", await f.store.readJson("workflow/runs/wf/checkpoints/normalize.json")).valid, true);
 });
 
 test("FEAT-002 resume invalidates on every context drift and missing current input", async () => {

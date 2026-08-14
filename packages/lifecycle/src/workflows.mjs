@@ -11,6 +11,54 @@ const transitions = {
 const missing = Object.freeze({ missing: true });
 
 function isRecord(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
+function assertJson(value, label) {
+  try { canonicalJson(value); }
+  catch { throw invalid(`${label} must be canonical JSON data`); }
+  return value;
+}
+function assertString(value, label, { nullable = false } = {}) {
+  if (nullable && value === null) return value;
+  if (typeof value !== "string" || value.length === 0) throw invalid(`${label} must be a non-empty string${nullable ? " or null" : ""}`);
+  return value;
+}
+function assertStringArray(value, label) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.length === 0)) throw invalid(`${label} must be an array of non-empty strings`);
+  assertJson(value, label);
+  return value;
+}
+function assertStringRecord(value, label) {
+  if (!isRecord(value) || Object.values(value).some((item) => typeof item !== "string" || item.length === 0)) throw invalid(`${label} must be an object of non-empty strings`);
+  assertJson(value, label);
+  return value;
+}
+function validateCompletion(stageName, completion) {
+  if (!isRecord(completion) || !isRecord(completion.input_hashes) || !isRecord(completion.output_hashes)) {
+    throw invalid(`Stage ${stageName} completion requires input_hashes and output_hashes objects`);
+  }
+  assertJson(completion.input_hashes, `Stage ${stageName} input_hashes`);
+  assertJson(completion.output_hashes, `Stage ${stageName} output_hashes`);
+  assertIdentifier(completion.project_id, "project ID");
+  if (completion.project_hash === undefined && completion.project_version === undefined) throw invalid(`Stage ${stageName} completion requires project context`);
+  if (completion.project_hash !== undefined) assertString(completion.project_hash, `Stage ${stageName} project_hash`);
+  if (completion.project_version !== undefined) assertString(completion.project_version, `Stage ${stageName} project_version`);
+  for (const field of ["dependency_hashes", "dependency_versions", "tool_hashes", "tool_versions"]) {
+    if (completion[field] !== undefined) assertStringRecord(completion[field], `Stage ${stageName} ${field}`);
+  }
+  for (const field of ["policy_hashes", "policy_versions", "profile_hashes", "profile_versions"]) {
+    if (completion[field] !== undefined) assertStringArray(completion[field], `Stage ${stageName} ${field}`);
+  }
+  if (completion.settings_hash !== undefined) assertString(completion.settings_hash, `Stage ${stageName} settings_hash`, { nullable: true });
+  if (!isRecord(completion.agent)) throw invalid(`Stage ${stageName} completion requires an agent identity`);
+  assertString(completion.agent.id, `Stage ${stageName} agent.id`); assertJson(completion.agent, `Stage ${stageName} agent`);
+  if (completion.model !== undefined && completion.model !== null && !isRecord(completion.model)) throw invalid(`Stage ${stageName} model must be an object or null`);
+  if (completion.model !== undefined) assertJson(completion.model, `Stage ${stageName} model`);
+  if (completion.sensors !== undefined) {
+    if (!Array.isArray(completion.sensors)) throw invalid(`Stage ${stageName} sensors must be an array`);
+    assertJson(completion.sensors, `Stage ${stageName} sensors`);
+  }
+  if (completion.approval_receipts !== undefined) assertStringArray(completion.approval_receipts, `Stage ${stageName} approval_receipts`);
+  if (completion.attempt_id !== undefined) assertIdentifier(completion.attempt_id, "attempt ID");
+}
 function sameJson(left, right) {
   try { return canonicalJson(left) === canonicalJson(right); }
   catch { return false; }
@@ -86,7 +134,7 @@ function changedFingerprintFields(expected, current) {
 }
 
 function historicalAttempt(checkpoint, supersededAt, supersededBy) {
-  const { attempt_history: ignoredHistory, ...attempt } = checkpoint;
+  const { attempt_history: ignoredHistory, audit_pending: ignoredAudit, ...attempt } = checkpoint;
   return { ...attempt, superseded_at: supersededAt, superseded_by: supersededBy };
 }
 
@@ -112,6 +160,46 @@ export class WorkflowEngine {
     delete updated.audit_pending;
     await this.store.writeJsonAtomic(this.path(state.workflow_id), updated);
     return updated;
+  }
+
+  #resumeAuditPath(id) { return `workflow/runs/${assertIdentifier(id, "workflow ID")}/resume-audit.json`; }
+
+  async #flushCheckpointAudit(id, path, checkpoint) {
+    if (!checkpoint.audit_pending) return checkpoint;
+    await this.audit.append(id, checkpoint.audit_pending);
+    const updated = { ...checkpoint };
+    delete updated.audit_pending;
+    await this.store.writeJsonAtomic(path, updated);
+    return updated;
+  }
+
+  async #readAuditedCheckpoint(id, path) {
+    if (!(await this.store.exists(path))) return null;
+    const checkpoint = await this.store.readJson(path);
+    if (!checkpoint.audit_pending) return checkpoint;
+    try { return await this.#flushCheckpointAudit(id, path, checkpoint); }
+    catch { throw new LifecycleError("KDLC_AUDIT_PENDING", "audit-failure", "Stage checkpoint audit is pending", { retryable: true, details: { workflow_id: id, stage: checkpoint.stage, attempt_id: checkpoint.attempt_id } }); }
+  }
+
+  async #recoverResumeAudit(id) {
+    const path = this.#resumeAuditPath(id);
+    if (!(await this.store.exists(path))) return null;
+    const outbox = await this.store.readJson(path);
+    if (outbox?.version !== 1 || outbox.workflow_id !== id || !Array.isArray(outbox.mutations) || !Array.isArray(outbox.invalidated) || !isRecord(outbox.event)) {
+      throw invalid("Resume audit outbox is invalid");
+    }
+    try {
+      for (const mutation of outbox.mutations) {
+        if (!isRecord(mutation) || typeof mutation.path !== "string" || !isRecord(mutation.checkpoint)) throw invalid("Resume audit mutation is invalid");
+        await this.store.writeJsonAtomic(mutation.path, mutation.checkpoint);
+      }
+      await this.audit.append(id, outbox.event);
+      await this.store.remove(path);
+      return { invalidated: outbox.invalidated };
+    } catch (error) {
+      if (error instanceof LifecycleError && error.code === "KDLC_INPUT_INVALID") throw error;
+      throw new LifecycleError("KDLC_AUDIT_PENDING", "audit-failure", "Workflow resume audit is pending", { retryable: true, details: { workflow_id: id } });
+    }
   }
 
   async create({ projectId, workflowId = this.ids.next("wf") }) {
@@ -153,14 +241,10 @@ export class WorkflowEngine {
 
   async #completeStage(id, stageName, completion) {
     const stage = this.graph.get(stageName);
-    if (!isRecord(completion) || !isRecord(completion.input_hashes) || !isRecord(completion.output_hashes)) {
-      throw invalid(`Stage ${stageName} completion requires input_hashes and output_hashes objects`);
-    }
-    if (typeof (completion.project_hash ?? completion.project_version) !== "string" || !isRecord(completion.agent) || typeof completion.agent.id !== "string") {
-      throw invalid(`Stage ${stageName} completion requires project context and an agent identity`);
-    }
+    validateCompletion(stageName, completion);
+    await this.#recoverResumeAudit(id);
     const path = this.checkpointPath(id, stage.name);
-    const existing = await this.store.exists(path) ? await this.store.readJson(path) : null;
+    const existing = await this.#readAuditedCheckpoint(id, path);
     const fingerprint = completionFingerprint(stage, completion);
     const reusable = stage.deterministic !== false && existing && !existing.invalidated_at
       && sameJson(checkpointFingerprint(existing), fingerprint);
@@ -206,11 +290,20 @@ export class WorkflowEngine {
       sensors: completion.sensors ?? [],
       approval_receipts: completion.approval_receipts ?? [],
       deterministic: stage.deterministic !== false,
-      completed_at: now
+      completed_at: now,
+      audit_pending: {
+        project: completion.project_id,
+        stage: stage.name,
+        actor: completion.agent.id,
+        action: "stage.completed",
+        input_hash: canonicalJson(completion.input_hashes),
+        result: "completed",
+        idempotency_key: `stage:${id}:${stage.name}:${attemptId}:completed`
+      }
     };
     await this.store.writeJsonAtomic(path, checkpoint);
-    await this.audit.append(id, { project: completion.project_id, stage: stage.name, actor: completion.agent?.id ?? "process:kdlc-engine", action: "stage.completed", input_hash: canonicalJson(completion.input_hashes), result: "completed" });
-    return checkpoint;
+    try { return await this.#flushCheckpointAudit(id, path, checkpoint); }
+    catch { throw new LifecycleError("KDLC_AUDIT_PENDING", "audit-failure", "Stage checkpoint audit is pending", { retryable: true, details: { workflow_id: id, stage: stage.name, attempt_id: attemptId } }); }
   }
 
   async resume(id, currentInputs) {
@@ -219,22 +312,50 @@ export class WorkflowEngine {
 
   async #resume(id, currentInputs) {
     if (!isRecord(currentInputs)) throw invalid("Resume requires current stage inputs");
+    const recovered = await this.#recoverResumeAudit(id);
+    if (recovered) return recovered;
+    assertJson(currentInputs, "Resume current stage inputs");
+    const checkpoints = new Map();
+    for (const stageName of this.graph.order) {
+      const path = this.checkpointPath(id, stageName);
+      const checkpoint = await this.#readAuditedCheckpoint(id, path);
+      if (checkpoint) checkpoints.set(stageName, checkpoint);
+    }
     const invalidated = [];
     for (const stageName of this.graph.order) {
-      const path = this.checkpointPath(id, stageName); if (!(await this.store.exists(path))) continue;
-      const checkpoint = await this.store.readJson(path); if (checkpoint.invalidated_at) continue;
+      const checkpoint = checkpoints.get(stageName); if (!checkpoint || checkpoint.invalidated_at) continue;
       const stage = this.graph.get(stageName);
       const changed = changedFingerprintFields(checkpointFingerprint(checkpoint), currentFingerprint(stage, currentInputs[stageName]));
       if (changed.length === 0) continue;
       for (const affected of this.graph.dependentsOf(stageName)) {
-        const affectedPath = this.checkpointPath(id, affected); if (!(await this.store.exists(affectedPath))) continue;
-        const target = await this.store.readJson(affectedPath); if (target.invalidated_at) continue;
-        target.invalidated_at = this.clock.now();
-        target.invalidation_reason = `checkpoint drift at ${stageName}: ${changed.join(", ")}`;
-        await this.store.writeJsonAtomic(affectedPath, target); invalidated.push(affected);
+        const target = checkpoints.get(affected); if (!target || target.invalidated_at) continue;
+        const updated = {
+          ...target,
+          invalidated_at: this.clock.now(),
+          invalidation_reason: `checkpoint drift at ${stageName}: ${changed.join(", ")}`
+        };
+        checkpoints.set(affected, updated); invalidated.push(affected);
       }
     }
-    await this.audit.append(id, { actor: "process:kdlc-engine", action: "workflow.resumed", result: invalidated.length ? "invalidated" : "unchanged" });
-    return { invalidated: [...new Set(invalidated)] };
+    const uniqueInvalidated = [...new Set(invalidated)];
+    const resumeAttempt = this.ids.next("resume");
+    const outbox = {
+      version: 1,
+      workflow_id: id,
+      invalidated: uniqueInvalidated,
+      mutations: uniqueInvalidated.map((stageName) => ({
+        path: this.checkpointPath(id, stageName),
+        checkpoint: checkpoints.get(stageName)
+      })),
+      event: {
+        actor: "process:kdlc-engine",
+        action: "workflow.resumed",
+        result: uniqueInvalidated.length ? "invalidated" : "unchanged",
+        invalidated: uniqueInvalidated,
+        idempotency_key: `workflow:${id}:resume:${resumeAttempt}`
+      }
+    };
+    await this.store.writeJsonAtomic(this.#resumeAuditPath(id), outbox);
+    return this.#recoverResumeAudit(id);
   }
 }
