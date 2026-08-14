@@ -1,0 +1,44 @@
+name: Requirement or governance change
+description: Propose a normative requirement, control, or process change.
+title: "REQ-AREA-NNN: "
+labels: ["requirement", "governance"]
+body:
+  - type: input
+    id: requirement_id
+    attributes:
+      label: Requirement ID
+      placeholder: REQ-GOV-002
+    validations:
+      required: true
+  - type: textarea
+    id: statement
+    attributes:
+      label: Normative statement
+      description: Use MUST/SHOULD/MAY deliberately and define the observable outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale and threat/failure model
+    validations:
+      required: true
+  - type: textarea
+    id: trace
+    attributes:
+      label: Specification trace
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance and verification criteria
+      placeholder: "- [ ] Deterministic test ..."
+    validations:
+      required: true
+  - type: textarea
+    id: migration
+    attributes:
+      label: Compatibility, migration, and rollback
+    validations:
+      required: true

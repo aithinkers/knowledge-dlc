@@ -1,0 +1,60 @@
+name: Feature
+description: Define a traceable K-DLC capability before implementation.
+title: "FEAT-NNN: "
+labels: ["feature", "requirement"]
+body:
+  - type: markdown
+    attributes:
+      value: Implementation must not begin until the requirement and acceptance criteria are reviewable.
+  - type: input
+    id: requirement_id
+    attributes:
+      label: Traceability ID
+      description: Use FEAT-NNN or an existing REQ-AREA-NNN identifier.
+      placeholder: FEAT-008
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Required outcome
+      description: Describe observable behavior, not an implementation preference.
+    validations:
+      required: true
+  - type: textarea
+    id: specification
+    attributes:
+      label: Specification trace
+      description: List exact K-DLC specification sections and any pinned normative references.
+      placeholder: "- §14.2 Stable publication requirements"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: "- [ ] Given ..., when ..., then ..."
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security, privacy, rights, and retention
+      description: State affected trust boundaries and required negative tests. Write None only with rationale.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and decisions
+      description: Link blocking issues, ADRs, policies, schemas, or upstream versions.
+    validations:
+      required: true
+  - type: dropdown
+    id: conformance
+    attributes:
+      label: Conformance module
+      multiple: true
+      options: [Core, Lifecycle, Governed, Federated, Served, Development-only]
+    validations:
+      required: true

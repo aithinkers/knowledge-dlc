@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/development-traceability-v1.json",
+  "title": "K-DLC development traceability index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "specification", "requirements"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "version": {"const": 1},
+    "specification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "status"],
+      "properties": {
+        "name": {"const": "K-DLC"},
+        "version": {"type": "string"},
+        "status": {"type": "string"}
+      }
+    },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "issue", "specification_sections", "status", "evidence"],
+        "properties": {
+          "id": {"pattern": "^(REQ-[A-Z]+-[0-9]{3}|FEAT-[0-9]{3}|ADR-[0-9]{3}|REL-[0-9]{3})$"},
+          "title": {"type": "string", "minLength": 1},
+          "issue": {"type": "integer", "minimum": 1},
+          "specification_sections": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "status": {"enum": ["planned", "in-progress", "blocked", "implemented", "verified", "released"]},
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["implementation", "tests"],
+            "properties": {
+              "implementation": {"type": "array", "items": {"type": "string"}},
+              "tests": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}
