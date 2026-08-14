@@ -56,6 +56,15 @@ when practical.
 One person or agent may perform multiple roles during early development, but
 the pull-request approval required by branch protection must be independent.
 
+### Audited owner bypass
+
+GitHub ruleset `K-DLC main protection` grants the one-member `k-dlc-bypass`
+team, currently `shasti421`, a pull-request-only bypass. A bypass is never
+represented as self-approval. It may be used only when required checks pass, an
+independent read-only agent review is attached to the pull request, no critical
+or high finding remains unresolved, and the bypass reason is recorded in the
+issue or pull request. Direct pushes to `main` remain prohibited.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.

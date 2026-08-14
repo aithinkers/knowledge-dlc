@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import process from "node:process";
+
+import { validateEvidencePaths, validateJsonFile } from "./governance-validation.mjs";
 
 const requiredFiles = [
   "AGENTS.md",
@@ -37,9 +39,14 @@ for (const file of requiredFiles) {
 
 let agentWorkflow;
 try {
-  agentWorkflow = JSON.parse(await readFile("development/agent-workflow.json", "utf8"));
+  const result = await validateJsonFile(
+    "development/agent-workflow.json",
+    "development/agent-workflow.schema.json"
+  );
+  agentWorkflow = result.document;
+  failures.push(...result.failures.map((failure) => `agent workflow schema: ${failure}`));
 } catch (error) {
-  failures.push(`agent workflow is not valid JSON: ${error.message}`);
+  failures.push(`agent workflow validation failed: ${error.message}`);
 }
 
 if (agentWorkflow) {
@@ -57,9 +64,12 @@ if (agentWorkflow) {
 
 let traceability;
 try {
-  traceability = JSON.parse(await readFile("docs/traceability.json", "utf8"));
+  const result = await validateJsonFile("docs/traceability.json", "docs/traceability.schema.json");
+  traceability = result.document;
+  failures.push(...result.failures.map((failure) => `traceability schema: ${failure}`));
+  failures.push(...await validateEvidencePaths(traceability));
 } catch (error) {
-  failures.push(`traceability index is not valid JSON: ${error.message}`);
+  failures.push(`traceability validation failed: ${error.message}`);
 }
 
 if (traceability) {

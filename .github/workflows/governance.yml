@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
   pull-requests: read
 
 jobs:
@@ -19,8 +20,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - run: node scripts/verify-governance.mjs
-      - run: node --test tests/governance/*.test.mjs
+      - run: npm ci
+      - run: npm test
 
   pull-request-traceability:
     name: Pull request traceability
@@ -30,9 +31,15 @@ jobs:
       KDLC_PR_TITLE: ${{ github.event.pull_request.title }}
       KDLC_PR_BODY: ${{ github.event.pull_request.body }}
       KDLC_PR_HEAD: ${{ github.event.pull_request.head.ref }}
+      KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      KDLC_REPOSITORY: ${{ github.repository }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      - run: npm ci
       - run: node scripts/verify-pr-traceability.mjs

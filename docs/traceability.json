@@ -12,9 +12,20 @@
       "title": "Enforce issue-to-release traceability and agent development workflow",
       "issue": 1,
       "specification_sections": ["5.2", "28", "29", "35"],
-      "status": "in-progress",
+      "status": "verified",
       "evidence": {
         "implementation": ["AGENTS.md", ".github", "development/agent-workflow.json", "scripts/verify-governance.mjs"],
+        "tests": ["tests/governance/governance.test.mjs"]
+      }
+    },
+    {
+      "id": "REQ-GOV-002",
+      "title": "Enforce relationship-aware development traceability",
+      "issue": 14,
+      "specification_sections": ["5.2", "28", "29", "35"],
+      "status": "in-progress",
+      "evidence": {
+        "implementation": ["AGENTS.md", ".github/workflows/governance.yml", "scripts/governance-validation.mjs", "scripts/verify-governance.mjs", "scripts/verify-pr-traceability.mjs"],
         "tests": ["tests/governance/governance.test.mjs"]
       }
     },

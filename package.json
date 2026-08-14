@@ -1,0 +1,18 @@
+{
+  "name": "knowledge-dlc",
+  "version": "0.0.0-private",
+  "private": true,
+  "description": "K-DLC development and governance tooling",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check:governance": "node scripts/verify-governance.mjs",
+    "test:governance": "node --test tests/governance/*.test.mjs",
+    "test": "npm run check:governance && npm run test:governance"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0"
+  }
+}
