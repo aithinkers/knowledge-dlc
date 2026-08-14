@@ -23,7 +23,7 @@
       "title": "Enforce relationship-aware development traceability",
       "issue": 14,
       "specification_sections": ["5.2", "28", "29", "35"],
-      "status": "in-progress",
+      "status": "verified",
       "evidence": {
         "implementation": ["AGENTS.md", ".github/workflows/candidate-tests.yml", ".github/workflows/governance.yml", "scripts/governance-validation.mjs", "scripts/verify-governance.mjs", "scripts/verify-pr-traceability.mjs"],
         "tests": ["tests/governance/governance.test.mjs"]

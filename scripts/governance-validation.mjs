@@ -92,7 +92,7 @@ export async function validateHarnessIntegrity(candidateRoot, trustedRoot) {
     for (const entry of await readdir(workflowDirectory, { withFileTypes: true })) {
       if (!entry.isFile() || entry.name === "candidate-tests.yml") continue;
       const content = await readFile(resolve(workflowDirectory, entry.name), "utf8");
-      if (/^\s*name:\s*Candidate tests\s*$/m.test(content)) {
+      if (/^\s*name:\s*(['"]?)Candidate tests\1\s*$/m.test(content)) {
         failures.push(`reserved check name "Candidate tests" appears in another workflow: ${entry.name}`);
       }
     }

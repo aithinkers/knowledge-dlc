@@ -178,7 +178,7 @@ test("REQ-GOV-002 rejects no-op or duplicate candidate-test controls", async () 
     }
     await writeFile(join(trusted, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\n");
     await writeFile(join(candidate, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\njobs: {}\n");
-    await writeFile(join(candidate, ".github/workflows/spoof.yml"), "name: Candidate tests\n");
+    await writeFile(join(candidate, ".github/workflows/spoof.yml"), 'name: "Candidate tests"\n');
     await writeFile(join(trusted, "package.json"), JSON.stringify({ scripts: { test: "npm run test:governance", "check:governance": "node check", "test:governance": "node test" } }));
     await writeFile(join(candidate, "package.json"), JSON.stringify({ scripts: { test: "true", "check:governance": "node check", "test:governance": "node test" } }));
 
