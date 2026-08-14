@@ -1,0 +1,39 @@
+name: Security hardening (non-vulnerability)
+description: Track a public-safe security control without exploit or private details.
+title: "REQ-SEC-NNN: "
+labels: ["security", "requirement"]
+body:
+  - type: markdown
+    attributes:
+      value: Do not use this form for vulnerabilities. Use the private security advisory link instead.
+  - type: input
+    id: requirement_id
+    attributes:
+      label: Requirement ID
+      placeholder: REQ-SEC-001
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Trust boundary and required control
+    validations:
+      required: true
+  - type: textarea
+    id: abuse
+    attributes:
+      label: Abuse and failure cases
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Positive and negative acceptance tests
+    validations:
+      required: true
+  - type: textarea
+    id: trace
+    attributes:
+      label: Specification trace and dependencies
+    validations:
+      required: true

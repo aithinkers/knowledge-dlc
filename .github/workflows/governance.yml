@@ -1,0 +1,38 @@
+name: Governance
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  repository-policy:
+    name: Repository policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: node scripts/verify-governance.mjs
+      - run: node --test tests/governance/*.test.mjs
+
+  pull-request-traceability:
+    name: Pull request traceability
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    env:
+      KDLC_PR_TITLE: ${{ github.event.pull_request.title }}
+      KDLC_PR_BODY: ${{ github.event.pull_request.body }}
+      KDLC_PR_HEAD: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: node scripts/verify-pr-traceability.mjs

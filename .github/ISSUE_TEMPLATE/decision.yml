@@ -1,0 +1,42 @@
+name: Architectural decision
+description: Resolve an implementation choice without silently changing requirements.
+title: "ADR-NNN: "
+labels: ["decision", "requirement"]
+body:
+  - type: input
+    id: decision_id
+    attributes:
+      label: Decision ID
+      placeholder: ADR-002
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and decision drivers
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Viable options and tradeoffs
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommended decision
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences, validation, and reversal plan
+    validations:
+      required: true
+  - type: textarea
+    id: specification
+    attributes:
+      label: Specification and requirement trace
+    validations:
+      required: true

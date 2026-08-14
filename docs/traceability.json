@@ -1,0 +1,94 @@
+{
+  "$schema": "./traceability.schema.json",
+  "version": 1,
+  "specification": {
+    "name": "K-DLC",
+    "version": "0.2.0",
+    "status": "draft-for-implementation"
+  },
+  "requirements": [
+    {
+      "id": "REQ-GOV-001",
+      "title": "Enforce issue-to-release traceability and agent development workflow",
+      "issue": 1,
+      "specification_sections": ["5.2", "28", "29", "35"],
+      "status": "in-progress",
+      "evidence": {
+        "implementation": ["AGENTS.md", ".github", "development/agent-workflow.json", "scripts/verify-governance.mjs"],
+        "tests": ["tests/governance/governance.test.mjs"]
+      }
+    },
+    {
+      "id": "ADR-001",
+      "title": "Resolve foundational implementation choices",
+      "issue": 2,
+      "specification_sections": ["32.6", "38"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-001",
+      "title": "Portable artifacts and deterministic indexes",
+      "issue": 3,
+      "specification_sections": ["2.1", "9", "10", "11", "12", "13", "14", "26", "34", "35"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-002",
+      "title": "Deterministic lifecycle engine",
+      "issue": 4,
+      "specification_sections": ["15", "16", "17", "28", "29", "30", "34", "35"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-003",
+      "title": "Bounded document normalization",
+      "issue": 5,
+      "specification_sections": ["12", "27.1", "27.2", "34", "35"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-004",
+      "title": "Governed agent workflows",
+      "issue": 6,
+      "specification_sections": ["13", "14", "15", "16", "17", "21", "22", "23", "34", "35"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-005",
+      "title": "Federation and lexical retrieval",
+      "issue": 7,
+      "specification_sections": ["18", "19", "20", "21", "27.3", "34", "35"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-006",
+      "title": "CLI, harness adapters, and MCP distribution",
+      "issue": 8,
+      "specification_sections": ["9", "25", "32.6", "34", "35"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "FEAT-007",
+      "title": "Extension SDK and compatibility tooling",
+      "issue": 9,
+      "specification_sections": ["23", "24", "31", "34"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
+      "id": "REL-001",
+      "title": "Prepare reviewed private-to-public MVP release",
+      "issue": 10,
+      "specification_sections": ["33", "35", "36"],
+      "status": "planned",
+      "evidence": {"implementation": [], "tests": []}
+    }
+  ]
+}

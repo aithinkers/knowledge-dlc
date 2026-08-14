@@ -1,0 +1,42 @@
+{
+  "$schema": "./agent-workflow.schema.json",
+  "id": "kdlc-development-v1",
+  "version": 1,
+  "gates": [
+    {
+      "id": "feature-definition",
+      "role": "feature-author",
+      "requires": ["github-issue", "traceability-id", "specification-trace", "acceptance-criteria"],
+      "produces": ["reviewable-requirement"],
+      "approval": "issue-review"
+    },
+    {
+      "id": "plan-review",
+      "role": "planner",
+      "requires": ["reviewable-requirement", "dependency-analysis", "risk-analysis", "verification-plan"],
+      "produces": ["reviewed-plan"],
+      "approval": "required-for-architecture-policy-api-format-or-publication-change"
+    },
+    {
+      "id": "development",
+      "role": "developer",
+      "requires": ["reviewed-plan", "issue-branch", "current-traceability-index"],
+      "produces": ["implementation", "tests", "updated-traceability-index"],
+      "approval": "none"
+    },
+    {
+      "id": "testing",
+      "role": "tester",
+      "requires": ["implementation", "tests", "acceptance-criteria"],
+      "produces": ["deterministic-test-evidence", "failure-path-evidence"],
+      "approval": "all-required-checks-pass"
+    },
+    {
+      "id": "final-review",
+      "role": "reviewer",
+      "requires": ["diff", "deterministic-test-evidence", "failure-path-evidence", "updated-traceability-index"],
+      "produces": ["pull-request-review", "merge-or-change-request"],
+      "approval": "independent-owner-or-codeowner"
+    }
+  ]
+}

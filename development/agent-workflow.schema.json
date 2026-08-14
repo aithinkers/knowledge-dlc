@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/development-agent-workflow-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "gates"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "id": {"const": "kdlc-development-v1"},
+    "version": {"const": 1},
+    "gates": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "requires", "produces", "approval"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "minLength": 1},
+          "requires": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "produces": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "approval": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# Governance and security controls require explicit owner review.
+/.github/ @shasti421
+/AGENTS.md @shasti421
+/docs/traceability.json @shasti421
+/docs/traceability.schema.json @shasti421
+/SECURITY.md @shasti421
+
+# Default ownership until team-specific ownership is introduced.
+* @shasti421
