@@ -15,7 +15,7 @@ depends on issues #8, #23, or #24 remain outside this tranche.
 
 The second tranche adds strict machine-readable pre-release conformance and
 deterministic evaluation evidence under `distribution/release/`. The structural
-record binds eight offline cases to exact committed fixture bytes and reports
+record binds nine offline cases to exact committed fixture and executable-evidence bytes and reports
 zero live model or external network calls. It is intentionally not a final statistical
 quality report: the versioned multi-trial suite and confidence intervals remain
 release-blocking.

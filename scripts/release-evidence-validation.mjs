@@ -5,7 +5,9 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
 import { descriptors } from "../packages/normalizers/index.mjs";
+import { artifactHash } from "../packages/core/index.mjs";
 import { readTrustedFile } from "./supply-chain-validation.mjs";
+import { conformanceModules, mandatoryProfileRequirements, mandatoryReleaseCases } from "./release-evidence-definition.mjs";
 
 const files = Object.freeze({
   conformance: "distribution/release/conformance-statement.json",
@@ -55,9 +57,22 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
   if (report.run_hash !== digest(documentBytes.run)) failures.push("evaluation report does not bind the exact recorded run bytes");
 
   const caseIds = corpus.cases.map(({ id }) => id); const resultIds = run.results.map(({ case_id: id }) => id);
-  if (new Set(caseIds).size !== caseIds.length || !same([...caseIds].sort(), [...resultIds].sort())) failures.push("recorded results must cover every unique corpus case exactly once");
+  const mandatoryCaseIds = Object.keys(mandatoryReleaseCases);
+  if (new Set(caseIds).size !== caseIds.length || !same(caseIds, mandatoryCaseIds) || !same(resultIds, mandatoryCaseIds)) failures.push("corpus and run must preserve the exact mandatory release case set and order");
   if (new Set(resultIds).size !== resultIds.length) failures.push("recorded results contain duplicate case IDs");
-  for (const entry of corpus.cases) for (const fixture of entry.fixtures) {
+  if (!same(profile.mandatory_requirements, mandatoryProfileRequirements)) failures.push("evaluation profile mandatory requirements are incomplete or substituted");
+  for (const entry of corpus.cases) {
+    const mandatory = mandatoryReleaseCases[entry.id];
+    if (!mandatory || !same(entry.requirement_ids, mandatory.requirements) || entry.executable_evidence?.path !== mandatory.evidence || !same(entry.executable_evidence?.test_ids, mandatory.tests)) {
+      failures.push(`${entry.id}: immutable requirements or executable evidence were substituted`);
+    }
+    try {
+      const evidenceBytes = await bytes(root, entry.executable_evidence.path);
+      if (digest(evidenceBytes) !== entry.executable_evidence.sha256) failures.push(`${entry.id}: executable evidence hash drift`);
+    } catch (error) { failures.push(`${entry.id}: executable evidence is unavailable (${error.message})`); }
+    const result = run.results.find(({ case_id: id }) => id === entry.id);
+    if (!result || result.case_hash !== artifactHash(entry) || result.evidence_hash !== entry.executable_evidence.sha256) failures.push(`${entry.id}: recorded result does not exact-bind its corpus case and executable evidence`);
+    for (const fixture of entry.fixtures) {
     try {
       const fixtureBytes = await bytes(root, fixture.path);
       if (digest(fixtureBytes) !== fixture.sha256) failures.push(`${entry.id}: fixture hash drift: ${fixture.path}`);
@@ -66,9 +81,7 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
         if (recording.model?.provider !== "recorded") failures.push(`${entry.id}: release model fixture is not recorded-only`);
       }
     } catch (error) { failures.push(`${entry.id}: fixture is unavailable: ${fixture.path} (${error.message})`); }
-  }
-  for (const result of run.results) for (const evidence of result.evidence) {
-    try { await bytes(root, evidence); } catch (error) { failures.push(`${result.case_id}: evidence is unavailable: ${evidence} (${error.message})`); }
+    }
   }
 
   const passed = run.results.filter(({ status }) => status === "passed").length;
@@ -81,22 +94,27 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
   if (!same(report.summary, expectedSummary)) failures.push("evaluation report summary is not derived from the recorded results/profile");
   if (run.external_network_calls !== 0 || run.live_model_calls !== 0 || profile.mode !== "recorded-only") failures.push("release structural evidence must be recorded and externally offline");
 
-  const moduleNames = conformance.modules.map(({ name }) => name);
-  if (new Set(moduleNames).size !== 5) failures.push("conformance modules must be unique and complete");
+  const moduleNames = conformance.modules.map(({ name }) => name); const expectedModuleNames = Object.keys(conformanceModules);
+  if (!same(moduleNames, expectedModuleNames)) failures.push("conformance modules must preserve the exact implemented module set and order");
   const governed = conformance.modules.find(({ name }) => name === "Governed");
   if (governed?.status !== "implemented" || !governed.requirement_ids.includes("FEAT-009") || conformance.pending_requirements.some(({ id }) => id === "FEAT-009")) failures.push("Governed implementation must bind merged FEAT-009 evidence");
   if (!same([...Object.keys(descriptors)].sort(), [...conformance.format_profiles].sort())) failures.push("conformance format profiles differ from the shipped normalizer descriptors");
-  for (const module of conformance.modules) for (const path of module.evidence) {
-    try { await bytes(root, path); } catch (error) { failures.push(`${module.name}: conformance evidence is unavailable: ${path} (${error.message})`); }
+  for (const module of conformance.modules) {
+    const expected = conformanceModules[module.name];
+    if (!expected || module.status !== "implemented" || !same(module.requirement_ids, expected.requirements) || !same(module.evidence.map(({ path }) => path), expected.evidence)) failures.push(`${module.name}: conformance claim differs from its allowlisted trace/evidence definition`);
+    for (const item of module.evidence) {
+      try { if (digest(await bytes(root, item.path)) !== item.sha256) failures.push(`${module.name}: conformance evidence hash drift: ${item.path}`); }
+      catch (error) { failures.push(`${module.name}: conformance evidence is unavailable: ${item.path} (${error.message})`); }
+    }
   }
-  for (const path of conformance.evidence) {
-    try { await bytes(root, path); } catch (error) { failures.push(`conformance evidence is unavailable: ${path} (${error.message})`); }
+  for (const item of conformance.evidence) {
+    try { if (digest(await bytes(root, item.path)) !== item.sha256) failures.push(`conformance evidence hash drift: ${item.path}`); }
+    catch (error) { failures.push(`conformance evidence is unavailable: ${item.path} (${error.message})`); }
   }
 
   try {
     const advertised = await json(root, "distribution/conformance.json");
-    if (!same(advertised.tools, conformance.tools) || !same(advertised.transports, conformance.transports)) failures.push("release statement differs from generated tool/transport conformance");
-    if (advertised.modules.some((name) => !moduleNames.includes(name))) failures.push("generated distribution advertises an undeclared conformance module");
+    if (!same(advertised.tools, conformance.tools) || !same(advertised.transports, conformance.transports) || !same(advertised.modules, moduleNames) || !same(advertised.formats, conformance.format_profiles)) failures.push("release statement differs from exact generated distribution conformance");
   } catch (error) { failures.push(`generated distribution conformance is unavailable: ${error.message}`); }
   try {
     const manifest = await json(root, "package.json");
@@ -108,6 +126,11 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
     const erasure = traceability.requirements?.find(({ id }) => id === "FEAT-009");
     if (rel?.issue !== 10 || rel.status !== "in-progress") failures.push("REL-001 traceability must remain in-progress on issue #10");
     if (erasure?.issue !== 24 || !["implemented", "verified", "released"].includes(erasure.status) || !erasure.evidence?.tests?.includes("tests/governance/revocation-erasure.test.mjs")) failures.push("Governed conformance requires traceable merged FEAT-009 erasure evidence");
+    for (const module of conformance.modules) for (const id of module.requirement_ids) {
+      const traced = traceability.requirements?.find((entry) => entry.id === id);
+      const claimed = module.evidence.map(({ path }) => path).filter((path) => traced?.evidence?.tests?.includes(path));
+      if (!traced || !["implemented", "verified", "released"].includes(traced.status) || claimed.length === 0) failures.push(`${module.name}: ${id} is not implemented with exact traceable test evidence`);
+    }
   } catch (error) { failures.push(`traceability is unavailable: ${error.message}`); }
   return failures;
 }

@@ -1,20 +1,20 @@
 {
   "api_version": "kdlc.dev/recorded-release-run/v1alpha1",
   "id": "pre-release-recorded-1",
-  "corpus_hash": "sha256:bfc338d55679aaa48b78d0f8773eeca6b2e7b0bf2c1a2764bee0c17610e51454",
-  "profile_hash": "sha256:69982a5c19c58be5bc88dfb0266e0bac82bc2351297f65f23fc0e3a32d31aeae",
+  "corpus_hash": "sha256:1ca4a24dc25c6d8575cf522db206cc9dc30edde6e3d968c10363392dc30e6e46",
+  "profile_hash": "sha256:01233c51097888aa7edd0ae2fdb9a026851f95ff18aa65b5cc0da19d1f8d74be",
   "runtime": {"node": "24.5.0", "npm": "11.5.1"},
   "external_network_calls": 0,
   "live_model_calls": 0,
   "results": [
-    {"case_id": "recorded-ingest", "status": "passed", "observations": ["Recorded ingest fixtures validate and replay without a model provider."], "evidence": ["tests/governance/agent-workflows.test.mjs"]},
-    {"case_id": "governed-publication", "status": "passed", "observations": ["Approval and publication bind exact persisted review inputs and invalidate on drift."], "evidence": ["tests/governance/agent-workflows.test.mjs"]},
-    {"case_id": "adversarial-governance", "status": "passed", "observations": ["Recorded injection, falsehood, rights, and authority-spoofing cases fail closed."], "evidence": ["tests/governance/governed-controls.test.mjs"]},
-    {"case_id": "bounded-normalization", "status": "passed", "observations": ["Structural profiles remain bounded and unsafe inputs quarantine."], "evidence": ["tests/governance/normalization.test.mjs"]},
-    {"case_id": "federated-nondisclosure", "status": "passed", "observations": ["Pre-query authorization, integrity, conflict, and nondisclosure cases pass."], "evidence": ["tests/governance/federation-retrieval.test.mjs"]},
-    {"case_id": "durable-concurrency", "status": "passed", "observations": ["Cross-instance and crash boundaries preserve durable serialization."], "evidence": ["tests/governance/lifecycle-concurrency.test.mjs"]},
-    {"case_id": "transport-equivalence", "status": "passed", "observations": ["Recorded governed workflow semantics agree across shipped transports and adapters."], "evidence": ["tests/governance/distribution.test.mjs"]},
-    {"case_id": "clean-rebuild", "status": "passed", "observations": ["Clean deterministic index generation reproduces committed bytes."], "evidence": ["tests/governance/core-runtime.test.mjs"]},
-    {"case_id": "governed-revocation-erasure", "status": "passed", "observations": ["Merged FEAT-009 evidence covers exact impact, authorization, durable erasure, late-copy fencing, legal hold, crash recovery, and retrieval nondisclosure."], "evidence": ["tests/governance/revocation-erasure.test.mjs"]}
+    {"case_id": "recorded-ingest", "case_hash":"sha256:489df54c08e736c00068f174afb8fcbafeb5339ca5eaf9f61e12c1b445f9b30c", "status": "passed", "observations": ["Recorded ingest fixtures validate and replay without a model provider."], "evidence_hash":"sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee"},
+    {"case_id": "governed-publication", "case_hash":"sha256:213a8de00cc0a786d119612b6b184cae63a3c9c0a0211c818ded591ff6587805", "status": "passed", "observations": ["Approval and publication bind exact persisted review inputs and invalidate on drift."], "evidence_hash":"sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee"},
+    {"case_id": "adversarial-governance", "case_hash":"sha256:12179053f70d8f50ec0575cfde4c0324168ba60e564647c71f66ecc08f14945c", "status": "passed", "observations": ["Recorded injection, falsehood, rights, and authority-spoofing cases fail closed."], "evidence_hash":"sha256:6afd8731bb1883573e59ff08d74c2471b2608db687ed0e3a454cc7ea7f0c1f6c"},
+    {"case_id": "bounded-normalization", "case_hash":"sha256:50111f300e2d193e938ff29fe6a9e98f979da21358942e1505b925ac3031554a", "status": "passed", "observations": ["Structural profiles remain bounded and unsafe inputs quarantine."], "evidence_hash":"sha256:8c784c4f8d27f447c373af8e17665e7e7d67330203ee56e60f0387d752dc7230"},
+    {"case_id": "federated-nondisclosure", "case_hash":"sha256:50a57c13fbe85fa530ff7944fa8a5ecba8df4cb0b3158c9a14c81a8225a340e6", "status": "passed", "observations": ["Pre-query authorization, integrity, conflict, and nondisclosure cases pass."], "evidence_hash":"sha256:5116f7e5833fcec804720560c94fd301b640939c4c519bf01fad960686b1baf4"},
+    {"case_id": "durable-concurrency", "case_hash":"sha256:a60788735541a17e7c04c006c18f843359bc5dfdaa37769db5830f79959a0b4a", "status": "passed", "observations": ["Cross-instance and crash boundaries preserve durable serialization."], "evidence_hash":"sha256:1d6e30e89a1d9903a3f868316a0a7048974efc8df4b4b2663aa9f273fb8cf984"},
+    {"case_id": "transport-equivalence", "case_hash":"sha256:357fb420720cb67f1df3d5ffdc4a561ce04b85e3e28cc03e3b70b5ca8d8dd6d8", "status": "passed", "observations": ["Recorded governed workflow semantics agree across shipped transports and adapters."], "evidence_hash":"sha256:57695c75b9191897bc65bfaa6b2c47750026f5db87c8de4d8c80a667545251dd"},
+    {"case_id": "clean-rebuild", "case_hash":"sha256:76f5b7c60511159d248f61277848cabe80613c1fef39bd20e0a3e2662f1d4e65", "status": "passed", "observations": ["Clean deterministic index generation reproduces committed bytes and exact retrieval records after cache removal."], "evidence_hash":"sha256:5116f7e5833fcec804720560c94fd301b640939c4c519bf01fad960686b1baf4"},
+    {"case_id": "governed-revocation-erasure", "case_hash":"sha256:f34a0771e8eb78fcca384434c27d8f6ac12abbdaed2313804e1f9868d3b0846f", "status": "passed", "observations": ["Merged FEAT-009 evidence covers exact impact, authorization, durable erasure, late-copy fencing, legal hold, crash recovery, and retrieval nondisclosure."], "evidence_hash":"sha256:cc3b37fe2511228e6e763d4922f8e9920dd7553a4b1eaa7906d241fae7a635d8"}
   ]
 }
