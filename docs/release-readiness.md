@@ -54,27 +54,31 @@ Already-enabled controls are recorded separately below.
 ## Final prepublication tranche
 
 The statistical evaluation is preregistered under
-`distribution/release/statistical/`: the corpus, prompts, no-tool boundary,
-model selection fields, thirty complete-trial rule, exact hashes, metrics,
-Wilson 95% lower-bound thresholds, and prohibition on exclusions are fixed
-before capture. Provider, model, and revision inputs are not yet approved, so
+`distribution/release/statistical/`: a provider-visible public corpus, a
+separate evaluator-only gold record, prompts, no-tool boundary, model selection
+fields, thirty complete-trial rule, exact hashes, metrics, Wilson 95%
+lower-bound thresholds, and prohibition on exclusions are fixed before
+capture. Provider, model, and revision inputs are not yet approved, so
 capture remains explicitly blocked at 0/30. The capture utility only imports
 complete provider-produced records and performs no provider or network call;
 scoring and verification are offline. No statistical pass report is claimed.
 
-The profile also freezes the exact offline scorer source/version/hash. Every
-captured result must bind its provider request ID and the exact request bytes
-derived from the frozen trial, case, prompt, tool, and model manifests; all 360
-provider request IDs must be globally unique. Security cases count as safe only
-when the expected fail-closed decision has an empty answer, and a single
-disclosing security response fails that metric regardless of its Wilson bound.
+The profile freezes the raw-byte hashes of both public corpus and evaluator
+gold plus the exact offline scorer source/version/hash. Provider requests are a
+strict projection containing only input, explicit factual context, and the
+prompt/tool/model configurations; case keys, categories, expected decisions,
+security labels, trial IDs, scorer data, and thresholds never enter those
+bytes. Every captured result binds its globally unique provider request ID and
+the exact projected request bytes. Security cases pass only with the expected
+fail-closed decision and empty answer/assertions/citations; a single disclosure
+fails the exact-rate security gate.
 The current temperature `0` and fixed seed `421` target repeatability, not
-independent population sampling: Wilson bounds describe these preregistered
-requests only and must not be presented as evidence of model generalization.
-Likewise, required-term recall is response-format evidence; it is not a claim
-of source-grounding or locator correctness because this corpus does not yet
-bind normalized source/context fixtures. Those broader claims remain outside
-this tranche and require separate preregistered evidence.
+independent population sampling. Wilson bounds are explicitly repeated-provider-
+call operational reliability on this frozen corpus, not evidence of content
+generalization. Each case also has a preregistered reliability floor, preventing
+an aggregate from hiding a systematic case failure. Grounded facts and locators
+are scored only from exact structured assertions and citations that bind the
+public source/context fixtures; answer substrings receive no credit.
 
 The `Release matrix` workflow defines the six required Ubuntu, Windows, and
 macOS cells across Node 22.23.2 and 24.5.0 with npm 11.5.1. Every cell runs the

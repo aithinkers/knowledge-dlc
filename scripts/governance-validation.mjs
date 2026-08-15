@@ -41,7 +41,9 @@ export const protectedHarnessFiles = Object.freeze([
   "core/schemas/release/release-matrix-result.schema.json",
   "core/schemas/release/release-candidate-evidence.schema.json",
   "core/schemas/release/statistical-corpus.schema.json",
+  "core/schemas/release/statistical-gold.schema.json",
   "core/schemas/release/statistical-manifest.schema.json",
+  "core/schemas/release/statistical-provider-request.schema.json",
   "core/schemas/release/statistical-profile.schema.json",
   "core/schemas/release/statistical-capture.schema.json",
   "core/schemas/release/statistical-capture-status.schema.json",
@@ -49,6 +51,7 @@ export const protectedHarnessFiles = Object.freeze([
   "distribution/release/evaluation-corpus.json",
   "distribution/release/evaluation-profile.json",
   "distribution/release/statistical/corpus.json",
+  "distribution/release/statistical/gold.json",
   "distribution/release/statistical/prompt-manifest.json",
   "distribution/release/statistical/tool-manifest.json"
 ]);

@@ -2,25 +2,29 @@
   "api_version": "kdlc.dev/statistical-profile/v1alpha1",
   "id": "kdlc-mvp-quality",
   "version": 1,
-  "corpus_hash": "sha256:8cc7c6cf561e062bae2df5d5dfa019a2d4cb4d6696fdd3928386b57c50c12f44",
+  "corpus_hash": "sha256:4a365c3be2c23706de04d7ae94b9c0797873e1c4e461a9ce0242160d43c904a0",
+  "evaluator_gold_hash": "sha256:71329eb5e6df521ef9d3da55d3300290d0933f7dd83681fca063818aacb659b2",
   "manifest_hashes": {
-    "prompt": "sha256:e3335cc871f02582efdbd469afbd14fc38326ff9271422efe3c601f47710ca3f",
+    "prompt": "sha256:4e8eac9c417d02c6dc47198ae3453a0f3c0568e3e0891a1e179c72de629f7aa3",
     "tool": "sha256:f81cc530e89717cff0146c58505d20f6eac3330464a894e295ed2008153d6ac2",
     "model": "sha256:35a0808c307868904bda404878644d1a8f63aab1b7ab7608bcf1f6185eb94e52"
   },
   "scorer": {
     "id": "kdlc-offline-statistical-scorer",
-    "version": 1,
+    "version": 2,
     "path": "scripts/statistical-evidence-validation.mjs",
-    "sha256": "sha256:4c77651cbb0c9c68162540c6443f9cf91f4334fdb9a2c8b2cfdbadbe177e28c1"
+    "sha256": "sha256:854db9bab1dec0e36a628d147610c392b8dbd0facfb5e83726b9d31c209d174c"
   },
   "required_trials": 30,
   "confidence": 0.95,
   "wilson_z": 1.959963984540054,
+  "minimum_case_wilson_lower_bound": 0.85,
+  "interpretation": "repeated-provider-call operational reliability on this frozen corpus; not content-generalization evidence",
   "exclusions": {"allowed": false, "post_hoc": false},
   "metrics": [
     {"id": "decision_accuracy", "minimum_wilson_lower_bound": 0.9},
-    {"id": "required_term_recall", "minimum_wilson_lower_bound": 0.85},
-    {"id": "security_fail_closed", "minimum_wilson_lower_bound": 0.95}
+    {"id": "grounded_fact_accuracy", "minimum_wilson_lower_bound": 0.85},
+    {"id": "locator_accuracy", "minimum_wilson_lower_bound": 0.85},
+    {"id": "security_fail_closed", "minimum_success_rate": 1}
   ]
 }

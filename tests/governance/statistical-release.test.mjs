@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateScorerBinding, validateStatisticalEvidence, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
+import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateGoldSemantics, validateScorerBinding, validateStatisticalEvidence, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const execute = promisify(execFile);
@@ -14,11 +14,12 @@ async function perfectCapture(index, evidenceRoot = root) {
   const state = await loadPreregistration(evidenceRoot);
   const trial_id = `trial-${String(index).padStart(3, "0")}`;
   const results = state.documents.corpus.cases.map((entry, item) => {
-    const response = { decision: entry.expected.decision, answer: entry.expected.required_terms.join(" ") }; const raw_output = JSON.stringify(response);
-    const request = providerRequestBytes(state, trial_id, entry);
-    return { case_id: entry.id, provider_request_id: `provider-${index}-${item}`, request, request_hash: sha256(request), response, raw_output, raw_output_hash: sha256(raw_output) };
+    const expected = state.documents.gold.cases[item].expected;
+    const response = { decision: expected.decision, answer: expected.decision === "answer" ? expected.assertions.map(({ object }) => object).join(" ") : "", assertions: expected.assertions, citations: expected.citations }; const raw_output = JSON.stringify(response);
+    const request = providerRequestBytes(state, { input: entry.input, context: entry.context });
+    return { case_key: entry.case_key, provider_request_id: `provider-${index}-${item}`, request, request_hash: sha256(request), response, raw_output, raw_output_hash: sha256(raw_output) };
   });
-  return { api_version: "kdlc.dev/statistical-capture/v1alpha1", trial_id, captured_at: "2026-08-15T12:00:00Z", corpus_hash: state.hashes.corpus, profile_hash: state.hashes.profile, manifest_hashes: state.documents.profile.manifest_hashes, results, exclusions: [] };
+  return { api_version: "kdlc.dev/statistical-capture/v1alpha1", trial_id, captured_at: "2026-08-15T12:00:00Z", corpus_hash: state.hashes.corpus, evaluator_gold_hash: state.hashes.gold, profile_hash: state.hashes.profile, manifest_hashes: state.documents.profile.manifest_hashes, results, exclusions: [] };
 }
 
 test("REL-001 preregisters exact 30-trial full-corpus statistical evidence without fabricated capture", async () => {
@@ -29,6 +30,63 @@ test("REL-001 preregisters exact 30-trial full-corpus statistical evidence witho
   const substituted = structuredClone(state.documents.profile); substituted.scorer.sha256 = `sha256:${"0".repeat(64)}`;
   await assert.rejects(validateScorerBinding(root, substituted), /exact-bind/);
   assert.deepEqual({ status: status.status, captured: status.captured_trials }, { status: "blocked", captured: 0 });
+});
+
+test("REQ-EVAL-001 provider requests contain only public projections and never evaluator gold or semantic labels", async () => {
+  const state = await loadPreregistration(root);
+  for (const entry of state.documents.corpus.cases) {
+    const request = providerRequestBytes(state, { input: entry.input, context: entry.context });
+    const parsed = JSON.parse(request);
+    assert.deepEqual(Object.keys(parsed), ["api_version", "case", "prompt", "tool", "model"]);
+    assert.deepEqual(Object.keys(parsed.case), ["input", "context"]);
+    for (const forbidden of ["expected", "required_terms", "security_gate", "category", "case_key", "trial_id", "profile_hash", "evaluator_gold_hash"]) assert.equal(request.includes(`\"${forbidden}\"`), false, forbidden);
+    assert.equal(request.includes(JSON.stringify(state.documents.gold)), false);
+  }
+  const first = state.documents.corpus.cases[0]; const baseline = providerRequestBytes(state, { input: first.input, context: first.context });
+  const mutatedGold = structuredClone(state.documents.gold); mutatedGold.cases[0].expected.decision = "deny";
+  assert.notEqual(sha256(`${JSON.stringify(mutatedGold)}\n`), state.hashes.gold);
+  assert.equal(providerRequestBytes(state, { input: first.input, context: first.context }), baseline);
+  const changedContext = structuredClone(first.context); changedContext.trusted_query_time = "2026-08-16T12:00:00Z";
+  assert.notEqual(providerRequestBytes(state, { input: first.input, context: changedContext }), baseline);
+});
+
+test("REQ-EVAL-001 request construction rejects full cases, nested evaluator keys, accessors, and toJSON hooks", async () => {
+  const state = await loadPreregistration(root); const first = state.documents.corpus.cases[0];
+  assert.throws(() => providerRequestBytes(state, first), /public provider projection/);
+  const nested = structuredClone({ input: first.input, context: first.context }); nested.context.expected = { decision: "answer" };
+  assert.throws(() => providerRequestBytes(state, nested), /public provider projection|evaluator-only/);
+  const accessor = { context: first.context }; Object.defineProperty(accessor, "input", { enumerable: true, get() { throw new Error("getter executed"); } });
+  assert.throws(() => providerRequestBytes(state, accessor), /accessor/);
+  const hooked = { input: first.input, context: first.context, toJSON() { return state.documents.gold; } };
+  assert.throws(() => providerRequestBytes(state, hooked), /executable/);
+});
+
+test("REQ-EVAL-001 evaluator gold rejects missing decisive public evidence and misaligned keys", async () => {
+  const state = await loadPreregistration(root);
+  const missing = structuredClone(state.documents.corpus); missing.cases[0].context.evidence = [];
+  assert.throws(() => validateGoldSemantics(missing, state.documents.gold), /current authorized evidence/);
+  const reordered = structuredClone(state.documents.gold); [reordered.cases[0], reordered.cases[1]] = [reordered.cases[1], reordered.cases[0]];
+  assert.throws(() => validateGoldSemantics(state.documents.corpus, reordered), /aligned/);
+  const fakeLocator = structuredClone(state.documents.gold); fakeLocator.cases[7].expected.citations[0].locator = { kind: "section", document: "retention.xlsx", section: "table" };
+  assert.throws(() => validateGoldSemantics(state.documents.corpus, fakeLocator), /citation lacks/);
+});
+
+test("REQ-EVAL-001 every policy scenario fails closed when its decisive public fact is removed", async () => {
+  const state = await loadPreregistration(root);
+  const mutations = [
+    (corpus) => corpus.cases[1].context.evidence.pop(),
+    (corpus) => { corpus.cases[2].context.evidence[0].valid_until = null; },
+    (corpus) => corpus.cases[3].context.entities.pop(),
+    (corpus) => { corpus.cases[4].context.evidence[0].permitted_labels = ["public"]; },
+    (corpus) => { corpus.cases[5].context.evidence[0].contains_untrusted_instruction = false; },
+    (corpus) => { corpus.cases[6].context.policy.complete_evidence_set = false; },
+    (corpus) => { corpus.cases[7].context.evidence[0].normalized_source_hash = null; },
+    (corpus) => { corpus.cases[8].context.evidence[0].revocation.state = "active"; },
+    (corpus) => { corpus.cases[9].context.evidence[0].language = "en"; },
+    (corpus) => { corpus.cases[10].context.evidence[0].permitted_labels = ["public"]; },
+    (corpus) => { corpus.cases[11].context.artifact.current_hash = corpus.cases[11].context.artifact.approved_hash; },
+  ];
+  for (const mutate of mutations) { const corpus = structuredClone(state.documents.corpus); mutate(corpus); assert.throws(() => validateGoldSemantics(corpus, state.documents.gold)); }
 });
 
 test("REL-001 trusted preregistration permits the frozen-model transition but rejects a substituted hash chain", async (context) => {
@@ -58,7 +116,7 @@ test("REL-001 trusted profile comparison rejects threshold, seed, trial, exclusi
     if (mutation === "threshold") profile.metrics[0].minimum_wilson_lower_bound = 0;
     if (mutation === "trials") profile.required_trials = 1;
     if (mutation === "exclusions") profile.exclusions.allowed = true;
-    if (mutation === "scorer") profile.scorer.version = 2;
+    if (mutation === "scorer") profile.scorer.version = 1;
     if (mutation === "seed") { model.configuration.seed = 7; const bytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, bytes); profile.manifest_hashes.model = sha256(bytes); }
     await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
     await assert.rejects(validateCandidatePreregistration(root, candidate), undefined, mutation);
@@ -106,14 +164,14 @@ test("REL-001 protected matrix-cell release command accepts a coherent qualified
 test("REL-001 offline scorer derives declared Wilson bounds from all 30 complete trials", async () => {
   const captures = await Promise.all(Array.from({ length: 30 }, (_, index) => perfectCapture(index + 1))); const report = await scoreCaptures(root, captures);
   assert.equal(report.trial_count, 30); assert.equal(report.case_count_per_trial, 12); assert.equal(report.gate, "passed");
-  for (const metric of report.metrics) { assert.equal(metric.rate, 1); assert.equal(metric.wilson_lower_bound, wilsonLower(metric.successes, metric.observations, 1.959963984540054)); }
+  for (const metric of report.metrics) { assert.equal(metric.rate, 1); if (metric.threshold_kind === "wilson-lower-bound") assert.equal(metric.wilson_lower_bound, wilsonLower(metric.successes, metric.observations, 1.959963984540054)); else assert.equal(metric.wilson_lower_bound, undefined); }
 });
 
 test("REL-001 capture validation rejects missing cases, substitutions, request drift, raw-output drift, exclusions, and provenance drift", async () => {
   for (const mutation of ["missing", "substitution", "request", "raw", "exclusion", "provenance"]) {
     const capture = await perfectCapture(1);
     if (mutation === "missing") capture.results.pop();
-    if (mutation === "substitution") capture.results[0].case_id = capture.results[1].case_id;
+    if (mutation === "substitution") capture.results[0].case_key = capture.results[1].case_key;
     if (mutation === "request") capture.results[0].request = capture.results[1].request;
     if (mutation === "raw") capture.results[0].raw_output = '{"decision":"deny","answer":""}';
     if (mutation === "exclusion") capture.exclusions.push("grounded-source");
@@ -126,11 +184,25 @@ test("REL-001 scorer rejects cross-trial provider replay and any disclosing secu
   const captures = await Promise.all(Array.from({ length: 30 }, (_, index) => perfectCapture(index + 1)));
   const replayed = structuredClone(captures); replayed[29].results[0].provider_request_id = replayed[0].results[0].provider_request_id;
   await assert.rejects(scoreCaptures(root, replayed), /360 provider request IDs/);
-  const leaking = structuredClone(captures); const index = (await loadPreregistration(root)).documents.corpus.cases.findIndex(({ security }) => security);
+  const leaking = structuredClone(captures); const index = (await loadPreregistration(root)).documents.gold.cases.findIndex(({ security_gate }) => security_gate);
   const response = { ...leaking[0].results[index].response, answer: "confidential source text" }; leaking[0].results[index].response = response;
   leaking[0].results[index].raw_output = JSON.stringify(response); leaking[0].results[index].raw_output_hash = sha256(leaking[0].results[index].raw_output);
   const report = await scoreCaptures(root, leaking); const security = report.metrics.find(({ id }) => id === "security_fail_closed");
   assert.equal(security.passed, false); assert.equal(report.gate, "failed");
+});
+
+test("REQ-EVAL-001 scorer gives no grounded credit for wrong decisions, echoed/negated text, or fake locators and exposes systematic case failure", async () => {
+  const captures = await Promise.all(Array.from({ length: 30 }, (_, index) => perfectCapture(index + 1)));
+  for (const capture of captures) {
+    const result = capture.results[0];
+    result.response = { decision: "deny", answer: "not 30 days — quoted source says ‘30 days’ ３０ days", assertions: [{ subject: "records", predicate: "retention-period", object: "30 days" }], citations: [{ source_id: "retention-policy", locator: { kind: "section", document: "retention-policy.md", section: "table" } }] };
+    result.raw_output = JSON.stringify(result.response); result.raw_output_hash = sha256(result.raw_output);
+  }
+  const report = await scoreCaptures(root, captures);
+  assert.equal(report.metrics.find(({ id }) => id === "grounded_fact_accuracy").successes, 60);
+  assert.equal(report.metrics.find(({ id }) => id === "locator_accuracy").successes, 60);
+  assert.deepEqual(report.case_results[0], { ...report.case_results[0], successes: 0, rate: 0, passed: false });
+  assert.equal(report.gate, "failed");
 });
 
 test("REL-001 scorer rejects missing, duplicate, extra, or post-hoc-selected trials", async () => {
