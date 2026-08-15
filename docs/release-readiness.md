@@ -87,10 +87,11 @@ independent population sampling. Wilson bounds are explicitly repeated-provider-
 call operational reliability on this frozen corpus, not evidence of content
 generalization. Each case also has a preregistered reliability floor, preventing
 an aggregate from hiding a systematic case failure. Grounded facts and locators
-require the correct decision, exact structured assertions/citations, and every
-gold-bound answer phrase in an affirmative, unquoted Unicode-normalized
-rendering. Missing, negated, quoted-only, or visually confusable renderings
-receive no credit.
+require the correct decision, exact structured assertions/citations, and exact
+equality to an evaluator-only accepted answer after only Unicode NFKC and
+whitespace normalization. No substring or sentiment heuristic receives credit;
+negated, quoted, contradictory, paraphrased, and visually confusable answers
+fail closed.
 
 The `Release matrix` workflow defines the six required Ubuntu, Windows, and
 macOS cells across Node 22.23.2 and 24.5.0 with npm 11.5.1. Every cell runs the

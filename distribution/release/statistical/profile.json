@@ -3,7 +3,7 @@
   "id": "kdlc-mvp-quality",
   "version": 1,
   "corpus_hash": "sha256:4a365c3be2c23706de04d7ae94b9c0797873e1c4e461a9ce0242160d43c904a0",
-  "evaluator_gold_hash": "sha256:7c517dc09eb73f6e7801eba17977f1978c1f102c5d1515f48df8cd0ed4541c1e",
+  "evaluator_gold_hash": "sha256:b8a0b21f3ade1dae3fcc60a67f9ae052f8bd364cafaab4ee6fcabd72dbf6b540",
   "manifest_hashes": {
     "prompt": "sha256:26f4342f693f7ae15068008286e54be0853ac3558887de90b7739b23f7198bef",
     "tool": "sha256:f81cc530e89717cff0146c58505d20f6eac3330464a894e295ed2008153d6ac2",
@@ -13,7 +13,7 @@
     "id": "kdlc-offline-statistical-scorer",
     "version": 2,
     "path": "scripts/statistical-evidence-validation.mjs",
-    "sha256": "sha256:ad882eca65c7e1975dc48fa4ad2d47996ad4d915917ab318f9b2d06d27952b50"
+    "sha256": "sha256:e681e5264e59db1eee219c84883a1b71c8af748f127f08cde19e4ac28162a650"
   },
   "required_trials": 30,
   "confidence": 0.95,

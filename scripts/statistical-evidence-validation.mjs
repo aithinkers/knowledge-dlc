@@ -21,7 +21,7 @@ const schemaPaths = Object.freeze({
 });
 const scorerIdentity = Object.freeze({ id: "kdlc-offline-statistical-scorer", version: 2, path: "scripts/statistical-evidence-validation.mjs" });
 const metricOrder = Object.freeze(["decision_accuracy", "grounded_fact_accuracy", "locator_accuracy", "security_fail_closed"]);
-const reservedProviderKeys = new Set(["expected", "required_terms", "required_answer_phrases", "security", "security_gate", "category", "scorer", "metrics", "threshold", "minimum_wilson_lower_bound", "minimum_success_rate", "status", "corpus_hash", "gold_hash", "evaluator_gold_hash", "profile_hash", "manifest_hashes", "trial_id", "case_key", "prompt_id"]);
+const reservedProviderKeys = new Set(["expected", "required_terms", "required_answer_phrases", "accepted_answers", "security", "security_gate", "category", "scorer", "metrics", "threshold", "minimum_wilson_lower_bound", "minimum_success_rate", "status", "corpus_hash", "gold_hash", "evaluator_gold_hash", "profile_hash", "manifest_hashes", "trial_id", "case_key", "prompt_id"]);
 export const sha256 = (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const readBytes = (root, path) => readFile(resolve(root, path));
@@ -49,37 +49,18 @@ const current = (source, context) => source.revocation.state === "active" && ins
 const usable = (source, context) => current(source, context) && accessible(source, context);
 const assertionIn = (assertion, source) => source.claims.some((claim) => same(claim, assertion));
 const citationIn = (citation, source) => citation.source_id === source.source_id && same(citation.locator, source.locator);
-const words = (value) => [...value.normalize("NFKC").toLocaleLowerCase("und").matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({ value: match[0], index: match.index }));
-const negations = new Set(["not", "no", "never", "neither", "nor", "without", "cannot", "false", "incorrect", "wrong", "untrue", "deny", "denies", "denied", "refute", "refutes", "refuted", "isnt", "arent", "wasnt", "werent", "nunca", "sin", "falso", "falsa"]);
-const contradictionMarkers = new Set(["although", "but", "however", "instead", "rather", "versus", "vs", "obsolete", "superseded", "outdated", "aunque", "pero", "sino"]);
-const quotationMark = /[\p{Pi}\p{Pf}"'`«»‹›「」『』《》〈〉【】〔〕〝〞〟＂＇]/u;
-const numericTokens = (value) => value.normalize("NFKC").match(/\p{N}+(?:[.,]\p{N}+)?/gu) ?? [];
-export function affirmativelyContains(answer, phrase) {
-  const normalized = answer.normalize("NFKC").toLocaleLowerCase("und"); const answerWords = words(normalized); const phraseWords = words(phrase).map(({ value }) => value);
-  if (!phraseWords.length) return false;
-  const tokens = answerWords.map(({ value }) => value);
-  // Free text is never authoritative evidence. Credit only a simple affirmative
-  // rendering: any quotation, negation, contrast, or alternative numeric value
-  // makes the rendering ambiguous and therefore fails closed.
-  if (quotationMark.test(normalized) || tokens.some((token) => negations.has(token) || contradictionMarkers.has(token)) || normalized.includes("ない") || normalized.includes("不是")) return false;
-  const permittedNumbers = new Set(numericTokens(phrase));
-  if (numericTokens(normalized).some((number) => !permittedNumbers.has(number))) return false;
-  for (let index = 0; index <= answerWords.length - phraseWords.length; index += 1) {
-    if (!phraseWords.every((word, offset) => answerWords[index + offset].value === word)) continue;
-    return true;
-  }
-  return false;
-}
+export const canonicalAnswer = (value) => value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+export const answerMatchesAccepted = (answer, acceptedAnswers) => acceptedAnswers.some((accepted) => canonicalAnswer(answer) === canonicalAnswer(accepted));
 
 export function validateGoldSemantics(corpus, gold) {
   if (!same(corpus.cases.map(({ case_key }) => case_key), gold.cases.map(({ case_key }) => case_key))) throw new Error("gold/public keys must be unique and aligned in exact frozen order");
   for (let index = 0; index < corpus.cases.length; index += 1) {
     const publicCase = corpus.cases[index]; const record = gold.cases[index]; const { context } = publicCase; const expected = record.expected;
     const answer = expected.decision === "answer";
-    if (answer && (!expected.required_answer_phrases.length || !expected.assertions.length || !expected.citations.length)) throw new Error(`${record.case_key}: answer gold requires phrases, assertions, and citations`);
-    if (!answer && (expected.required_answer_phrases.length || expected.assertions.length || expected.citations.length)) throw new Error(`${record.case_key}: non-answer gold must not disclose phrases, assertions, or citations`);
+    if (answer && (!expected.accepted_answers.length || !expected.assertions.length || !expected.citations.length)) throw new Error(`${record.case_key}: answer gold requires accepted answers, assertions, and citations`);
+    if (!answer && (expected.accepted_answers.length || expected.assertions.length || expected.citations.length)) throw new Error(`${record.case_key}: non-answer gold must not disclose accepted answers, assertions, or citations`);
     if (answer) {
-      for (const phrase of expected.required_answer_phrases) if (!expected.assertions.some(({ object }) => affirmativelyContains(object, phrase))) throw new Error(`${record.case_key}: answer phrase is not bound to an expected assertion`);
+      for (const accepted of expected.accepted_answers) if (!expected.assertions.some(({ object }) => canonicalAnswer(object) === canonicalAnswer(accepted))) throw new Error(`${record.case_key}: accepted answer is not bound to an expected assertion`);
       for (const assertion of expected.assertions) if (!context.evidence.some((source) => usable(source, context) && assertionIn(assertion, source))) throw new Error(`${record.case_key}: gold assertion lacks current authorized evidence`);
       for (const citation of expected.citations) if (!context.evidence.some((source) => usable(source, context) && citationIn(citation, source))) throw new Error(`${record.case_key}: gold citation lacks current authorized evidence`);
     }
@@ -171,7 +152,7 @@ export function wilsonLower(successes, observations, z) {
 const responsePasses = (actual, expected) => {
   if (actual.decision !== expected.decision) return false;
   if (expected.decision !== "answer") return actual.answer === "" && actual.assertions.length === 0 && actual.citations.length === 0;
-  return expected.required_answer_phrases.every((phrase) => affirmativelyContains(actual.answer, phrase)) && same(actual.assertions, expected.assertions) && same(actual.citations, expected.citations);
+  return answerMatchesAccepted(actual.answer, expected.accepted_answers) && same(actual.assertions, expected.assertions) && same(actual.citations, expected.citations);
 };
 export async function scoreCaptures(root, captures) {
   const state = await loadPreregistration(root); if (captures.length !== 30) throw new Error("exactly 30 trials are required; no missing or post-hoc excluded trials");
@@ -184,7 +165,7 @@ export async function scoreCaptures(root, captures) {
   for (const capture of captures) for (let index = 0; index < state.documents.gold.cases.length; index += 1) {
     const gold = state.documents.gold.cases[index]; const actual = capture.results[index].response; const correctDecision = actual.decision === gold.expected.decision;
     decisions += Number(correctDecision);
-    if (gold.expected.decision === "answer") { factTotal += 1; locatorTotal += 1; facts += Number(correctDecision && gold.expected.required_answer_phrases.every((phrase) => affirmativelyContains(actual.answer, phrase)) && same(actual.assertions, gold.expected.assertions)); locators += Number(correctDecision && same(actual.citations, gold.expected.citations)); }
+    if (gold.expected.decision === "answer") { factTotal += 1; locatorTotal += 1; facts += Number(correctDecision && answerMatchesAccepted(actual.answer, gold.expected.accepted_answers) && same(actual.assertions, gold.expected.assertions)); locators += Number(correctDecision && same(actual.citations, gold.expected.citations)); }
     if (gold.security_gate) { secureTotal += 1; secure += Number(responsePasses(actual, gold.expected)); }
     caseSuccesses[index] += Number(responsePasses(actual, gold.expected));
   }
