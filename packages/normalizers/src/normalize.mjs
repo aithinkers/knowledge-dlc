@@ -15,6 +15,9 @@ const MAX_RATIO = 100;
 const unitAjv = new Ajv2020({ strict: true, allErrors: true }); addFormats(unitAjv);
 unitAjv.addSchema(JSON.parse(await readFile(new URL("../../../core/schemas/common.schema.json", import.meta.url), "utf8")));
 const validateUnit = unitAjv.compile(JSON.parse(await readFile(new URL("../../../core/schemas/normalization/normalized-unit.schema.json", import.meta.url), "utf8")));
+const validateManifest = unitAjv.compile(JSON.parse(await readFile(new URL("../../../core/schemas/normalization/normalization-manifest.schema.json", import.meta.url), "utf8")));
+const portableSourceId = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+const rfc3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 class Quarantine extends Error { constructor(code, message, details = {}) { super(message); this.code = code; this.details = details; } }
 const exceed = (name, actual, maximum) => { if (actual > maximum) throw new Quarantine("limit-exceeded", `${name} exceeds configured limit`, { limit: name, actual, maximum }); };
@@ -99,13 +102,21 @@ function csvProfile(bytes, sourceHash, settings, limits) {
 }
 
 async function pdfProfile(bytes, sourceHash, limits) {
-  if (new TextDecoder("latin1").decode(bytes.subarray(0, Math.min(bytes.length, 100_000))).includes("/Encrypt")) throw new Quarantine("encrypted", "Encrypted PDF is not supported");
+  const pdfSource = new TextDecoder("latin1").decode(bytes);
+  if (pdfSource.includes("/Encrypt")) throw new Quarantine("encrypted", "Encrypted PDF is not supported");
+  if (/\/S\s*\/(?:URI|GoToR|Launch|SubmitForm)\b|\/URI\s*(?:\(|<)/.test(pdfSource)) throw new Quarantine("external-relationship", "External PDF catalog, outline, and action relationships are disabled");
   const descriptor = descriptors.pdf; const make = unitFactory(sourceHash, descriptor); let document;
   try { const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs"); document = await pdfjs.getDocument({ data: new Uint8Array(bytes), isEvalSupported: false, useWorkerFetch: false, disableFontFace: true }).promise; }
   catch (error) { if (error?.name === "PasswordException") throw new Quarantine("encrypted", "Encrypted PDF is not supported"); throw new Quarantine("malformed", "PDF parsing failed", { parser: error.message }); }
   exceed("pages", document.numPages, limits.pages); const units = [];
-  const metadata = await document.getMetadata().catch(() => ({ info: {} })); const outline = await document.getOutline().catch(() => []);
-  units.push(make("pdf-metadata", { kind: "page", page: 0 }, { structured_data: { metadata: metadata.info ?? {}, outline: (outline ?? []).map(({ title }) => title), page_count: document.numPages } }));
+  let metadata; let outline; let actions; let openAction;
+  try { metadata = await document.getMetadata(); outline = await document.getOutline(); actions = await document.getJSActions(); openAction = await document.getOpenAction(); }
+  catch { throw new Quarantine("malformed", "PDF catalog and action coverage could not be verified"); }
+  const outlineEntries = []; const visitOutline = (items) => { for (const item of items ?? []) { outlineEntries.push(item); if (typeof (item.url ?? item.unsafeUrl) === "string") throw new Quarantine("external-relationship", "External PDF outline relationships are disabled"); visitOutline(item.items); } };
+  visitOutline(outline);
+  if (actions && Object.keys(actions).length) throw new Quarantine("unsafe-active-content", "PDF JavaScript actions are disabled");
+  if (openAction && typeof (openAction.url ?? openAction.unsafeUrl) === "string") throw new Quarantine("external-relationship", "External PDF catalog actions are disabled");
+  units.push(make("pdf-metadata", { kind: "page", page: 0 }, { structured_data: { metadata: metadata.info ?? {}, outline: outlineEntries.map(({ title }) => title), page_count: document.numPages } }));
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber); const content = await page.getTextContent(); const annotations = await page.getAnnotations().catch(() => []);
     if (annotations.some(({ url, unsafeUrl }) => typeof (url ?? unsafeUrl) === "string")) throw new Quarantine("external-relationship", "External PDF relationships are disabled", { page: pageNumber });
@@ -121,7 +132,8 @@ function officeKind(parts, requested) {
   const types = text(parts["[Content_Types].xml"]); const declaredTypes = new Map();
   parseXml(types, { open(node) { if (node.name === "Override" || node.name.endsWith(":Override")) { const contentType = node.attributes.ContentType; const partName = node.attributes.PartName; if (typeof contentType === "string" && typeof partName === "string" && /^\/[A-Za-z0-9_.\/-]+$/.test(partName) && !partName.split("/").includes("..")) declaredTypes.set(partName, contentType); } } });
   if (!parts["_rels/.rels"]) throw new Quarantine("malformed", "OPC package lacks the root relationship part");
-  const roots = []; parseXml(text(parts["_rels/.rels"]), { open(node) { if ((node.name === "Relationship" || node.name.endsWith(":Relationship")) && /\/officeDocument$/.test(String(node.attributes.Type))) { if (node.attributes.TargetMode === "External") throw new Quarantine("external-relationship", "External package relationships are disabled"); roots.push(`/${String(node.attributes.Target).replace(/^\//, "")}`); } } });
+  const officeRelationships = new Set(["http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument", "http://purl.oclc.org/ooxml/officeDocument/relationships/officeDocument"]);
+  const roots = []; parseXml(text(parts["_rels/.rels"]), { open(node) { if (node.name === "Relationship" || node.name.endsWith(":Relationship")) { const type = String(node.attributes.Type); if (/officeDocument$/i.test(type) && !officeRelationships.has(type)) throw new Quarantine("malformed", "OPC root relationship type is not allowlisted"); if (officeRelationships.has(type)) { if (node.attributes.TargetMode === "External") throw new Quarantine("external-relationship", "External package relationships are disabled"); roots.push(`/${String(node.attributes.Target).replace(/^\//, "")}`); } } } });
   const main = roots.length === 1 ? roots[0] : null; const contentType = main ? declaredTypes.get(main) : null;
   if (main === "/word/document.xml" && contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" && parts["word/document.xml"]) return "docx";
   if (main === "/xl/workbook.xml" && contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" && parts["xl/workbook.xml"]) return "xlsx";
@@ -185,9 +197,10 @@ function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error)
 }
 
 export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
+  if (process.env.KDLC_RESTRICTED_WORKER !== "1" || !process.permission || process.permission.has("child") || process.permission.has("fs.write", "/")) throw new Error("Direct normalization requires the restricted worker capability boundary");
   const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes); const computedHash = byteHash(input); const hash = computedHash; sourceId ??= `source-${hash.slice(7, 23)}`;
   try {
-    if (typeof sourceId !== "string" || !sourceId || typeof normalizedAt !== "string" || !Number.isFinite(Date.parse(normalizedAt))) throw new Quarantine("invalid-source-metadata", "Source ID and normalization timestamp are required");
+    if (typeof sourceId !== "string" || !portableSourceId.test(sourceId) || typeof normalizedAt !== "string" || !rfc3339.test(normalizedAt) || !Number.isFinite(Date.parse(normalizedAt))) throw new Quarantine("invalid-source-metadata", "Portable source ID and RFC3339 normalization timestamp are required");
     const resolvedLimits = { ...defaultLimits };
     for (const [name, value] of Object.entries(limits)) { if (!(name in defaultLimits) || !Number.isSafeInteger(value) || value <= 0 || value > defaultLimits[name]) throw new Quarantine("invalid-limits", "Normalizer limits may only tighten trusted ceilings", { limit: name }); resolvedLimits[name] = value; }
     if (sourceHash && sourceHash !== computedHash) throw new Quarantine("source-hash-mismatch", "Declared source hash does not match input bytes", { declared: sourceHash, actual: computedHash });
@@ -204,7 +217,9 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
       if (!/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(settings.language)) throw new Quarantine("invalid-language", "Language must be a BCP 47 tag");
       result.units = result.units.map((unit) => ({ ...unit, language: settings.language }));
     }
-    if (probabilisticUnits.some((unit) => { const model = unit.extraction_method?.model; return !validateUnit(unit) || unit.extraction_method?.mode !== "probabilistic" || !model?.id || !model?.version || !model?.provider || !/^sha256:[a-f0-9]{64}$/.test(model?.recorded_output_hash ?? "") || unit.source_hash !== hash; })) throw new Quarantine("invalid-probabilistic-output", "Probabilistic units require schema-valid locators, substantive recorded-model provenance, and matching source identity");
+    const allowedLocators = new Set(result.descriptor.locator_kinds);
+    if (result.units.some((unit) => !validateUnit(unit) || unit.extraction_method?.mode !== "deterministic" || unit.source_hash !== hash || !allowedLocators.has(unit.locator?.kind))) throw new Quarantine("invalid-deterministic-output", "Deterministic units must satisfy their descriptor schema and locator contract");
+    if (probabilisticUnits.some((unit) => { const model = unit.extraction_method?.model; return !validateUnit(unit) || !allowedLocators.has(unit.locator?.kind) || unit.extraction_method?.mode !== "probabilistic" || !model?.id || !model?.version || !model?.provider || !/^sha256:[a-f0-9]{64}$/.test(model?.recorded_output_hash ?? "") || unit.source_hash !== hash; })) throw new Quarantine("invalid-probabilistic-output", "Probabilistic units require schema-valid descriptor locators, substantive recorded-model provenance, and matching source identity");
     const deterministicBytes = `${result.units.map((unit) => canonicalJson(unit)).join("\n")}${result.units.length ? "\n" : ""}`; exceed("output_bytes", Buffer.byteLength(deterministicBytes), resolvedLimits.output_bytes);
     const outputs = [{ path: "units.jsonl", hash: byteHash(deterministicBytes), bytes: Buffer.byteLength(deterministicBytes), mode: "deterministic" }];
     if (probabilisticUnits.length) { const derived = `${probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}\n`; exceed("output_bytes", Buffer.byteLength(deterministicBytes) + Buffer.byteLength(derived), resolvedLimits.output_bytes); exceed("shapes", probabilisticUnits.length, resolvedLimits.shapes); exceed("processing_ms", performance.now() - started, resolvedLimits.processing_ms); outputs.push({ path: "probabilistic-units.jsonl", hash: byteHash(derived), bytes: Buffer.byteLength(derived), mode: "probabilistic" }); }
@@ -213,21 +228,27 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest: { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security } };
   } catch (error) {
     const quarantined = error instanceof Quarantine ? error : new Quarantine("malformed", "Normalizer failed safely", { parser: error.message });
-    const safeSourceId = typeof sourceId === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId) && sourceId !== "." && sourceId !== ".." ? sourceId : `source-${hash.slice(7, 23)}`;
-    const safeNormalizedAt = typeof normalizedAt === "string" && Number.isFinite(Date.parse(normalizedAt)) ? normalizedAt : "1970-01-01T00:00:00.000Z";
+    const safeSourceId = typeof sourceId === "string" && portableSourceId.test(sourceId) ? sourceId : `source-${hash.slice(7, 23)}`;
+    const safeNormalizedAt = typeof normalizedAt === "string" && rfc3339.test(normalizedAt) && Number.isFinite(Date.parse(normalizedAt)) ? normalizedAt : "1970-01-01T00:00:00.000Z";
     return { descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(safeSourceId, hash, safeNormalizedAt, settings, quarantined) };
   }
 }
 
 export function portableArtifacts(result, sourceId) {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId) || sourceId === "." || sourceId === "..") throw new Error("Source ID is not portable");
+  if (!portableSourceId.test(sourceId)) throw new Error("Source ID is not portable");
   if (sourceId !== result?.manifest?.source_id) throw new Error("Source ID does not match the normalization manifest");
+  if (!validateManifest(result.manifest)) throw new Error("Normalization manifest is invalid");
+  const deterministic = `${result.units.map((unit) => canonicalJson(unit)).join("\n")}${result.units.length ? "\n" : ""}`;
+  const probabilistic = `${result.probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}${result.probabilisticUnits.length ? "\n" : ""}`;
+  if (result.units.some((unit) => !validateUnit(unit) || unit.source_hash !== result.manifest.source_hash) || result.probabilisticUnits.some((unit) => !validateUnit(unit) || unit.source_hash !== result.manifest.source_hash)) throw new Error("Normalized units are invalid or source-unbound");
+  const expectedOutputs = result.manifest.status === "quarantined" ? [] : [{ path: "units.jsonl", hash: byteHash(deterministic), bytes: Buffer.byteLength(deterministic), mode: "deterministic" }, ...(result.probabilisticUnits.length ? [{ path: "probabilistic-units.jsonl", hash: byteHash(probabilistic), bytes: Buffer.byteLength(probabilistic), mode: "probabilistic" }] : [])];
+  if (canonicalJson(result.manifest.outputs) !== canonicalJson(expectedOutputs)) throw new Error("Normalization manifest output hashes do not match serialized bytes");
   const basis = result.manifest.outputs.find(({ mode }) => mode === "deterministic")?.hash ?? result.manifest.source_hash;
   const directory = `sources/normalized/${sourceId}/${basis.replace("sha256:", "sha256-")}`;
   const files = { [`${directory}/manifest.json`]: `${canonicalJson(result.manifest)}\n` };
   if (result.manifest.status !== "quarantined") {
-    files[`${directory}/units.jsonl`] = `${result.units.map((unit) => canonicalJson(unit)).join("\n")}${result.units.length ? "\n" : ""}`;
-    if (result.probabilisticUnits.length) files[`${directory}/probabilistic-units.jsonl`] = `${result.probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}\n`;
+    files[`${directory}/units.jsonl`] = deterministic;
+    if (result.probabilisticUnits.length) files[`${directory}/probabilistic-units.jsonl`] = probabilistic;
   }
   return { directory, files };
 }

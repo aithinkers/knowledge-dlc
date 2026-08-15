@@ -1,4 +1,3 @@
-import { createInterface } from "node:readline";
 import dns from "node:dns";
 import dnsPromises from "node:dns/promises";
 import childProcess from "node:child_process";
@@ -18,13 +17,15 @@ for (const name of ["exec", "execFile", "execFileSync", "execSync", "fork", "spa
 if (typeof cluster.fork === "function") cluster.fork = denied;
 const { normalizeInRestrictedWorker } = await import("../../packages/normalizers/src/normalize.mjs");
 
-const input = createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false });
-for await (const line of input) {
+const MAX_LINE_BYTES = 40_000_000;
+async function handle(line) {
   let id = null;
   try {
     const request = JSON.parse(line); id = request.id;
     const allowed = new Set(["id", "bytes_base64", "filename", "mediaType", "sourceId", "normalizedAt", "sourceHash", "settings", "limits", "probabilisticUnits", "network", "execute"]);
     if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some((key) => !allowed.has(key)) || typeof request.id !== "string" || request.id.length < 1 || request.id.length > 128 || typeof request.bytes_base64 !== "string" || request.bytes_base64.length > 34_000_000 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(request.bytes_base64)) throw new Error("Worker request violates the restricted protocol");
+    if (request.probabilisticUnits !== undefined && (!Array.isArray(request.probabilisticUnits) || request.probabilisticUnits.length > 10_000)) throw new Error("Worker probabilistic unit count exceeds protocol limits");
+    let probabilisticBytes = 0; for (const unit of request.probabilisticUnits ?? []) { const bytes = Buffer.byteLength(JSON.stringify(unit)); if (bytes > 1_000_000 || (probabilisticBytes += bytes) > 50_000_000) throw new Error("Worker probabilistic output exceeds protocol limits"); }
     if (request.network === true || request.execute === true) throw new Error("Worker policy forbids network and code execution");
     const result = await normalizeInRestrictedWorker({ ...request, bytes: Buffer.from(request.bytes_base64, "base64") });
     process.stdout.write(`${JSON.stringify({ id, ok: true, result })}\n`);
@@ -32,3 +33,11 @@ for await (const line of input) {
     process.stdout.write(`${JSON.stringify({ id, ok: false, error: { code: "KDLC_NORMALIZER_WORKER", message: error.message } })}\n`);
   }
 }
+
+process.stdin.setEncoding("utf8"); let pending = "";
+for await (const chunk of process.stdin) {
+  pending += chunk;
+  if (Buffer.byteLength(pending) > MAX_LINE_BYTES) { process.stdout.write(`${JSON.stringify({ id: null, ok: false, error: { code: "KDLC_NORMALIZER_WORKER", message: "Worker request line exceeds protocol limit" } })}\n`); process.exitCode = 1; break; }
+  let newline; while ((newline = pending.indexOf("\n")) !== -1) { const line = pending.slice(0, newline); pending = pending.slice(newline + 1); if (line) await handle(line); }
+}
+if (pending && process.exitCode !== 1) await handle(pending);

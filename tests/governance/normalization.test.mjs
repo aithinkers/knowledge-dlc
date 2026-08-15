@@ -15,9 +15,9 @@ import { descriptors, normalize, portableArtifacts, runRestrictedNormalizer } fr
 const root = process.cwd();
 const fixture = (name) => readFile(join(root, "fixtures/normalization", name));
 
-function makePdf(value = "Hello PDF") {
+function makePdf(value = "Hello PDF", catalogAction = "") {
   const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Catalog /Pages 2 0 R ${catalogAction} >>`,
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 144] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
     `<< /Length ${value.length + 31} >>\nstream\nBT /F1 12 Tf 72 72 Td (${value}) Tj ET\nendstream`,
@@ -99,11 +99,14 @@ test("FEAT-003 deterministic units and probabilistic model-derived units remain 
   assert(result.units.length > 0); assert.equal(result.probabilisticUnits.length, 1); assert.deepEqual(result.manifest.outputs.map(({ mode }) => mode), ["deterministic", "probabilistic"]);
   const invalid = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, extraction_method: { ...derived.extraction_method, model: undefined } }] }); assert.equal(invalid.manifest.status, "quarantined");
   const invalidLocator = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, locator: { kind: "page" } }] }); assert.equal(invalidLocator.manifest.quarantine.code, "invalid-probabilistic-output");
+  const wrongProfileLocator = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, locator: { kind: "page", page: 1 } }] }); assert.equal(wrongProfileLocator.manifest.quarantine.code, "invalid-probabilistic-output");
   const localized = await normalize({ bytes, filename: "source.txt", settings: { language: "en-US" } }); assert(localized.units.every(({ language }) => language === "en-US"));
   const artifacts = portableArtifacts(result, "src_fixture"); assert.match(artifacts.directory, /^sources\/normalized\/src_fixture\/sha256-[a-f0-9]{64}$/); assert(!artifacts.directory.includes(":")); assert(Object.keys(artifacts.files).some((path) => path.endsWith("manifest.json")));
 });
 
 test("FEAT-003 restricted JSONL worker refuses active policy and returns bounded output", async () => {
+  const { normalizeInRestrictedWorker } = await import("../../packages/normalizers/src/normalize.mjs");
+  await assert.rejects(normalizeInRestrictedWorker({ bytes: Buffer.from("bypass") }), /restricted worker capability/);
   const child = spawn(process.execPath, ["--permission", "--allow-worker", "--allow-addons", `--allow-fs-read=${root}`, join(root, "workers/normalizer/worker.mjs")], { shell: false, env: { PATH: process.env.PATH, KDLC_RESTRICTED_WORKER: "1" }, stdio: ["pipe", "pipe", "pipe"] });
   let output = ""; child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk) => { output += chunk; });
   child.stdin.end(`${JSON.stringify({ id: "ok", bytes_base64: Buffer.from("safe").toString("base64"), filename: "safe.txt", network: false, execute: false })}\n${JSON.stringify({ id: "deny", bytes_base64: "", filename: "safe.txt", network: true })}\n`);
@@ -111,6 +114,7 @@ test("FEAT-003 restricted JSONL worker refuses active policy and returns bounded
   const isolated = await runRestrictedNormalizer({ id: "isolated", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt" }, { timeoutMs: 5_000 });
   assert.equal(isolated.manifest.security.network, false); assert.equal(isolated.units.find(({ kind }) => kind === "line").text, "bounded");
   await assert.rejects(runRestrictedNormalizer({ id: "limited", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt" }, { outputBytes: 1 }), /output limit/);
+  await assert.rejects(runRestrictedNormalizer({ id: "too-many", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt", probabilisticUnits: Array.from({ length: 10_001 }, () => null) }), /count exceeds/);
 });
 
 test("FEAT-003 trusted ceilings, package identity, provenance, and portable paths fail closed", async () => {
@@ -118,16 +122,25 @@ test("FEAT-003 trusted ceilings, package identity, provenance, and portable path
   await assert.rejects(runRestrictedNormalizer({ id: "relax", bytes_base64: "", filename: "safe.txt", limits: { processing_ms: 99_000 } }), /cannot relax/);
   const spoofed = zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "word/document.xml": strToU8("<w:document/>") });
   assert.equal((await normalize({ bytes: spoofed, filename: "spoof.docx" })).manifest.quarantine.code, "malformed");
+  const lookalikeRelationship = zipSync({ ...opc("word/document.xml", "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"), "_rels/.rels": strToU8("<Relationships><Relationship Type='https://attacker.invalid/officeDocument' Target='word/document.xml'/></Relationships>"), "word/document.xml": strToU8("<w:document/>") });
+  assert.equal((await normalize({ bytes: lookalikeRelationship, filename: "spoof.docx" })).manifest.quarantine.code, "malformed");
+  const activePdf = await normalize({ bytes: makePdf("linked", "/OpenAction << /S /URI /URI (https://example.invalid) >>"), filename: "linked.pdf" });
+  assert.equal(activePdf.manifest.quarantine.code, "external-relationship");
   const externalDrawio = await normalize({ bytes: Buffer.from("<mxfile><diagram><mxGraphModel><root><mxCell id='1' href='https://example.invalid'/></root></mxGraphModel></diagram></mxfile>"), filename: "external.drawio" });
   assert.equal(externalDrawio.manifest.quarantine.code, "external-relationship");
   const bomb = Buffer.from(deflateSync(strToU8(encodeURIComponent(`<mxGraphModel><root>${" ".repeat(50_000)}</root></mxGraphModel>`)))).toString("base64");
   assert.equal((await normalize({ bytes: Buffer.from(`<mxfile><diagram>${bomb}</diagram></mxfile>`), filename: "bomb.drawio" })).manifest.quarantine.code, "limit-exceeded");
   await assert.rejects(() => normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", settings: { invalid: 1n } }), /JSON serializable/);
   const quarantined = await normalize({ bytes: Buffer.from([0, 1, 2]), filename: "bad.bin" }); assert.doesNotThrow(() => JSON.stringify(quarantined.manifest));
+  assert.doesNotThrow(() => portableArtifacts(quarantined, quarantined.manifest.source_id));
   const safe = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt" }); assert.throws(() => portableArtifacts(safe, ".."), /portable/);
   assert.throws(() => portableArtifacts(safe, "different"), /does not match/);
   const badMetadata = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "../escape", normalizedAt: "not-a-time" });
   assert.equal(badMetadata.manifest.status, "quarantined"); assert.match(badMetadata.manifest.source_id, /^source-/); assert.equal(badMetadata.manifest.normalized_at, "1970-01-01T00:00:00.000Z");
   const valid = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "source-7", normalizedAt: "2026-08-15T00:00:00Z" });
   assert.equal(valid.manifest.source_id, "source-7"); assert.equal(valid.manifest.normalized_at, "2026-08-15T00:00:00Z");
+  const changedUnit = structuredClone(valid); changedUnit.units[0].source_hash = `sha256:${"0".repeat(64)}`;
+  assert.throws(() => portableArtifacts(changedUnit, "source-7"), /source-unbound/);
+  const changedManifest = structuredClone(valid); changedManifest.manifest.outputs[0].hash = `sha256:${"0".repeat(64)}`;
+  assert.throws(() => portableArtifacts(changedManifest, "source-7"), /output hashes/);
 });

@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["api_version", "source_id", "source_hash", "normalized_at", "status", "format", "normalizer", "settings", "coverage", "omissions", "quality_warnings", "outputs", "security"],
   "properties": {
-    "api_version": {"const": "kdlc.dev/normalization-manifest/v1"}, "source_id": {"type": "string", "minLength": 1}, "source_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "normalized_at": {"type": "string", "format": "date-time"},
+    "api_version": {"const": "kdlc.dev/normalization-manifest/v1"}, "source_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}, "source_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "normalized_at": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"},
     "status": {"enum": ["complete", "partial", "quarantined"]}, "format": {"type": ["string", "null"]},
     "normalizer": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["id", "version", "parser"], "properties": {"id": {"type": "string"}, "version": {"type": "string"}, "parser": {"type": "object", "required": ["name", "version", "license"], "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "license": {"type": "string"}}, "additionalProperties": false}}, "additionalProperties": false}]}, "settings": {"type": "object"},
     "coverage": {"type": "object", "required": ["discovered", "emitted"], "properties": {"discovered": {"type": "integer", "minimum": 0}, "emitted": {"type": "integer", "minimum": 0}}, "additionalProperties": true},
