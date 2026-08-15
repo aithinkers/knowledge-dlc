@@ -213,7 +213,8 @@ test("REQ-GOV-002 permits an independently reviewed gate only while it is absent
     await writeFile(join(candidate, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\n");
     for (const path of protectedHarnessFiles.filter((path) => path !== ".github/workflows/candidate-tests.yml")) {
       await mkdir(dirname(join(candidate, path)), { recursive: true });
-      await writeFile(join(candidate, path), path === ".github/workflows/release-matrix.yml" ? "name: Release matrix\n" : `introduced ${path}\n`);
+      const contents = path === ".github/workflows/release-matrix.yml" ? "name: Release matrix\n" : path.startsWith(".github/workflows/") ? `name: fixture-${path.split("/").at(-1)}\n` : `introduced ${path}\n`;
+      await writeFile(join(candidate, path), contents);
     }
     const scripts = Object.fromEntries(protectedHarnessScripts.map((script) => [script, `node ${script}`]));
     await writeFile(join(trusted, "package.json"), JSON.stringify({ scripts }));
@@ -232,13 +233,14 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
     for (const directory of [trusted, candidate]) {
       for (const path of protectedHarnessFiles) {
         await mkdir(dirname(join(directory, path)), { recursive: true });
-        const contents = path === ".github/workflows/candidate-tests.yml" ? "name: Candidate tests\n" : path === ".github/workflows/release-matrix.yml" ? "name: Release matrix\njobs:\n  aggregate:\n    name: Release matrix\n" : `trusted ${path}\n`;
+        const contents = path === ".github/workflows/candidate-tests.yml" ? "name: Candidate tests\n" : path === ".github/workflows/release-matrix.yml" ? "name: Release matrix\njobs:\n  aggregate:\n    name: Release matrix\n" : path.startsWith(".github/workflows/") ? `name: fixture-${path.split("/").at(-1)}\n` : `trusted ${path}\n`;
         await writeFile(join(directory, path), contents);
       }
     }
     const scripts = Object.fromEntries(protectedHarnessScripts.map((script) => [script, `node ${script}`]));
-    await writeFile(join(trusted, "package.json"), JSON.stringify({ scripts }));
-    await writeFile(join(candidate, "package.json"), JSON.stringify({ scripts }));
+    const packageDocument = { scripts, dependencies: { yaml: "2.9.0", ajv: "8.20.0" } };
+    await writeFile(join(trusted, "package.json"), JSON.stringify(packageDocument));
+    await writeFile(join(candidate, "package.json"), JSON.stringify(packageDocument));
     assert.deepEqual(await validateHarnessIntegrity(candidate, trusted), []);
 
     for (const path of [
@@ -250,8 +252,17 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
     ]) await writeFile(join(candidate, path), `candidate substituted ${path}\n`);
     const candidatePackage = JSON.parse(await readFile(join(candidate, "package.json"), "utf8"));
     candidatePackage.scripts["check:statistical-evidence"] = "true";
+    candidatePackage.dependencies.yaml = "npm:hostile-parser@1.0.0";
     await writeFile(join(candidate, "package.json"), JSON.stringify(candidatePackage));
-    await writeFile(join(candidate, ".github/workflows/spoof-release.yml"), "name: harmless\njobs:\n  pass:\n    name: Release matrix\n");
+    await writeFile(join(candidate, "package-lock.json"), "candidate dependency substitution\n");
+    const spoofWorkflows = {
+      "spoof-release.yml": "name: harmless\njobs:\n  pass:\n    name: Release matrix\n",
+      "spoof-expression.yml": 'name: harmless\njobs:\n  pass:\n    name: ${{ "Release matrix" }}\n',
+      "spoof-escaped.yml": 'name: harmless\njobs:\n  pass:\n    name: "\\u0052elease matrix"\n',
+      "spoof-block.yml": "name: harmless\njobs:\n  pass:\n    name: >-\n      Release matrix\n",
+      "spoof-matrix.yml": "name: harmless\njobs:\n  pass:\n    strategy:\n      matrix:\n        context: [Release matrix]\n    name: ${{ matrix.context }}\n"
+    };
+    for (const [name, contents] of Object.entries(spoofWorkflows)) await writeFile(join(candidate, ".github/workflows", name), contents);
 
     const failures = await validateHarnessIntegrity(candidate, trusted);
     for (const path of [
@@ -262,7 +273,13 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
       "distribution/release/statistical/profile.json"
     ]) assert.ok(failures.includes(`protected harness file differs from trusted base: ${path}`));
     assert.ok(failures.includes("protected npm script differs from trusted base: check:statistical-evidence"));
-    assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-release.yml'));
+    assert.ok(failures.includes("protected harness file differs from trusted base: package.json"));
+    assert.ok(failures.includes("protected harness file differs from trusted base: package-lock.json"));
+    assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-release.yml#pass'));
+    assert.ok(failures.includes("dynamic job name is forbidden outside a protected workflow: spoof-expression.yml#pass"));
+    assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-escaped.yml#pass'));
+    assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-block.yml#pass'));
+    assert.ok(failures.includes("dynamic job name is forbidden outside a protected workflow: spoof-matrix.yml#pass"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

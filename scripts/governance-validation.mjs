@@ -3,11 +3,14 @@ import { lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
+import YAML from "yaml";
 
 export const protectedHarnessFiles = Object.freeze([
   ".github/workflows/governance.yml",
   ".github/workflows/candidate-tests.yml",
   ".github/workflows/release-matrix.yml",
+  "package.json",
+  "package-lock.json",
   "scripts/governance-validation.mjs",
   "scripts/verify-governance.mjs",
   "scripts/release-matrix-definition.mjs",
@@ -43,6 +46,30 @@ const reservedContexts = Object.freeze([
   Object.freeze({ name: "Candidate tests", workflow: "candidate-tests.yml" }),
   Object.freeze({ name: "Release matrix", workflow: "release-matrix.yml" })
 ]);
+
+function inspectReservedContexts(content, entryName) {
+  const failures = [];
+  const document = YAML.parseDocument(content, { prettyErrors: false, uniqueKeys: true });
+  if (document.errors.length) return [`candidate workflow cannot be parsed safely: ${entryName}: ${document.errors[0].message}`];
+  const workflow = document.toJS({ maxAliasCount: 100 });
+  if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) return [`candidate workflow is not a mapping: ${entryName}`];
+  const isProtectedOwner = reservedContexts.some(({ workflow: owner }) => entryName === owner);
+  if (!isProtectedOwner && workflow.jobs && typeof workflow.jobs === "object" && !Array.isArray(workflow.jobs)) for (const [jobId, job] of Object.entries(workflow.jobs)) {
+    if (job && typeof job === "object" && !Array.isArray(job) && typeof job.name === "string" && job.name.includes("${{")) {
+      failures.push(`dynamic job name is forbidden outside a protected workflow: ${entryName}#${jobId}`);
+    }
+  }
+  for (const reserved of reservedContexts) {
+    if (entryName === reserved.workflow) continue;
+    if (workflow.name === reserved.name) failures.push(`reserved check name "${reserved.name}" appears in another workflow: ${entryName}`);
+    if (!workflow.jobs || typeof workflow.jobs !== "object" || Array.isArray(workflow.jobs)) continue;
+    for (const [jobId, job] of Object.entries(workflow.jobs)) {
+      if (!job || typeof job !== "object" || Array.isArray(job) || typeof job.name !== "string") continue;
+      if (job.name === reserved.name) failures.push(`reserved check name "${reserved.name}" appears in another workflow: ${entryName}#${jobId}`);
+    }
+  }
+  return failures;
+}
 
 export async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
@@ -134,11 +161,9 @@ export async function validateHarnessIntegrity(candidateRoot, trustedRoot) {
   try {
     const workflowDirectory = resolve(candidateRoot, ".github/workflows");
     for (const entry of await readdir(workflowDirectory, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
+      if (!entry.isFile() || !/\.ya?ml$/u.test(entry.name)) continue;
       const content = await readFile(resolve(workflowDirectory, entry.name), "utf8");
-      for (const reserved of reservedContexts) if (entry.name !== reserved.workflow && new RegExp(`^\\s*name:\\s*(['"]?)${reserved.name}\\1\\s*$`, "m").test(content)) {
-        failures.push(`reserved check name "${reserved.name}" appears in another workflow: ${entry.name}`);
-      }
+      failures.push(...inspectReservedContexts(content, entry.name));
     }
   } catch (error) {
     failures.push(`candidate workflow names cannot be inspected: ${error.message}`);
