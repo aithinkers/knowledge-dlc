@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { releaseMatrixCells, releaseMatrixCommandIds, releaseMatrixDifferences } from "../../scripts/release-matrix-definition.mjs";
-import { removeReleaseTemporary, withReleaseCleanup } from "../../scripts/release-artifact-cleanup.mjs";
+import { removeReleaseTemporary, validateInstalledCliSmoke, withReleaseCleanup } from "../../scripts/release-artifact-cleanup.mjs";
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -26,7 +26,7 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.match(attributes, /^\* text=auto eol=lf$/m);
   assert.match(workflow, /release-matrix:\r?\n    name: Release matrix/); assert.match(workflow, /npm install --global npm@11\.5\.1/); assert.match(workflow, /needs\.matrix\.result != 'success'/);
   assert.match(workflow, /name: Bind exact installed npm CLI/); assert.match(workflow, /test "\$\(node "\$npm_cli" --version\)" = 11\.5\.1/); assert.match(workflow, /KDLC_NPM_CLI/);
-  assert.match(derivationSource, /bin, "doctor"[\s\S]+cwd: canonicalConsumer/); assert.match(derivationSource, /id === "project\.manifest" && status === "pass"/); assert.doesNotMatch(derivationSource, /canonicalDoctor/);
+  assert.match(derivationSource, /bin, "doctor"[\s\S]+cwd: canonicalConsumer/); assert.doesNotMatch(derivationSource, /canonicalDoctor/);
   const aggregatorSteps = parsedWorkflow.jobs["release-matrix"].steps;
   const trustedCheckout = aggregatorSteps.find((step) => step.name === "Check out trusted release verifier");
   assert.equal(trustedCheckout.with.ref, "${{ github.event.pull_request.base.sha || github.sha }}");
@@ -82,4 +82,8 @@ test("REL-001 trusted artifact derivation removes readonly output without maskin
   const primary = new Error("primary"); const cleanup = new Error("cleanup");
   await assert.rejects(withReleaseCleanup(async () => { throw primary; }, async () => { throw cleanup; }), (error) => error === primary);
   await assert.rejects(withReleaseCleanup(async () => "ok", async () => { throw cleanup; }), (error) => error === cleanup);
+  const initialized = { ok: true, result: { project: "initialized" } }; const diagnosed = { ok: true, result: { healthy: true, diagnostics: [{ id: "project.manifest", status: "pass" }] } };
+  assert.doesNotThrow(() => validateInstalledCliSmoke(initialized, diagnosed));
+  assert.throws(() => validateInstalledCliSmoke(initialized, { ...diagnosed, result: { ...diagnosed.result, healthy: false } }), /doctor/);
+  assert.throws(() => validateInstalledCliSmoke(initialized, { ok: true, data: diagnosed.result }), /doctor/);
 });

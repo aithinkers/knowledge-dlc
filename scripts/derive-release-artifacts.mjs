@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
 import { normalizeNpmPackPath } from "./supply-chain-validation.mjs";
-import { removeReleaseTemporary, withReleaseCleanup } from "./release-artifact-cleanup.mjs";
+import { removeReleaseTemporary, validateInstalledCliSmoke, withReleaseCleanup } from "./release-artifact-cleanup.mjs";
 
 const execute = promisify(execFile); const [candidateArgument, outputArgument] = process.argv.slice(2);
 if (!candidateArgument || !outputArgument || process.argv.length !== 4) throw new Error("usage: node scripts/derive-release-artifacts.mjs <candidate-root> <output.json>");
@@ -31,9 +31,8 @@ await withReleaseCleanup(async () => {
   const bin = resolve(canonicalConsumer, "node_modules", "knowledge-dlc", "packages", "cli", "bin.mjs"); const readable = [`--allow-fs-read=${canonicalConsumer}`, `--allow-fs-read=${consumer}`];
   const writable = [`--allow-fs-write=${canonicalConsumer}`, `--allow-fs-write=${consumer}`];
   const initialized = JSON.parse((await execute(process.execPath, ["--permission", ...readable, ...writable, bin, "init", "--output", "json"], { cwd: canonicalConsumer, env: safeEnvironment, maxBuffer: 16 * 1024 * 1024 })).stdout);
-  if (initialized.ok !== true) throw new Error("installed CLI init did not establish a governed project");
   const diagnosed = JSON.parse((await execute(process.execPath, ["--permission", ...readable, ...writable, bin, "doctor", "--output", "json"], { cwd: canonicalConsumer, env: safeEnvironment, maxBuffer: 16 * 1024 * 1024 })).stdout);
-  if (diagnosed.ok !== true || diagnosed.data?.healthy !== true || !diagnosed.data.diagnostics?.some(({ id, status }) => id === "project.manifest" && status === "pass")) throw new Error("installed CLI doctor did not verify the initialized governed project");
+  validateInstalledCliSmoke(initialized, diagnosed);
   await execute(process.execPath, ["--permission", ...readable, "--input-type=module", "--eval", "await import('knowledge-dlc/cli'); await import('knowledge-dlc/adapters');"], { cwd: canonicalConsumer, env: { ...safeEnvironment, NODE_PATH: resolve(canonicalConsumer, "node_modules").split(delimiter).join(delimiter) }, maxBuffer: 16 * 1024 * 1024 });
   const policy = JSON.parse(await readFile(resolve(candidate, "security/supply-chain-policy.json"), "utf8")); const head = process.env.KDLC_HEAD_SHA;
   if (!/^[0-9a-f]{40}$/u.test(head ?? "")) throw new Error("trusted candidate head is unavailable");

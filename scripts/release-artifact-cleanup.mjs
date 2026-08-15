@@ -13,3 +13,8 @@ export async function withReleaseCleanup(action, cleanup) {
   try { return await action(); } catch (error) { primary = error; throw error; }
   finally { try { await cleanup(); } catch (error) { if (!primary) throw error; } }
 }
+
+export function validateInstalledCliSmoke(initialized, diagnosed) {
+  if (initialized?.ok !== true) throw new Error("installed CLI init did not establish a governed project");
+  if (diagnosed?.ok !== true || diagnosed.result?.healthy !== true || !diagnosed.result.diagnostics?.some(({ id, status }) => id === "project.manifest" && status === "pass")) throw new Error("installed CLI doctor did not verify the initialized governed project");
+}
