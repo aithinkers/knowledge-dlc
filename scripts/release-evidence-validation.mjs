@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -25,6 +26,36 @@ const schemas = Object.freeze({
   run: "core/schemas/release/recorded-run.schema.json",
   report: "core/schemas/release/evaluation-report.schema.json",
 });
+
+export async function validateReleaseCandidateEvidence(root, { version, headSha, matrixRunId, trustedRepositorySnapshot, trustedReviewRecord } = {}) {
+  const failures = []; let evidence; let schema;
+  try { schema = await json(root, "core/schemas/release/release-candidate-evidence.schema.json"); evidence = await json(root, "distribution/release/release-candidate-evidence.json"); }
+  catch (error) { return [`release-candidate evidence is unavailable: ${error.message}`]; }
+  const ajv = new Ajv2020({ allErrors: true, strict: true }); addFormats(ajv); ajv.addSchema(await json(root, schemas.common)); const validate = ajv.compile(schema);
+  if (!validate(evidence)) return [`release-candidate evidence contract: ${ajv.errorsText(validate.errors)}`];
+  if (evidence.version !== version || evidence.head_sha !== headSha || evidence.matrix.head_sha !== headSha || evidence.matrix.run_id !== Number(matrixRunId)) failures.push("release-candidate evidence does not exact-bind version, head, and trusted matrix run");
+  if (evidence.artifacts.first_sha256 !== evidence.artifacts.second_sha256) failures.push("two independent package builds are not byte-identical");
+  for (const item of [evidence.changelog, evidence.artifacts.manifest, evidence.artifacts.checksums, ...Object.values(evidence.supply_chain), evidence.install_smoke.record, evidence.repository, evidence.independent_review]) {
+    try { if (digest(await bytes(root, item.path)) !== item.sha256) failures.push(`release-candidate evidence hash drift: ${item.path}`); }
+    catch (error) { failures.push(`release-candidate evidence unavailable: ${item.path} (${error.message})`); }
+  }
+  try { if (!(await bytes(root, evidence.changelog.path)).toString("utf8").includes(version)) failures.push("changelog does not declare the candidate version"); } catch {}
+  try { const manifest = await json(root, evidence.artifacts.manifest.path); if (manifest.version !== version || !Array.isArray(manifest.files) || manifest.files.length === 0) failures.push("package manifest is empty or version-drifted"); } catch { failures.push("package manifest is invalid"); }
+  try { const checksums = await json(root, evidence.artifacts.checksums.path); if (checksums.version !== version || checksums.package_sha256 !== evidence.artifacts.first_sha256) failures.push("artifact checksums do not bind the reproducible package"); } catch { failures.push("artifact checksums are invalid"); }
+  try { const settings = await json(root, evidence.repository.path); if (settings.visibility !== "public" || settings.branch_protection !== true || settings.release_blocking_issues_closed !== true || !settings.required_checks?.includes("Release matrix")) failures.push("repository settings snapshot is not release-ready"); }
+  catch { failures.push("repository settings snapshot is invalid"); }
+  try { const review = await json(root, evidence.independent_review.path); if (review.decision !== "approved" || review.independent !== true || review.head_sha !== headSha) failures.push("independent review record is not an exact-head approval"); }
+  catch { failures.push("independent review record is invalid"); }
+  try { if (!trustedRepositorySnapshot || !trustedReviewRecord || !same(JSON.parse(await readFile(trustedRepositorySnapshot, "utf8")), await json(root, evidence.repository.path)) || !same(JSON.parse(await readFile(trustedReviewRecord, "utf8")), await json(root, evidence.independent_review.path))) failures.push("repository settings or independent review are not backed by trusted live GitHub state"); }
+  catch { failures.push("trusted live GitHub release state is unavailable"); }
+  try { const provenance = await json(root, evidence.supply_chain.provenance_decision.path); if (provenance.decision !== "passed" || provenance.version !== version) failures.push("supply-chain provenance decision is not passing and version-bound"); }
+  catch { failures.push("supply-chain provenance decision is invalid"); }
+  try { const sbom = await json(root, evidence.supply_chain.sbom.path); if (sbom.version !== version || !Array.isArray(sbom.packages) || sbom.packages.length === 0) failures.push("SBOM is empty or version-drifted"); } catch { failures.push("SBOM record is invalid"); }
+  try { if (!(await bytes(root, evidence.supply_chain.notices.path)).toString("utf8").trim()) failures.push("license notices are empty"); } catch {}
+  try { const smoke = await json(root, evidence.install_smoke.record.path); if (smoke.version !== version || smoke.cli !== true || smoke.imports !== true || smoke.passed !== true) failures.push("install smoke record is incomplete or version-drifted"); }
+  catch { failures.push("install smoke record is invalid"); }
+  return failures;
+}
 
 function digest(bytes) { return `sha256:${createHash("sha256").update(bytes).digest("hex")}`; }
 function same(left, right) { return JSON.stringify(left) === JSON.stringify(right); }
@@ -137,6 +168,7 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
     const erasure = traceability.requirements?.find(({ id }) => id === "FEAT-009");
     if (rel?.issue !== 10) failures.push("REL-001 traceability must remain bound to issue #10");
     failures.push(...validateReleaseLifecycle({ manifest, lock, conformance, report, rel, statisticalPhase: statistical.phase }));
+    if (conformance.release_status === "release-candidate") failures.push(...await validateReleaseCandidateEvidence(root, { version: manifest?.version, headSha: process.env.KDLC_HEAD_SHA, matrixRunId: process.env.GITHUB_RUN_ID, trustedRepositorySnapshot: process.env.KDLC_TRUSTED_REPOSITORY_SNAPSHOT, trustedReviewRecord: process.env.KDLC_TRUSTED_REVIEW_RECORD }));
     if (erasure?.issue !== 24 || !["implemented", "verified", "released"].includes(erasure.status) || !erasure.evidence?.tests?.includes("tests/governance/revocation-erasure.test.mjs")) failures.push("Governed conformance requires traceable merged FEAT-009 erasure evidence");
     for (const module of conformance.modules) for (const id of module.requirement_ids) {
       const traced = traceability.requirements?.find((entry) => entry.id === id);

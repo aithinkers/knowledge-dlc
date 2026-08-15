@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 jobs:
   matrix:
@@ -62,6 +64,15 @@ jobs:
         with:
           node-version: 24.5.0
       - run: npm ci --ignore-scripts --prefix trusted
+      - name: Collect trusted final-candidate state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if grep -q '"release_status": "release-candidate"' distribution/release/conformance-statement.json; then
+            test -f trusted/scripts/collect-release-state.mjs
+            node trusted/scripts/collect-release-state.mjs trusted-release-state
+          fi
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-matrix-*
@@ -71,6 +82,9 @@ jobs:
         env:
           KDLC_PR_NUMBER: ${{ github.event.pull_request.number }}
           KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          KDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          KDLC_TRUSTED_REPOSITORY_SNAPSHOT: ${{ github.workspace }}/trusted-release-state/repository-settings.json
+          KDLC_TRUSTED_REVIEW_RECORD: ${{ github.workspace }}/trusted-release-state/independent-review.json
         run: |
           if test -f trusted/scripts/verify-release-matrix.mjs; then
             (cd trusted && KDLC_CANDIDATE_ROOT=.. node scripts/verify-release-matrix.mjs ../matrix-results)
