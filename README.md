@@ -4,10 +4,11 @@ K-DLC (Knowledge Development Lifecycle) is a harness-neutral lifecycle and
 governance framework for building, querying, and maintaining agent-authored
 knowledge bases.
 
-The repository is in private MVP development against specification version
-0.2.0. The implementation will declare conformance module-by-module; no module
-or document-format capability is considered implemented until its linked issue,
-tests, and review evidence are complete.
+The public repository is in pre-release MVP development against specification
+version 0.2.0. It is not a supported release. Conformance is declared
+module-by-module; no module or document-format capability is considered
+implemented until its linked issue, tests, and independent review evidence are
+complete.
 
 ## Development status
 
@@ -18,6 +19,10 @@ tests, and review evidence are complete.
 - [Agent development contract](AGENTS.md)
 - [Development harness](development/README.md)
 - [Contributing guide](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Support policy](SUPPORT.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Release-readiness gates](docs/release-readiness.md)
 
 ## Required delivery flow
 
@@ -35,6 +40,7 @@ the machine-checkable parts of this contract.
 ```bash
 node scripts/verify-governance.mjs
 node --test tests/governance/*.test.mjs
+npm run check:supply-chain
 ```
 
 ## License

@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible, public-safe defect in K-DLC.
+title: "BUG: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include vulnerabilities, credentials, personal information, private evidence, restricted source material, or unredacted logs. Follow SECURITY.md for confidential reporting.
+  - type: input
+    id: revision
+    attributes:
+      label: K-DLC revision
+      description: Commit SHA or other exact revision where the defect occurs.
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other or multiple
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use synthetic, public-safe inputs and redact diagnostic output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public disclosure check
+      options:
+        - label: I confirmed this report contains no secret, vulnerability detail, personal information, or restricted material.
+          required: true

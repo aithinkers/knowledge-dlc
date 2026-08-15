@@ -1,0 +1,117 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import test from "node:test";
+
+import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
+
+const root = resolve(import.meta.dirname, "../..");
+const text = (path) => readFile(resolve(root, path), "utf8");
+const json = async (path) => JSON.parse(await text(path));
+
+test("REL-001 public policies provide actionable low-disclosure security and conduct channels", async () => {
+  const [readme, security, conduct, support, config] = await Promise.all([
+    text("README.md"), text("SECURITY.md"), text("CODE_OF_CONDUCT.md"), text("SUPPORT.md"), text(".github/ISSUE_TEMPLATE/config.yml")
+  ]);
+  assert.doesNotMatch(`${readme}\n${security}\n${support}`, /private (?:MVP|`main` branch)/i);
+  assert.match(security, /mailto:connect@aithinkers\.com\?subject=K-DLC%20confidential%20security%20report/);
+  assert.match(conduct, /mailto:connect@aithinkers\.com\?subject=K-DLC%20confidential%20conduct%20report/);
+  assert.match(security, /before sending reproduction details/i);
+  assert.match(conduct, /Do not\s+file a public issue/i);
+  const parsed = parseYamlArtifact(config);
+  assert.equal(parsed.blank_issues_enabled, false);
+  assert.deepEqual(parsed.contact_links.map(({ name }) => name), ["Security vulnerability", "Confidential conduct report"]);
+  assert.equal(parsed.contact_links.every(({ url }) => url.startsWith("https://")), true);
+});
+
+test("REL-001 security workflows pin executable actions and scan complete Git history", async () => {
+  const workflows = ["secret-history.yml", "codeql.yml", "dependency-review.yml", "supply-chain.yml"];
+  for (const name of workflows) {
+    const source = await text(`.github/workflows/${name}`);
+    parseYamlArtifact(source);
+    for (const reference of source.matchAll(/uses:\s*([^\s#]+)/g)) assert.match(reference[1], /^[^@\s]+@[0-9a-f]{40}$/, `${name}: ${reference[1]}`);
+    assert.doesNotMatch(source, /pull_request_target/);
+  }
+  const secret = await text(".github/workflows/secret-history.yml");
+  assert.match(secret, /fetch-depth: 0/);
+  assert.match(secret, /--log-opts="--all"/);
+  assert.match(secret, /a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb/);
+  const config = await text(".gitleaks.toml");
+  assert.match(config, /useDefault = true/);
+  assert.doesNotMatch(config, /allowlist|allowlists|regexes|paths/);
+});
+
+test("REL-001 npm updates, installed licenses, dependency graph, and exact package contents are bounded", async () => {
+  const [manifest, dependabot, policy, notices, sbom, packageFiles] = await Promise.all([
+    json("package.json"), text(".github/dependabot.yml"), json("security/supply-chain-policy.json"), text("THIRD_PARTY_NOTICES.md"), json("docs/supply-chain/sbom.spdx.json"), json("security/npm-package-files.json")
+  ]);
+  assert.equal(manifest.private, true);
+  assert.equal(manifest.version, "0.0.0-private");
+  assert.equal(manifest.license, "MIT");
+  assert.deepEqual(manifest.files, policy.package_files);
+  assert.ok(manifest.files.includes("distribution/"));
+  assert.equal(parseYamlArtifact(dependabot).updates.some((entry) => entry["package-ecosystem"] === "npm"), true);
+  assert.deepEqual(policy.allowed_licenses, ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT"]);
+  assert.match(notices, /Inventory hash: `sha256:[0-9a-f]{64}`/);
+  assert.match(notices, /installed dependency graph/i);
+  assert.equal(sbom.spdxVersion, "SPDX-2.3");
+  assert.equal(sbom.dataLicense, "CC0-1.0");
+  assert.ok(sbom.packages.length > 1);
+  assert.deepEqual(sbom.documentDescribes, ["SPDXRef-Root"]);
+  assert.ok(packageFiles.files.includes("package.json"));
+  assert.ok(packageFiles.files.includes("packages/retrieval/src/retriever.mjs"));
+  assert.deepEqual(exactPackageManifestFailures([...packageFiles.files, "packages/core/src/unexpected-secret.txt"], packageFiles.files), ["unexpected emitted package file: packages/core/src/unexpected-secret.txt"]);
+  assert.deepEqual(exactPackageManifestFailures(packageFiles.files.filter((path) => path !== "package.json"), packageFiles.files), ["missing emitted package file: package.json"]);
+  assert.deepEqual(installedMetadataFailures({ identity: { name: "example" }, entry: { version: "1.0.0" }, metadata: { name: "example", version: "1.0.1", license: "GPL-3.0" }, allowedLicenses: policy.allowed_licenses }), [
+    "installed identity differs from lock: example@1.0.0", "installed license is not allowlisted: example@1.0.0 (GPL-3.0)"
+  ]);
+  const byName = Object.fromEntries(sbom.packages.map((item) => [item.name, item.SPDXID]));
+  assert.ok(sbom.relationships.some((item) => item.spdxElementId === byName.ajv && item.relationshipType === "DEPENDS_ON" && item.relatedSpdxElement === byName["fast-deep-equal"]));
+  assert.ok(sbom.relationships.some((item) => item.spdxElementId === byName.ajv && item.relationshipType === "DEV_DEPENDENCY_OF" && item.relatedSpdxElement === "SPDXRef-Root"));
+  assert.ok(sbom.packages.filter(({ SPDXID }) => SPDXID !== "SPDXRef-Root").every((item) => item.externalRefs?.some(({ referenceType }) => referenceType === "kdlc:installed-manifest-sha256")));
+  assert.ok(sbom.packages.filter(({ SPDXID }) => SPDXID !== "SPDXRef-Root").every((item) => item.externalRefs?.some(({ referenceType }) => referenceType === "kdlc:installed-tree-sha256")));
+  const installedBytes = [{ path: "package.json", size: 2, sha256: "a".repeat(64) }];
+  assert.notEqual(installedTreeHash(installedBytes), installedTreeHash([{ ...installedBytes[0], sha256: "b".repeat(64) }]));
+  assert.throws(() => installedTreeHash([{ path: "../escape", size: 1, sha256: "a".repeat(64) }]), /invalid/);
+});
+
+test("REL-001 readiness record keeps final release gates explicitly open", async () => {
+  const readiness = await text("docs/release-readiness.md");
+  assert.match(readiness, /not a conformance statement,\s+release announcement, or evidence that REL-001 is complete/i);
+  assert.match(readiness, /private vulnerability reporting/i);
+  assert.match(readiness, /secret scanning, non-provider patterns, validity checks, and\s+push protection/i);
+  assert.match(readiness, /Final REL-001 blockers/);
+});
+
+test("REL-001 package evidence reads are descriptor-pinned, no-follow, ancestry-bound, and leak-free", async (context) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "kdlc-supply-read-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(resolve(directory, "package"));
+  await writeFile(resolve(directory, "package/metadata.json"), "trusted");
+  assert.equal((await readTrustedFile(directory, "package/metadata.json")).toString(), "trusted");
+  await symlink(resolve(directory, "package/metadata.json"), resolve(directory, "link.json"));
+  await assert.rejects(readTrustedFile(directory, "link.json"));
+
+  await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async ({ target }) => {
+    await rename(target, `${target}.old`);
+    await symlink(resolve(directory, "link.json"), target);
+  } }), /identity changed|ELOOP/);
+  await rm(resolve(directory, "package/metadata.json"), { force: true });
+  await rename(resolve(directory, "package/metadata.json.old"), resolve(directory, "package/metadata.json"));
+
+  await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => {
+    await rename(resolve(directory, "package"), resolve(directory, "package.old"));
+    await mkdir(resolve(directory, "package"));
+    await writeFile(resolve(directory, "package/metadata.json"), "substituted");
+  } }), /identity changed|parent identity changed/);
+  await rm(resolve(directory, "package"), { recursive: true, force: true });
+  await rename(resolve(directory, "package.old"), resolve(directory, "package"));
+
+  const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+  const before = (await readdir(descriptorDirectory)).length;
+  for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
+  const after = (await readdir(descriptorDirectory)).length;
+  assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
+});

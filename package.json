@@ -3,6 +3,30 @@
   "version": "0.0.0-private",
   "private": true,
   "description": "K-DLC development and governance tooling",
+  "license": "MIT",
+  "author": "AIThinkers",
+  "homepage": "https://github.com/aithinkers/knowledge-dlc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aithinkers/knowledge-dlc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aithinkers/knowledge-dlc/issues"
+  },
+  "keywords": ["knowledge-management", "governance", "agents", "provenance", "lifecycle"],
+  "files": [
+    "core/",
+    "distribution/",
+    "packages/",
+    "workers/",
+    "security/npm-package-files.json",
+    "docs/supply-chain/sbom.spdx.json",
+    "README.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "type": "module",
   "exports": {
     "./normalizers": "./packages/normalizers/index.mjs",
@@ -19,6 +43,8 @@
   },
   "scripts": {
     "check:governance": "node scripts/verify-governance.mjs",
+    "check:supply-chain": "node scripts/verify-supply-chain.mjs",
+    "sbom:generate": "node scripts/verify-supply-chain.mjs --write",
     "test:extensions": "node --test tests/governance/extensions.test.mjs",
     "test:governance": "node --test tests/governance/*.test.mjs",
     "generate:distribution": "node packages/adapters/generate.mjs",
