@@ -6,6 +6,7 @@
     "distribution/",
     "packages/",
     "workers/",
+    "security/npm-package-files.json",
     "docs/supply-chain/sbom.spdx.json",
     "README.md",
     "SECURITY.md",
@@ -13,6 +14,7 @@
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
+  "package_manifest": "security/npm-package-files.json",
   "notices": "THIRD_PARTY_NOTICES.md",
   "sbom": "docs/supply-chain/sbom.spdx.json"
 }

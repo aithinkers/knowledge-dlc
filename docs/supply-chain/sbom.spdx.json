@@ -25,198 +25,6 @@
       "copyrightText": "Copyright (c) 2026 AIThinkers"
     },
     {
-      "SPDXID": "SPDXRef-Package-e73fd7eebf1b0879cd1b",
-      "name": "@napi-rs/canvas",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "51de1dd232ebf6f49a6a4bdf39322380fde1a18f243086201c2e26b44e0bd1b3f74adf657fa4f2095b089ef148384a1fcdc51e31f0f27470f2f05b365ae5b3f8"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-55238213d24b470a5598",
-      "name": "@napi-rs/canvas-android-arm64",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-android-arm64/-/canvas-android-arm64-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "099526644c8dfdc9923753a1449e38bc113ac726f97a405bb0817c76a3608b36e70221d214d8bc780038a32c8801ee4acc9ef62b5e8e282da50329d92e1bf7d9"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-6bf10be4711a3dd2eaf3",
-      "name": "@napi-rs/canvas-darwin-arm64",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "14626c2278117d2f4b0da5f8b7f945b61aa7d8a9ba6fad4e3738c9142ebecae69b2f536068aef1d1fc2b8fcdbbe8e4059230af4a9259efe09e65681ccb4dc5db"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-6a15c689614b8e415bfd",
-      "name": "@napi-rs/canvas-darwin-x64",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-darwin-x64/-/canvas-darwin-x64-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "c0b0ebb5f5fd5786eee8ee79fd6c06bcf5428dfba72f66c49b9f65cc8164f5940eb7ba09acfcddc7fcad66242be9b319f57385c2f5ee8eccd8b69a022bbc946e"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-180aecc919d5aae14213",
-      "name": "@napi-rs/canvas-linux-arm-gnueabihf",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm-gnueabihf/-/canvas-linux-arm-gnueabihf-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "f1396510fffd50f0d5c6b04dfed9db181b31c701bc128dad8325bcc03cbe1a2f6b9bdb22d88e8cb03bfd3257c8ddaec93aece405cbab1d80c7671c0b83300874"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-7a5d7d7f3ec668480433",
-      "name": "@napi-rs/canvas-linux-arm64-gnu",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm64-gnu/-/canvas-linux-arm64-gnu-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "605d7900aa06ae053b6a8034dc247e7004c244f41c56de8bd782dbfdaf61a8aee94fbfc384892a878ab297e6b618b7eac7efb220825f06e677b07337ce55ccd5"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-ac91dfad307e2661d7f6",
-      "name": "@napi-rs/canvas-linux-arm64-musl",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm64-musl/-/canvas-linux-arm64-musl-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "cd779558d1698fbdb41d9967d1b7c0b3ed7f9cfdd6cba679854c3ad1426ef9cbe08a9b398d9b6e5f6f848c31c593df2adc1637e46684d5340bc04f52db8e2f3c"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-474367075be4452778cd",
-      "name": "@napi-rs/canvas-linux-riscv64-gnu",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-linux-riscv64-gnu/-/canvas-linux-riscv64-gnu-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "92fcb5629ab8383108d9644d1afb39f3ca9331c5828e5108b994725bc257a620673148ab83142e9080c554340472b2e51cfe5ca99f5cbef7ce90127b9283a4b4"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-a7de04057b19b6d9a830",
-      "name": "@napi-rs/canvas-linux-x64-gnu",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-linux-x64-gnu/-/canvas-linux-x64-gnu-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "7331e77cb8120a5e3c8a5b92e9b36bcad19886c6d24d4b88bccb9c0303b498f123d6e8641e4e92522448d31a2abf43d2173a4615f4a742f1699bbbd5fad0cef8"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-73164ae17f4b750a3608",
-      "name": "@napi-rs/canvas-linux-x64-musl",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-linux-x64-musl/-/canvas-linux-x64-musl-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "69fb20e86c9f531f2a6738eccb08e299750459c49611363917cd2198c6f61565525e445ba2bf08a5fb58da05e76acabe638d97ba0ffbeaa4c7c2abed8bb1d14f"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-4827436eaf72582c9522",
-      "name": "@napi-rs/canvas-win32-arm64-msvc",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-win32-arm64-msvc/-/canvas-win32-arm64-msvc-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "6f2ce16b7e7ba62cb4c202ba219390b54e29969b7de1fe82c47152ecb849a5662b0d6593fc08ad40dc5131f08d35a407657501dc1c0d85049f1f6469899d1669"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
-      "SPDXID": "SPDXRef-Package-f31875a115973af01cfc",
-      "name": "@napi-rs/canvas-win32-x64-msvc",
-      "versionInfo": "1.0.6",
-      "downloadLocation": "https://registry.npmjs.org/@napi-rs/canvas-win32-x64-msvc/-/canvas-win32-x64-msvc-1.0.6.tgz",
-      "filesAnalyzed": false,
-      "licenseConcluded": "NOASSERTION",
-      "licenseDeclared": "MIT",
-      "checksums": [
-        {
-          "algorithm": "SHA512",
-          "checksumValue": "8162ce80a199cf7859873838f6ad8f248511c32da9096875cef3455e62ced728a778e3e1129a0bdc457afd52233a229ad65d8fea278fd76128dfce6ed4c2cb55"
-        }
-      ],
-      "copyrightText": "NOASSERTION"
-    },
-    {
       "SPDXID": "SPDXRef-Package-a6b193ff0df9277b6807",
       "name": "acorn",
       "versionInfo": "8.15.0",
@@ -230,7 +38,15 @@
           "checksumValue": "359c896ab05f2fb9d6c08abe1432fa669ff21c485e3cc3679c9d32dea7e2782ae636f61cb7cbafb62578d54be549ee9aa407e4d1f63515b5b1f8dc1f9a9bed4e"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:9e422c8225c9cc4c774e9a9392d0ecac7f766b46122ef2db99db0fc4bbedc247"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-9c728cf87aba8556fa4b",
@@ -246,7 +62,15 @@
           "checksumValue": "4e16e58be3a53a3fa230f60505505f2773a60809da4b2367e0cd6fcfd4fa1a46b926df5b6bf1c8479ea3a32eb9b58ea4c7f142179557341f35f58eff194ac118"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:1f9033ee5a6515e7d76938b7072941862d1ed228a6879cc7fe10cdeb75107989"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-3081140538322aaf684c",
@@ -262,7 +86,15 @@
           "checksumValue": "f2252a979d04511fae51c7514371c3a9ae84572a3776870bf20e5627714d7169aeeb621b90652e7bfa44c8b056f1518a2ae7133e0a9e92ce1f214d43038ca8c1"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:402fb4bcfa457f0226813f3976ac42839dd619907c075c108efba8600d7edb69"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-7b8d94be277f0a52bef0",
@@ -278,7 +110,15 @@
           "checksumValue": "144757cf05acf8ddeb66a12aa6a95e898f4cd40e8801ff68a35cc71400672d6f45709fe3cecbbe1bf2acdc7ab71609663ca7bcd06786070f195cb127c0f074bd"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:b4fe69cd7668c761bc1f0a6c41fcd3d4e53bc3c2d280b5d789fe5e6a6c6505d0"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-c9e1955f3d800370ad54",
@@ -294,7 +134,15 @@
           "checksumValue": "b8a66086ff5498f90c54b632fff299f47140209b25ef0921a047482f4fab86e498f6965096169e1840cf21efbfc3b7a1f3530eaa5f10ffdfa29c01961ba64760"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:6fb5ce96bb883cff2cede920643dcc44430ea856b89b2104b954964d1574b522"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-60db03f2d9496a0b9ae9",
@@ -310,7 +158,15 @@
           "checksumValue": "7f7a90f68432f63d808417bf1fd542f75c0b98a042094fe00ce9ca340606e61b303bb04b2a3d3d1dce4760dcfd70623efb19690c22200da8ad56cd3701347ce1"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:a5c63940db0260739be9e2ac67f3aac268df4db5770420ee4e34e493152f97d2"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-ade6c223e148259c4c6d",
@@ -326,7 +182,15 @@
           "checksumValue": "807c00d4ef4b0c870aba730a84e6d2fc78a6c2d7a13b59cf50408a02ee53a4a81a3b5f5f716125e1b96259ed635b1545bc85f3b498e34382fc5d0d4453d7fb27"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:3b01e17f5de289a0905ad894187235c8a8bb284a1fd285b40227b1d862f86b4d"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-e40a8fa62b11394bb3c9",
@@ -342,7 +206,15 @@
           "checksumValue": "b5b64db89acbc06529df3b2106d772e16f8e47166e221f1ae629722044030b9ad8d5fdd4db424caf2d0b977581cd4e7c1192ac12e2455e16f9830bfc0ac3ef80"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:5922d8150b307bc0e4e441491c779c45379e9913d348848fca8d5cf02db4d134"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-dfd7041e536fad65503d",
@@ -358,7 +230,15 @@
           "checksumValue": "ac8d9ab30efbbb4986830855dea03e384818a9a0e7e5436a82cf81c74146c12a6ea9f627f88afa45063910d350f126c8886fe6e6055aec20f946b88ee1fe0bb2"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:1e7ef2e860e4e37fb1c41ae146fcd456cda76d4d9e80f6dd73ecb93c79ae0772"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-591199b7af30bc0d9a8c",
@@ -374,7 +254,15 @@
           "checksumValue": "c5ecc626639be2593f3356592d347f8da047438806fe5a909c9a9d22fe3bdb50cc820b1ad5b0d59475cd78762881a2041c3f6f091bf47dc2f884c03e0a86ab92"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:30f7493f5e528d41b190c8aca110f78cb6ab73ab13df384e94f92d409ad809ad"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-e830fd7d93f6ebaa3030",
@@ -390,7 +278,15 @@
           "checksumValue": "34cf3f3fd9f75e35e12199f594b86415a0024ce5114178d6855e0103f4673aff31be0aadaa9017f483b89914314b1d51968e2dab37aa6f4b0e96bb9a3b2dddba"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:156fb24af02845c190701360d06dfda35ef04282e34a734289ea9535ad9819ae"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-62d398829a7647cd7ddb",
@@ -406,7 +302,15 @@
           "checksumValue": "63115bf9241ca1d376ae75fd4e7ddd1d896a7dbecd8e5cf37ce34fa4977e00aa0ab548c475ebd37db0b4edde5371ccf338aeb6eb56ae4643ff33c3811ecf6f15"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:d7918934bf0ef5b18beed1bd2d9b49a04447de445c171305a2de082ccee369ed"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-bc20339cbc91aaa3e6dc",
@@ -422,7 +326,15 @@
           "checksumValue": "5dfd2759ee91b1ece214cbbe029f5b8a251b9a996ae92f7fa7eef0ed85cffc904786b5030d48706bebc0372b9bbaa7d9593bde53ffc36151ac0c6ed128bfef13"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:c0002f7d4c7d7e2a885cf0f97226344902417c3a0980f2beca41962d2bc1f6d8"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-48e79d9690cb7acd3e3b",
@@ -438,7 +350,15 @@
           "checksumValue": "c4083b48e9c486b9b9cc8de9b8e38acb2d4e31c32520965834963bc4b0704b37b452384f2e759f8f6185d84a53d239b368928858a1cbb1a4926a37f7e5b7189c"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:32052572b41c2a890ed0854798c48454cc5991dcaafe5fb1718a4253046acfd3"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-9820574a08f66349702b",
@@ -454,7 +374,15 @@
           "checksumValue": "445d05c3eacee4031ff4c0326915c8e005745258f994c1ea571c5d4a08956e2c52097a049a65ff8e4d02b89c38fb74aaae860ef55a1487e1dcb898afbed25e98"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:bf2e091359d5870257cc8287a268e001bfb39abf19275f382276efe3c7785a4f"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-214e9e8e22cdb064b0a1",
@@ -470,7 +398,15 @@
           "checksumValue": "2599c328af01d11083c3ce0535d0c022964af89b89c3eb3b2f3f2792c23b488b94dd45c926c954b61b22fae5815183b03c5c16ed6ecf44b45f50aa718ed8c50b"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:a91c0b20003ff9399dde1de8c59681f1b6901c6fb1aac71780a3a876dc548583"
+        }
+      ]
     },
     {
       "SPDXID": "SPDXRef-Package-be80181ebffd939c178a",
@@ -486,7 +422,15 @@
           "checksumValue": "d80be1357de66fccdde99cbb20d4ed4a9975175e475ba5a7aa3d2cad696428b729625fe03083098b2b86ab629e236605c543e376507edcb735d2c78c2ed2f870"
         }
       ],
-      "copyrightText": "NOASSERTION"
+      "primaryPackagePurpose": "LIBRARY",
+      "copyrightText": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "OTHER",
+          "referenceType": "kdlc:installed-manifest-sha256",
+          "referenceLocator": "sha256:20b8b197cbd10dad245d45e463dfe58e4c8c25a47e24bc4256ad9ab58bf35683"
+        }
+      ]
     }
   ],
   "relationships": [
@@ -494,11 +438,6 @@
       "spdxElementId": "SPDXRef-Root",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-a6b193ff0df9277b6807"
-    },
-    {
-      "spdxElementId": "SPDXRef-Root",
-      "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-9c728cf87aba8556fa4b"
     },
     {
       "spdxElementId": "SPDXRef-Root",
@@ -544,6 +483,46 @@
       "spdxElementId": "SPDXRef-Root",
       "relationshipType": "DEPENDS_ON",
       "relatedSpdxElement": "SPDXRef-Package-be80181ebffd939c178a"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-9c728cf87aba8556fa4b",
+      "relationshipType": "DEV_DEPENDENCY_OF",
+      "relatedSpdxElement": "SPDXRef-Root"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-9c728cf87aba8556fa4b",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-60db03f2d9496a0b9ae9"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-9c728cf87aba8556fa4b",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-ade6c223e148259c4c6d"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-9c728cf87aba8556fa4b",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-e830fd7d93f6ebaa3030"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-9c728cf87aba8556fa4b",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-bc20339cbc91aaa3e6dc"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-3081140538322aaf684c",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-9c728cf87aba8556fa4b"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-dfd7041e536fad65503d",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-591199b7af30bc0d9a8c"
+    },
+    {
+      "spdxElementId": "SPDXRef-Package-48e79d9690cb7acd3e3b",
+      "relationshipType": "DEPENDS_ON",
+      "relatedSpdxElement": "SPDXRef-Package-214e9e8e22cdb064b0a1"
     }
   ]
 }

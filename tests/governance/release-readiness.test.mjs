@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures } from "../../scripts/supply-chain-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const text = (path) => readFile(resolve(root, path), "utf8");
@@ -41,9 +42,9 @@ test("REL-001 security workflows pin executable actions and scan complete Git hi
   assert.doesNotMatch(config, /allowlist|allowlists|regexes|paths/);
 });
 
-test("REL-001 npm updates, license policy, notices, SBOM, and package contents are bounded", async () => {
-  const [manifest, dependabot, policy, notices, sbom] = await Promise.all([
-    json("package.json"), text(".github/dependabot.yml"), json("security/supply-chain-policy.json"), text("THIRD_PARTY_NOTICES.md"), json("docs/supply-chain/sbom.spdx.json")
+test("REL-001 npm updates, installed licenses, dependency graph, and exact package contents are bounded", async () => {
+  const [manifest, dependabot, policy, notices, sbom, packageFiles] = await Promise.all([
+    json("package.json"), text(".github/dependabot.yml"), json("security/supply-chain-policy.json"), text("THIRD_PARTY_NOTICES.md"), json("docs/supply-chain/sbom.spdx.json"), json("security/npm-package-files.json")
   ]);
   assert.equal(manifest.private, true);
   assert.equal(manifest.version, "0.0.0-private");
@@ -53,10 +54,22 @@ test("REL-001 npm updates, license policy, notices, SBOM, and package contents a
   assert.equal(parseYamlArtifact(dependabot).updates.some((entry) => entry["package-ecosystem"] === "npm"), true);
   assert.deepEqual(policy.allowed_licenses, ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT"]);
   assert.match(notices, /Inventory hash: `sha256:[0-9a-f]{64}`/);
+  assert.match(notices, /installed dependency graph/i);
   assert.equal(sbom.spdxVersion, "SPDX-2.3");
   assert.equal(sbom.dataLicense, "CC0-1.0");
   assert.ok(sbom.packages.length > 1);
   assert.deepEqual(sbom.documentDescribes, ["SPDXRef-Root"]);
+  assert.ok(packageFiles.files.includes("package.json"));
+  assert.ok(packageFiles.files.includes("packages/retrieval/src/retriever.mjs"));
+  assert.deepEqual(exactPackageManifestFailures([...packageFiles.files, "packages/core/src/unexpected-secret.txt"], packageFiles.files), ["unexpected emitted package file: packages/core/src/unexpected-secret.txt"]);
+  assert.deepEqual(exactPackageManifestFailures(packageFiles.files.filter((path) => path !== "package.json"), packageFiles.files), ["missing emitted package file: package.json"]);
+  assert.deepEqual(installedMetadataFailures({ identity: { name: "example" }, entry: { version: "1.0.0" }, metadata: { name: "example", version: "1.0.1", license: "GPL-3.0" }, allowedLicenses: policy.allowed_licenses }), [
+    "installed identity differs from lock: example@1.0.0", "installed license is not allowlisted: example@1.0.0 (GPL-3.0)"
+  ]);
+  const byName = Object.fromEntries(sbom.packages.map((item) => [item.name, item.SPDXID]));
+  assert.ok(sbom.relationships.some((item) => item.spdxElementId === byName.ajv && item.relationshipType === "DEPENDS_ON" && item.relatedSpdxElement === byName["fast-deep-equal"]));
+  assert.ok(sbom.relationships.some((item) => item.spdxElementId === byName.ajv && item.relationshipType === "DEV_DEPENDENCY_OF" && item.relatedSpdxElement === "SPDXRef-Root"));
+  assert.ok(sbom.packages.filter(({ SPDXID }) => SPDXID !== "SPDXRef-Root").every((item) => item.externalRefs?.some(({ referenceType }) => referenceType === "kdlc:installed-manifest-sha256")));
 });
 
 test("REL-001 readiness record keeps final release gates explicitly open", async () => {

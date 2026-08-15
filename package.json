@@ -19,6 +19,7 @@
     "distribution/",
     "packages/",
     "workers/",
+    "security/npm-package-files.json",
     "docs/supply-chain/sbom.spdx.json",
     "README.md",
     "SECURITY.md",
