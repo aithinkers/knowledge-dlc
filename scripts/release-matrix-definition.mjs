@@ -12,6 +12,7 @@ export function releaseMatrixDifferences(os) {
   return Object.freeze([
     Object.freeze({ key: "path_separator", value: os === "win32" ? "backslash" : "slash" }),
     Object.freeze({ key: "line_ending", value: "lf-generated-evidence" }),
-    Object.freeze({ key: "executable_shim", value: os === "win32" ? "cmd" : "posix" })
+    Object.freeze({ key: "executable_shim", value: os === "win32" ? "cmd" : "posix" }),
+    Object.freeze({ key: "package_archive_metadata", value: os === "win32" ? "windows-mode" : "posix-mode" })
   ]);
 }

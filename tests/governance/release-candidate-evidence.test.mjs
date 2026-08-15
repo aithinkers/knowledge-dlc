@@ -10,8 +10,8 @@ import { deriveRulesetState } from "../../scripts/release-state-derivation.mjs";
 
 const root = resolve(import.meta.dirname, "../.."); const hash = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const cells = ["ubuntu-node22", "ubuntu-node24", "windows-node22", "windows-node24", "macos-node22", "macos-node24"];
-const observed = { package: { first_sha256: "b".repeat(64), second_sha256: "b".repeat(64), manifest_sha256: "c".repeat(64), file_count: 178 }, supply_chain: { sbom_sha256: "d".repeat(64), notices_sha256: "e".repeat(64) }, smoke: { cli: true, imports: true } };
-const matrix = (head) => cells.map((cell) => ({ cell, head_sha: head, observed_evidence: structuredClone(observed) }));
+const observed = { package: { first_sha256: "b".repeat(64), second_sha256: "b".repeat(64), manifest_sha256: "c".repeat(64), content_sha256: "f".repeat(64), file_count: 178 }, supply_chain: { sbom_sha256: "d".repeat(64), notices_sha256: "e".repeat(64) }, smoke: { cli: true, imports: true } };
+const matrix = (head) => cells.map((cell) => ({ cell, head_sha: head, platform: { os: cell.startsWith("windows") ? "win32" : cell.startsWith("macos") ? "darwin" : "linux" }, observed_evidence: structuredClone(observed) }));
 
 test("REL-001 release-candidate gate derives package, supply-chain, settings, and independent review evidence outside candidate records", async (context) => {
   const candidate = await mkdtemp(resolve(tmpdir(), "kdlc-candidate-evidence-")); context.after(() => rm(candidate, { recursive: true, force: true }));
@@ -28,6 +28,11 @@ test("REL-001 release-candidate gate derives package, supply-chain, settings, an
   await writeFile(settingsPath, JSON.stringify(settings)); await writeFile(reviewPath, JSON.stringify(review));
   const trusted = { version, headSha: head, matrixResults: matrix(head), trustedRepositorySnapshot: settingsPath, trustedReviewRecord: reviewPath };
   assert.deepEqual(await validateReleaseCandidateEvidence(candidate, trusted), []);
+
+  const osMetadata = matrix(head); for (const result of osMetadata.filter(({ platform }) => platform.os === "win32")) { result.observed_evidence.package.first_sha256 = result.observed_evidence.package.second_sha256 = "9".repeat(64); result.observed_evidence.package.manifest_sha256 = "8".repeat(64); }
+  assert.deepEqual(await validateReleaseCandidateEvidence(candidate, { ...trusted, matrixResults: osMetadata }), []);
+  for (const result of osMetadata.filter(({ platform }) => platform.os === "win32")) result.observed_evidence.package.content_sha256 = "7".repeat(64);
+  assert.ok((await validateReleaseCandidateEvidence(candidate, { ...trusted, matrixResults: osMetadata })).some((failure) => failure.includes("paths/content/size")));
 
   const substituted = matrix(head); substituted[5].observed_evidence.package.first_sha256 = "f".repeat(64);
   assert.ok((await validateReleaseCandidateEvidence(candidate, { ...trusted, matrixResults: substituted })).some((failure) => failure.includes("package bytes")));

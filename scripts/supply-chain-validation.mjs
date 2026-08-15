@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
+import { promisify } from "node:util";
+
+const execute = promisify(execFile);
 
 function inside(root, path) {
   const rel = relative(root, path);
@@ -54,6 +58,16 @@ export function npmCommandInvocation({ platform = process.platform, environment 
   const cli = environment.KDLC_NPM_CLI ?? environment.npm_execpath;
   if (typeof cli !== "string" || !win32.isAbsolute(cli) || !/[\\/]npm-cli\.js$/iu.test(cli)) throw new Error("trusted Windows npm CLI path is unavailable");
   return { command: node, prefix: [cli] };
+}
+
+export async function inspectPackageArchive(archive, extractionRoot) {
+  await mkdir(extractionRoot); await execute("tar", ["-xzf", archive, "-C", extractionRoot], { maxBuffer: 16 * 1024 * 1024 });
+  const packageRoot = resolve(extractionRoot, "package"); const entries = [];
+  const visit = async (directory) => { for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name, "en"))) {
+    const absolute = resolve(directory, entry.name); if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) throw new Error("package archive contains an unsupported entry");
+    if (entry.isDirectory()) await visit(absolute); else { const bytes = await readFile(absolute); entries.push({ path: relative(packageRoot, absolute).split(sep).join("/"), size: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") }); }
+  } };
+  await visit(packageRoot); return { content_sha256: createHash("sha256").update(JSON.stringify(entries)).digest("hex"), file_count: entries.length };
 }
 
 export function exactPackageManifestFailures(actual, expected) {

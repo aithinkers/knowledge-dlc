@@ -83,7 +83,11 @@ rebuild, supply-chain, reproducible double-package, installed CLI, and installed
 export checks. Each protected cell records the exact candidate head plus
 observed package, manifest, SBOM, notices, and smoke evidence. The stable
 `Release matrix` aggregator runs trusted-base code and dependencies to reject
-missing or substituted cells and cross-platform evidence drift. A separate
+missing or substituted cells and cross-platform path/content/size drift. Each
+cell must reproduce its archive twice; Windows archive mode metadata is an
+explicit platform difference, while the trusted Ubuntu Node 24 derivation is
+the designated candidate artifact and all platforms must install equivalent
+content. A separate
 read-token job executes only the trusted-base live-state collector and never
 checks out or executes candidate code. Passing workflow evidence is still
 required before release.

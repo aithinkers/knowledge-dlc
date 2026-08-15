@@ -44,8 +44,10 @@ export async function validateReleaseCandidateEvidence(root, { version, headSha,
   else {
     const observed = matrixResults.map(({ head_sha, observed_evidence }) => ({ head_sha, observed_evidence }));
     if (observed.some(({ head_sha }) => head_sha !== headSha)) failures.push("matrix artifacts do not exact-bind the candidate head");
-    const packages = observed.map(({ observed_evidence }) => observed_evidence?.package);
-    if (packages.some((item) => !item || item.first_sha256 !== item.second_sha256) || !packages.every((item) => same(item, packages[0]))) failures.push("two-build package bytes/manifests are not identical in every release cell");
+    const packages = matrixResults.map(({ platform, observed_evidence }) => ({ os: platform?.os, value: observed_evidence?.package }));
+    if (packages.some(({ value }) => !value || value.first_sha256 !== value.second_sha256)) failures.push("two-build package bytes are not identical within every release cell");
+    for (const os of ["linux", "win32", "darwin"]) { const group = packages.filter((item) => item.os === os).map(({ value }) => value); if (group.length !== 2 || !group.every((item) => same(item, group[0]))) failures.push(`${os} package evidence differs across supported Node runtimes`); }
+    if (!packages.every(({ value }) => value?.content_sha256 === packages[0].value?.content_sha256 && value?.file_count === packages[0].value?.file_count)) failures.push("package paths/content/size differ across release platforms");
     const supply = observed.map(({ observed_evidence }) => observed_evidence?.supply_chain);
     if (supply.some((item) => !item) || !supply.every((item) => same(item, supply[0]))) failures.push("verified SBOM/notices bytes differ across release cells");
     if (observed.some(({ observed_evidence }) => observed_evidence?.smoke?.cli !== true || observed_evidence?.smoke?.imports !== true)) failures.push("installed package CLI/import smoke was not observed in every release cell");

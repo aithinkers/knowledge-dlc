@@ -7,7 +7,7 @@ import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { releaseMatrixCells, releaseMatrixDifferences } from "./release-matrix-definition.mjs";
-import { normalizeNpmPackPath, npmCommandInvocation } from "./supply-chain-validation.mjs";
+import { inspectPackageArchive, normalizeNpmPackPath, npmCommandInvocation } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile); const [cellFlag, cell, outputFlag, output] = process.argv.slice(2);
 if (cellFlag !== "--cell" || !cell || outputFlag !== "--output" || !output) throw new Error("usage: node scripts/run-release-matrix-cell.mjs --cell <cell> --output <result.json>");
@@ -42,9 +42,9 @@ try {
     const { stdout } = await execute(npmCommand, npmArgs(["pack", "--json", "--ignore-scripts", "--pack-destination", destination]), { cwd: root, maxBuffer: 16 * 1024 * 1024 });
     const parsed = JSON.parse(stdout); if (!Array.isArray(parsed) || parsed.length !== 1 || !parsed[0].filename || !Array.isArray(parsed[0].files)) throw new Error("npm pack did not return one artifact and manifest");
     const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path: normalizeNpmPackPath(path), size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en"));
-    const artifact = await readFile(resolve(destination, parsed[0].filename)); builds.push({ filename: parsed[0].filename, sha256: digest(artifact), manifest_sha256: digest(JSON.stringify(manifest)), file_count: manifest.length });
+    const artifactPath = resolve(destination, parsed[0].filename); const artifact = await readFile(artifactPath); const contents = await inspectPackageArchive(artifactPath, resolve(destination, "extracted")); builds.push({ filename: parsed[0].filename, sha256: digest(artifact), manifest_sha256: digest(JSON.stringify(manifest)), content_sha256: contents.content_sha256, file_count: manifest.length });
   }
-  if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("two clean package builds are not byte-identical");
+  if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].content_sha256 !== builds[1].content_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("two clean package builds are not byte-identical");
   commands.push({ id: "pack", status: "passed" });
   const consumer = resolve(temporary, "consumer"); await import("node:fs/promises").then(({ mkdir }) => mkdir(consumer)); await writeFile(resolve(consumer, "package.json"), '{"name":"kdlc-release-smoke","private":true,"type":"module"}\n');
   await execute(npmCommand, npmArgs(["install", "--ignore-scripts", "--no-audit", "--no-fund", resolve(packDirectories[0], builds[0].filename)]), { cwd: consumer, maxBuffer: 32 * 1024 * 1024 });
@@ -55,7 +55,7 @@ try {
   const policy = JSON.parse(await readFile(resolve(root, "security/supply-chain-policy.json"), "utf8"));
   const headSha = process.env.KDLC_HEAD_SHA; if (!/^[0-9a-f]{40}$/u.test(headSha ?? "")) throw new Error("trusted candidate head is unavailable");
   const result = { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell, head_sha: headSha, runtime: { node: nodeVersion, npm: npmVersion }, platform: { os: process.platform, arch: process.arch }, commands, differences: releaseMatrixDifferences(process.platform), observed_evidence: {
-    package: { first_sha256: builds[0].sha256, second_sha256: builds[1].sha256, manifest_sha256: builds[0].manifest_sha256, file_count: builds[0].file_count },
+    package: { first_sha256: builds[0].sha256, second_sha256: builds[1].sha256, manifest_sha256: builds[0].manifest_sha256, content_sha256: builds[0].content_sha256, file_count: builds[0].file_count },
     supply_chain: { sbom_sha256: digest(await readFile(resolve(root, policy.sbom))), notices_sha256: digest(await readFile(resolve(root, policy.notices))) }, smoke: { cli: true, imports: true }
   } };
   await writeFile(resolve(output), `${JSON.stringify(result, null, 2)}\n`);
