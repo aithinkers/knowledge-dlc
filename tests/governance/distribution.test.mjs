@@ -12,6 +12,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
 import { distributionDefinition } from "../../packages/adapters/index.mjs";
+import { NodeFileStore } from "../../packages/lifecycle/src/store.mjs";
 import {
   CLI_COMMANDS,
   createLocalProjectEngine,
@@ -733,4 +734,50 @@ test("FEAT-006 MCP resources, schemas, metadata, doctor, and generated drift are
   const [code] = await once(child, "exit");
   assert.equal(code, 0);
   await server.close();
+});
+
+test("FEAT-006 local CLI bootstrap is init-only and remote principals cannot self-bootstrap", async (t) => {
+  const root = await temporary(t);
+  const run = async () => {
+    const child = spawn(process.execPath, [resolve(repository, "packages/cli/bin.mjs"), "init", "--output", "json"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = ""; child.stdout.on("data", (chunk) => { stdout += chunk; }); child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const [code] = await once(child, "exit");
+    return { code, envelope: JSON.parse(stdout || stderr) };
+  };
+  const first = await run();
+  assert.equal(first.code, 0);
+  assert.equal(first.envelope.ok, true);
+  const second = await run();
+  assert.equal(second.code, EXIT.conflict);
+  const remoteRoot = await temporary(t);
+  const remote = createLocalProjectEngine({ root: remoteRoot, principal: { actor: "human:remote", principal_mode: "served", issuer: "https://issuer.invalid", scopes: ["mutate"] } });
+  const denied = await remote.envelope("project_init", { project_id: "remote.project" });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, "KDLC_POLICY_DENIED");
+});
+
+test("FEAT-006 governed packet, decision, and publication survive engine restart", async (t) => {
+  const root = await temporary(t);
+  const bootstrap = createLocalProjectEngine({ root });
+  assert.equal((await bootstrap.envelope("project_init", { project_id: "governed.project" })).ok, true);
+  const recording = JSON.parse(await readFile(resolve(repository, "tests/fixtures/models/ingest-recording.json"), "utf8"));
+  const normalized_evidence = JSON.parse(await readFile(resolve(repository, "tests/fixtures/workflows/ingest-normalized.json"), "utf8"));
+  const first = createLocalProjectEngine({ root });
+  const created = await first.execute("proposal_create", { proposal: { workflow_id: "wf_ingest", task: "ingest", recording, normalized_evidence } });
+  const proposal = created.proposals[0];
+  assert.equal((await first.execute("review_packet", { proposal_id: proposal.proposal.id })).packet_hash, proposal.packet_hash);
+  await first.execute("review_submit", { proposal_id: proposal.proposal.id, decision: "approved", receipt_id: "rr_restart" });
+  await first.close();
+  const restarted = createLocalProjectEngine({ root });
+  const current = { concept: proposal.proposal.concept.after, target_revision: proposal.proposal.target.revision, source_hashes: [normalized_evidence.source_hash], resolved_dependencies: proposal.packet.resolved.dependencies, profile: proposal.packet.resolved.profile, policies: proposal.packet.resolved.policies };
+  const publication = await restarted.execute("publish_request", { proposal_id: proposal.proposal.id, receipt_id: "rr_restart", current });
+  assert.equal(publication.intent.receipt_id, "rr_restart");
+  await restarted.close();
+});
+
+test("FEAT-006 durable coordination fails bounded when its configured root is absent", async (t) => {
+  const root = await temporary(t);
+  const missingRoot = resolve(root, "absent");
+  const store = new NodeFileStore(missingRoot);
+  await assert.rejects(() => store.withMutex("lock", { owner: "fixture", clock: { now: () => new Date().toISOString(), millis: () => Date.now() }, timeoutMs: 20 }, async () => {}), (error) => error.code === "KDLC_INPUT_INVALID");
 });

@@ -1,6 +1,6 @@
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import { KdlcEngine } from "../cli/index.mjs";
+import { KdlcEngine, localOwnerActor } from "../cli/index.mjs";
 export const MCP_PROTOCOL = "2025-06-18";
 const definitions = {
   project_init: [
@@ -136,15 +136,15 @@ export class McpProjectServer {
   constructor({
     root,
     projectId,
-    principal = {
-      actor: "process:local",
-      scopes: ["read", "mutate", "review", "publish"],
-    },
+    principal,
     engineFactory = (options) => new KdlcEngine(options),
   } = {}) {
     this.root = root;
     this.projectId = projectId;
-    this.principal = structuredClone(principal);
+    this.principal = structuredClone(principal ?? {
+      actor: engineFactory.name === "createLocalProjectEngine" ? localOwnerActor() : "process:local",
+      scopes: ["read", "mutate", "review", "publish"],
+    });
     this.engineFactory = engineFactory;
     this.engines = new Map();
   }

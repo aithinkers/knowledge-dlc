@@ -147,6 +147,14 @@ export class NodeFileStore {
 
   async withMutex(relativePath, { owner, clock, leaseMs = 30_000, timeoutMs = 10_000, retryMs = 2 }, action) {
     if (!owner || !clock?.millis) throw invalid("Filesystem mutex requires owner and clock");
+    try {
+      const rootMetadata = await stat(this.root);
+      if (!rootMetadata.isDirectory()) throw invalid("Filesystem mutex root must be a directory");
+      await realpath(this.root);
+    } catch (error) {
+      if (error?.code === "ENOENT") throw invalid("Filesystem mutex root does not exist");
+      throw error;
+    }
     const started = Date.now();
     const leasePath = `${relativePath}/owner.json`;
     let acquiredLease;

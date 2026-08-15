@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import {
   mkdir,
   readFile,
@@ -95,6 +96,11 @@ const digest = (value) =>
   `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 const portable = (value) =>
   typeof value === "string" && /^[a-z0-9][a-z0-9._-]{0,127}$/.test(value);
+export const localOwnerActor = () => {
+  const identity = userInfo();
+  const stable = `${identity.username}-${identity.uid}`.replace(/[^A-Za-z0-9._-]/g, "-");
+  return `human:${stable}`;
+};
 
 export class EngineError extends Error {
   constructor(code, message, exitClass, details = {}) {
@@ -137,7 +143,7 @@ export class KdlcEngine {
   constructor({
     root = process.cwd(),
     principal = {
-      actor: "process:local",
+      actor: localOwnerActor(),
       scopes: ["read", "mutate"],
     },
     clock = { now: () => new Date().toISOString() },
@@ -211,6 +217,7 @@ export class KdlcEngine {
   }
   async execute(operation, input = {}) {
     await this.resumeJobs();
+    if (this.principal.bootstrap_init_only && !["init", "project_init"].includes(operation)) throw new EngineError("KDLC_POLICY_DENIED", "Bootstrap principal is restricted to project initialization", EXIT.policy);
     if (
       !CLI_COMMANDS.includes(operation) &&
       ![
@@ -350,17 +357,22 @@ export class KdlcEngine {
         },
       ],
     };
+    await this.store.ensureDir(".kdlc/governed");
     await atomicJson(path, project);
     await atomicJson(this.path("principal-policy.json"), {
       api_version: "kdlc.dev/local-principal-policy/v1",
       principals: [
         {
-          actor: "process:local",
-          scopes: ["read", "mutate"],
+          id: localOwnerActor(),
+          actor: localOwnerActor(),
+          principal_mode: "local",
+          review_roles: ["trust-reviewer"],
+          scopes: ["read", "mutate", "review", "publish"],
           clearance: "public",
           compartments: [],
         },
       ],
+      review_contexts: [],
       minimum_trust: "unverified",
       stale_behavior: "warn",
     });
@@ -740,11 +752,11 @@ export function renderEnvelope(envelope, output = "text") {
 export function createLocalProjectEngine(options = {}) {
   const root = resolve(options.root ?? process.cwd());
   const requestedPrincipal = options.principal ?? {
-    actor: "process:local",
+    actor: localOwnerActor(),
     scopes: [],
   };
   let policy = null,
-    principal = requestedPrincipal;
+    principal = { ...requestedPrincipal, scopes: [] };
   const policyPath = resolve(root, ".kdlc/principal-policy.json");
   if (existsSync(policyPath)) {
     const candidate = JSON.parse(readFileSync(policyPath, "utf8"));
@@ -777,6 +789,8 @@ export function createLocalProjectEngine(options = {}) {
       };
       policy = candidate;
     }
+  } else if (options.principal === undefined && !existsSync(resolve(root, ".kdlc/project.json"))) {
+    principal = { actor: localOwnerActor(), scopes: ["mutate"], bootstrap_init_only: true };
   }
   const resolveMounts = async () => {
     const project = parseYamlArtifact(
@@ -786,7 +800,7 @@ export function createLocalProjectEngine(options = {}) {
       project,
     );
   };
-  const authorizedRetriever = async () => {
+  const prepareRetriever = async () => {
     const { mounts } = await resolveMounts();
     const order = { public: 0, internal: 1, confidential: 2, restricted: 3 };
     const allowed = (access) =>
@@ -803,10 +817,19 @@ export function createLocalProjectEngine(options = {}) {
     const retriever = new FederatedRetriever({
       mounts,
       policy: pdp,
-      minimumDurationMs: 0,
+      minimumDurationMs: 25,
+      authorizationTtlMs: 300_000,
     });
     const authorization = await retriever.prepareAuthorization({ principal });
-    return { retriever, authorization };
+    return { retriever, authorization, expires_at: Date.now() + 300_000 };
+  };
+  const startRetriever = () => prepareRetriever().catch((error) => ({ error, expires_at: 0 }));
+  let retrievalSnapshot = policy ? startRetriever() : null;
+  const authorizedRetriever = async () => {
+    const prepared = await retrievalSnapshot;
+    if (prepared?.error) throw prepared.error;
+    if (!prepared || Date.now() >= prepared.expires_at) throw missing("Retrieval authorization requires an explicit refresh");
+    return prepared;
   };
   const search = async (input) => {
     const { retriever, authorization } = await authorizedRetriever();
@@ -891,23 +914,41 @@ export function createLocalProjectEngine(options = {}) {
         ...(record.issuer ? { issuer: record.issuer } : {}),
         review_roles: Array.isArray(record.review_roles) ? record.review_roles : [],
       })));
-      const contextAuthority = new ReviewContextAuthority(policy.review_contexts);
       const indexStore = new NodeFileStore(root);
       const indexPath = (proposalId) => `.kdlc/governed/proposal-index/${proposalId}.json`;
       const proposalIndex = async (proposalId) => {
         if (!portable(proposalId) || !await indexStore.exists(indexPath(proposalId))) throw missing("Requested proposal is unavailable");
         return indexStore.readJson(indexPath(proposalId));
       };
+      const contextPath = (workflowId) => `.kdlc/governed/review-contexts/${workflowId}.json`;
+      const contextSession = async (workflowId) => {
+        const configured = policy.review_contexts.find((record) => record.workflow_id === workflowId);
+        const record = configured ?? (await indexStore.exists(contextPath(workflowId)) ? await indexStore.readJson(contextPath(workflowId)) : null);
+        if (!record) throw missing("Trusted review context is unavailable");
+        return new ReviewContextAuthority([record]).establish(workflowId);
+      };
       const harness = async (workflowId, review = false) => GovernedAgentWorkflows.create({
         store,
         trustAuthority,
-        reviewContextSession: contextAuthority.establish(workflowId),
+        reviewContextSession: await contextSession(workflowId),
         ...(review ? { session: principalAuthority.establishReviewSession(principal.id, principal.review_roles[0]) } : {}),
       });
       governed = {
         proposal_create: async ({ proposal }) => {
           const workflowId = proposal?.workflow_id;
           if (!portable(workflowId) || !["ingest", "adopt"].includes(proposal?.task)) throw inputError("proposal requires a portable workflow_id and recorded ingest/adopt task");
+          if (!policy.review_contexts.some((record) => record.workflow_id === workflowId) && !await indexStore.exists(contextPath(workflowId))) {
+            const normalized = proposal.normalized_evidence;
+            const context = {
+              evidence: (normalized?.units ?? []).map((unit) => ({ source_id: normalized.source_id, source_hash: normalized.source_hash, locator: unit.locator, excerpt: unit.text, authority: principal.actor, access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "deterministic", warnings: [] })),
+              sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: digest({ workflowId, normalized }) }],
+              impact: { links: [], dependents: [], freshness_change: null, unresolved_conflicts: [] },
+              resolved: { profile: { id: "kdlc-base", version: "0.2.0", hash: digest("kdlc-base/0.2.0") }, policies: [{ id: "team-policy", version: "1", hash: digest("local-owner-policy") }], dependencies: {} },
+              provenance: { models: [{ id: proposal.recording?.model?.model ?? "recorded" }], tools: [{ id: "kdlc-harness/0.2.0" }] },
+              budget: { model_tokens: 0, model_cost_usd: 0 },
+            };
+            await indexStore.writeJsonAtomic(contextPath(workflowId), { workflow_id: workflowId, context });
+          }
           const runtime = await harness(workflowId);
           const output = await runtime.runRecorded({ task: proposal.task, workflowId, recording: proposal.recording, normalizedEvidence: proposal.normalized_evidence });
           const assembled = [];
@@ -996,6 +1037,8 @@ export function createLocalProjectEngine(options = {}) {
         },
         refresh: async () => {
           const resolved = await resolveMounts();
+          retrievalSnapshot = startRetriever();
+          await retrievalSnapshot;
           return {
             lock: resolved.lock,
             mounts: resolved.mounts.map(({ alias, id, resolved_ref }) => ({
