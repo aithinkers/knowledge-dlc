@@ -96,6 +96,39 @@ cryptographically independent attestation from repository writers. A distinct
 GitHub App or organization-controlled required workflow is future hardening;
 bypass and status activity remain auditable in GitHub.
 
+PR #45, linked to issue #44, may use a one-time protected release-state
+bootstrap bypass only at head
+`ef34ce150c53f285a57c238b2ff63b33250795bf`. It authorizes exactly these
+SHA-256 transitions:
+
+- `.github/workflows/release-matrix.yml` from
+  `637ae1155eabde7e3d53cf29fb157d5177113d2c4482adfe5dcd5ab975587fcc`
+  to `3e03834c1d4d9bc9c12bde39d22bdbfbf9d09da8196984faeef3dc01ad4acfb1`;
+- `scripts/collect-release-state.mjs` from
+  `f07e557073978f722136d59cb4af0f29eb8a5b553eee227735065f1d9f4a1b3c`
+  to `1fc144b0954e543c94efeb8b4719dfb478f97f54da2d52b4808b6749b1539d7c`;
+- `scripts/release-state-derivation.mjs` from
+  `db94d015dd3ab409eac9b2c43af5c991dedf5e3a4cd893285af5c54c6f727a34`
+  to `bfc4c4367697f12fd5eba63e72200049e69426dcd0785993067402299a4fbcfc`;
+- `scripts/release-evidence-validation.mjs` from
+  `3d4e224165a5296f3baf7e5f8a2e0302e5e52baff586eadcddb8b4552b40639d`
+  to `f8696009967ff88106a9fbaafbacf1c4479a0dbedd11e141d46ac6f22ea06cb3`.
+
+The complete PR diff is limited to those protected transitions, the local
+owner two-step capture/confirmation utility, issue #44 tests and documentation,
+traceability, and mechanical conformance hashes. Candidate tests and every
+non-self security check must pass, the full six-cell matrix must pass locally,
+and an independent agent must approve the exact head with no unresolved
+critical or high finding. Only `Repository policy` protected-byte rejection and
+the `Trusted release state`/aggregate `Release matrix` failures caused by trusted
+`main` executing the superseded administration endpoint may be bypassed; the
+owner record must name each as a self-transition failure. Candidate code must
+never execute in the token/attestation job. This exception does not authorize
+trigger, permission, toolchain, candidate-test, governance-verifier, or
+unrelated release-gate changes. It is consumed and expires immediately when PR
+#45 merges. A subsequent ordinary PR must demonstrate green `Trusted release
+state` and `Release matrix` before issue #44 is treated as fully verified.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
