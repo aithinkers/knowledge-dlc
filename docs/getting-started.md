@@ -48,6 +48,11 @@ kdlc status
 kdlc doctor
 ```
 
+On a fresh workspace, `doctor` reports `healthy: true` with three expected
+warnings — `dependencies.lock`, `cache.integrity`, and
+`policies.compatibility` are `missing` until you mount a dependency knowledge
+base and resolve policies. They need no action for a single-base project.
+
 ## 3. Ingest a source
 
 ```bash
@@ -107,19 +112,25 @@ descriptors, not by prompt text.
 
 ## 6. Pick your harness
 
-| Harness | Install | Invoke |
+| Harness | Setup | Invoke |
 |---|---|---|
 | Claude Code | `claude plugin install <repo>/distribution/claude-code` | `/kdlc:<operation>` commands, `kdlc:<role>` agents |
-| Codex CLI (≥ 0.145) | copy `distribution/codex/` conventions into your Codex setup | `$kdlc` skill (`SKILL.md`), `.codex/agents/<role>` |
-| Kiro CLI (≥ 2.6) | copy `distribution/kiro/.kiro/` into your project | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
-| Kiro IDE | copy `distribution/kiro-ide/.kiro/` into your project | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
+| Codex CLI (≥ 0.145) | point Codex at this checkout; skills/agents in `distribution/codex/` | `$kdlc` skill (`SKILL.md`), `.codex/agents/<role>` |
+| Kiro CLI (≥ 2.6) | point Kiro at this checkout; skills/agents in `distribution/kiro/.kiro/` | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
+| Kiro IDE | point Kiro at this checkout; skills/agents in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
 | Any MCP client | `distribution/mcp/desktop.json` (stdio) or `custom-app.json` (HTTP) | `kb_search`, `kb_fetch`, `proposal_create`, … |
 
 Every harness invokes the same governed CLI engine and returns the same
 versioned JSON envelope; adapters never change stage requirements, security
-policy, state transitions, or artifact contracts (§25). Kiro operations run
-`node distribution/<harness>/run.mjs` from this repository checkout, so keep
-the checkout available (or `npm link` and adjust the runner path).
+policy, state transitions, or artifact contracts (§25).
+
+IMPORTANT: the Codex and Kiro skill files invoke
+`node distribution/<harness>/run.mjs`, whose imports resolve relative to this
+repository. Run those harnesses with this checkout as the working directory
+(your knowledge project can live anywhere; pass its path in the operation
+arguments), or use the Claude Code plugin / MCP server, which carry their own
+location. Do not copy `.kiro/` alone into another project — the runner will
+not resolve. A self-contained packaged runner is tracked as a follow-up.
 
 ## 7. MCP server
 
@@ -132,7 +143,9 @@ unauthenticated project server.
 
 ## Command reference
 
-`init`, `adopt`, `ingest`, `query`, `review`, `publish`, `status`, `lint`,
-`refresh`, `trace`, `conflicts`, `gaps`, `migrate`, `doctor`,
-`reconcile-edits`, `jobs`, `proposal` — see `distribution/claude-code/COMMANDS.md`
-for the harness bindings.
+Argument-free: `init`, `status`, `doctor`, `lint`, `jobs`, `conflicts`,
+`gaps`, `refresh`, `reconcile-edits`. Require arguments: `adopt <source...>`,
+`ingest <source...>`, `query <question>`, `trace <kb://...>`,
+`review <proposal-id> <decision> <receipt-id>`,
+`publish <proposal-id> <receipt-id>`, `proposal <json>`, `migrate <json>`.
+See `distribution/claude-code/COMMANDS.md` for the harness bindings.

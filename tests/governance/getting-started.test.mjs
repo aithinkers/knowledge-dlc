@@ -61,10 +61,17 @@ test("FEAT-011 the getting-started walkthrough works exactly as documented", asy
   assert.equal(query.envelope.ok, true);
   assert.equal(query.envelope.result.status, "not_found");
 
+  // REQ-UX-001: argument-requiring commands fail with input-class errors, not internal leaks.
+  for (const bare of [["trace"], ["migrate"]]) {
+    const failed = await run(root, ...bare);
+    assert.equal(failed.code, 2, `${bare[0]} without arguments must exit input class`);
+    assert.equal(failed.envelope.error.code, "KDLC_INPUT_INVALID", `${bare[0]} must return KDLC_INPUT_INVALID`);
+  }
+
   // Documented command surface stays honest.
   const guide = await readFile(resolve(repository, "docs/getting-started.md"), "utf8");
   const { CLI_COMMANDS } = await import(`file://${resolve(repository, "packages/cli/index.mjs")}`);
-  for (const command of CLI_COMMANDS) assert.ok(guide.includes(`\`${command}\``), `guide must mention CLI command: ${command}`);
+  for (const command of CLI_COMMANDS) assert.ok(guide.includes(`\`${command}`), `guide must mention CLI command: ${command}`);
   const packageManifest = JSON.parse(await readFile(resolve(repository, "package.json"), "utf8"));
   assert.equal(packageManifest.bin.kdlc, "./packages/cli/bin.mjs", "npm link instruction requires the kdlc bin entry");
 });
