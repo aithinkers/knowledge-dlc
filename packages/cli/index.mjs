@@ -5,17 +5,24 @@ import {
   readdir,
   rename,
   stat,
-  unlink,
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 
 import {
+  byteHash,
   canonicalJson,
   materializeScaffold,
+  parseMarkdownConcept,
   scaffoldProject,
 } from "../core/index.mjs";
-import { createContractValidator } from "../contracts/index.mjs";
+import {
+  createContractValidator,
+  parseYamlArtifact,
+} from "../contracts/index.mjs";
+import { FederationResolver } from "../federation/index.mjs";
+import { NodeFileStore } from "../lifecycle/src/index.mjs";
+import { FederatedRetriever } from "../retrieval/index.mjs";
 
 export const CLI_COMMANDS = Object.freeze([
   "init",
@@ -109,6 +116,11 @@ export class KdlcEngine {
     this.inFlight = new Map();
     this.resumed = false;
     this.closed = false;
+    this.store = new NodeFileStore(this.root);
+    this.coordinationClock = {
+      now: () => this.clock.now(),
+      millis: () => Date.parse(this.clock.now()),
+    };
   }
   path(...parts) {
     return resolve(this.root, ".kdlc", ...parts);
@@ -327,6 +339,8 @@ export class KdlcEngine {
       error: null,
       cancellation_requested: false,
       request: structuredClone(input),
+      revision: 0,
+      attempts: [],
     };
     try {
       await createJson(path, job);
@@ -357,20 +371,26 @@ export class KdlcEngine {
     this.inFlight.set(job.id, running);
   }
   async runClaimedJob(job, input) {
-    const claim = this.path("jobs", `${job.id}.claim.json`);
-    try {
-      await createJson(claim, { pid: process.pid, job_id: job.id });
-    } catch (error) {
-      if (error.code === "EEXIST") return;
-      throw error;
-    }
-    try {
-      return await this.runJob(job, input);
-    } finally {
-      await unlink(claim).catch((error) => {
-        if (error.code !== "ENOENT") throw error;
-      });
-    }
+    const leaseId = `attempt-${job.id}-${randomUUID()}`;
+    return this.store.withMutex(
+      `.kdlc/job-leases/${job.id}`,
+      {
+        owner: `${job.principal}:${leaseId}`,
+        clock: this.coordinationClock,
+        leaseMs: 1_000,
+      },
+      () => this.runJob(job, input, leaseId),
+    );
+  }
+  mutateJob(id, action) {
+    return this.store.withMutex(
+      `.kdlc/job-state/${id}`,
+      {
+        owner: `job-state:${id}:${randomUUID()}`,
+        clock: this.coordinationClock,
+      },
+      action,
+    );
   }
   async resumeJobs() {
     if (this.resumed || this.closed) return;
@@ -397,37 +417,87 @@ export class KdlcEngine {
     this.closed = true;
     await this.drain();
   }
-  async runJob(job, input) {
+  async runJob(job, input, leaseId) {
     const path = this.path("jobs", `${job.id}.json`);
-    let current = await this.job(job.id);
+    const attempt = {
+      lease_id: leaseId,
+      process_id: process.pid,
+      started_at: this.clock.now(),
+      state: "running",
+      result_hash: null,
+    };
+    let current = await this.mutateJob(job.id, async () => {
+      const value = await this.job(job.id);
+      if (value.cancellation_requested) return value;
+      const updated = {
+        ...value,
+        state: "running",
+        revision: (value.revision ?? 0) + 1,
+        attempts: [...(value.attempts ?? []), attempt],
+        updated_at: this.clock.now(),
+      };
+      await atomicJson(path, updated);
+      return updated;
+    });
     if (current.cancellation_requested) return current;
-    current = { ...current, state: "running", updated_at: this.clock.now() };
-    await atomicJson(path, current);
     try {
       const result = await this.handlers[job.operation](
         structuredClone(input),
-        { engine: this, principal: structuredClone(this.principal) },
-      );
-      current = await this.job(job.id);
-      current = {
-        ...current,
-        state: current.cancellation_requested ? "cancelled" : "completed",
-        progress: { completed: 1, total: 1 },
-        result: current.cancellation_requested ? null : structuredClone(result),
-        updated_at: this.clock.now(),
-      };
-    } catch (error) {
-      current = {
-        ...(await this.job(job.id)),
-        state: "failed",
-        error: {
-          code: error.code ?? "KDLC_INTERNAL",
-          message: "Job execution failed",
+        {
+          engine: this,
+          principal: structuredClone(this.principal),
+          durableIdempotencyKey: job.idempotency_key,
+          lifecycleContract: "JobRegistry",
+          cancellationPoint: async () =>
+            (await this.job(job.id)).cancellation_requested,
         },
-        updated_at: this.clock.now(),
-      };
+      );
+      current = await this.mutateJob(job.id, async () => {
+        const value = await this.job(job.id);
+        const cancelled = value.cancellation_requested;
+        const updated = {
+          ...value,
+          revision: (value.revision ?? 0) + 1,
+          attempts: value.attempts.map((entry) =>
+            entry.lease_id === leaseId
+              ? {
+                  ...entry,
+                  state: cancelled ? "cancelled" : "completed",
+                  finished_at: this.clock.now(),
+                  result_hash: cancelled ? null : digest(result),
+                }
+              : entry,
+          ),
+          state: cancelled ? "cancelled" : "completed",
+          progress: { completed: 1, total: 1 },
+          result: cancelled ? null : structuredClone(result),
+          updated_at: this.clock.now(),
+        };
+        await atomicJson(path, updated);
+        return updated;
+      });
+    } catch (error) {
+      current = await this.mutateJob(job.id, async () => {
+        const value = await this.job(job.id);
+        const updated = {
+          ...value,
+          revision: (value.revision ?? 0) + 1,
+          attempts: value.attempts.map((entry) =>
+            entry.lease_id === leaseId
+              ? { ...entry, state: "failed", finished_at: this.clock.now() }
+              : entry,
+          ),
+          state: "failed",
+          error: {
+            code: error.code ?? "KDLC_INTERNAL",
+            message: "Job execution failed",
+          },
+          updated_at: this.clock.now(),
+        };
+        await atomicJson(path, updated);
+        return updated;
+      });
     }
-    await atomicJson(path, current);
     return current;
   }
   async job(id) {
@@ -448,16 +518,19 @@ export class KdlcEngine {
     return job;
   }
   async cancelJob(id) {
-    const job = await this.job(id);
-    if (["completed", "failed", "cancelled"].includes(job.state)) return job;
-    const updated = {
-      ...job,
-      state: job.state === "queued" ? "cancelled" : job.state,
-      cancellation_requested: true,
-      updated_at: this.clock.now(),
-    };
-    await atomicJson(this.path("jobs", `${id}.json`), updated);
-    return updated;
+    return this.mutateJob(id, async () => {
+      const job = await this.job(id);
+      if (["completed", "failed", "cancelled"].includes(job.state)) return job;
+      const updated = {
+        ...job,
+        revision: (job.revision ?? 0) + 1,
+        state: job.state === "queued" ? "cancelled" : job.state,
+        cancellation_requested: true,
+        updated_at: this.clock.now(),
+      };
+      await atomicJson(this.path("jobs", `${id}.json`), updated);
+      return updated;
+    });
   }
   async jobs() {
     const directory = this.path("jobs");
@@ -585,4 +658,99 @@ export function renderEnvelope(envelope, output = "text") {
   if (envelope.ok)
     return `${envelope.operation}: ok\n${canonicalJson(envelope.result)}\n`;
   return `${envelope.operation}: ${envelope.error.code}: ${envelope.error.message}\n`;
+}
+
+export function createLocalProjectEngine(options = {}) {
+  const root = resolve(options.root ?? process.cwd());
+  const principal = options.principal ?? {
+    actor: "process:local",
+    scopes: ["read", "mutate", "publish"],
+  };
+  const resolveMounts = async () => {
+    const project = parseYamlArtifact(
+      await readFile(resolve(root, "knowledge-project.yaml"), "utf8"),
+    );
+    return new FederationResolver({ projectRoot: root }).resolveProject(
+      project,
+    );
+  };
+  const search = async (input) => {
+    const { mounts } = await resolveMounts();
+    const policy = {
+      authorizeMount: async () => principal.scopes.includes("read"),
+      authorizeConcept: async () => principal.scopes.includes("read"),
+      authorizeSource: async () => principal.scopes.includes("read"),
+    };
+    const retriever = new FederatedRetriever({
+      mounts,
+      policy,
+      minimumDurationMs: 0,
+    });
+    const authorization = await retriever.prepareAuthorization({ principal });
+    return retriever.search({
+      authorization,
+      principal,
+      query: input.query ?? input.question,
+      mode: input.mode ?? "wiki-only",
+      includeSources: true,
+    });
+  };
+  const fetchConcept = async ({ uri }) => {
+    const match = /^kb:\/\/([a-z0-9.-]+)\/(.+)$/.exec(uri ?? "");
+    if (!match) throw inputError("A canonical kb URI is required");
+    const { mounts } = await resolveMounts();
+    const mount = mounts.find(({ id }) => id === match[1]);
+    const record = mount?.retrieval_catalog.find(({ id }) => id === match[2]);
+    if (!mount || !record) throw missing("Requested concept is unavailable");
+    const bytes = await readFile(resolve(mount.root, record.path));
+    if (byteHash(bytes) !== record.byte_hash)
+      throw new EngineError(
+        "KDLC_HASH_CONFLICT",
+        "Concept bytes drifted",
+        EXIT.conflict,
+      );
+    const concept = parseMarkdownConcept(bytes);
+    return {
+      uri,
+      knowledge_base_id: mount.id,
+      revision: mount.resolved_ref,
+      concept: {
+        id: record.id,
+        frontmatter: concept.frontmatter,
+        body: concept.body,
+      },
+      citations: [
+        {
+          concept: `kb://${mount.id}@${mount.resolved_ref}/${record.id}`,
+          knowledge_base_id: mount.id,
+          revision: mount.resolved_ref,
+          tree_hash: mount.tree_hash,
+        },
+      ],
+    };
+  };
+  const handlers = {
+    query: search,
+    kb_search: search,
+    kb_fetch: fetchConcept,
+    trace: fetchConcept,
+    kb_trace: fetchConcept,
+    refresh: async () => {
+      const resolved = await resolveMounts();
+      return {
+        lock: resolved.lock,
+        mounts: resolved.mounts.map(({ alias, id, resolved_ref }) => ({
+          alias,
+          id,
+          resolved_ref,
+        })),
+      };
+    },
+  };
+  return new KdlcEngine({
+    ...options,
+    root,
+    principal,
+    handlers: { ...handlers, ...(options.handlers ?? {}) },
+  });
 }

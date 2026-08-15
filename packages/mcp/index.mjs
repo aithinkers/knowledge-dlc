@@ -252,7 +252,7 @@ export class McpProjectServer {
         );
         if (
           !tool ||
-          !this.available(tool) ||
+          !this.available(tool, principal) ||
           !tool.scopes.every((scope) => principal.scopes.includes(scope))
         )
           throw Object.assign(new Error("Tool unavailable"), { code: -32004 });

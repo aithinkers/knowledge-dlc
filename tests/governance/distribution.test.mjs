@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -13,6 +14,7 @@ import addFormats from "ajv-formats";
 import { distributionDefinition } from "../../packages/adapters/index.mjs";
 import {
   CLI_COMMANDS,
+  createLocalProjectEngine,
   EXIT,
   KdlcEngine,
   parseCli,
@@ -170,6 +172,87 @@ test("FEAT-006 durable workers resume once and expose deterministic drain", asyn
   await resumed.close();
 });
 
+test("FEAT-006 running cancellation wins the completion race", async (t) => {
+  const root = await temporary(t);
+  let enter;
+  const entered = new Promise((resolve) => {
+    enter = resolve;
+  });
+  let release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const engine = new KdlcEngine({
+    root,
+    clock,
+    handlers: {
+      ingest: async (_input, { cancellationPoint }) => {
+        enter();
+        await blocked;
+        await cancellationPoint();
+        return { late: true };
+      },
+    },
+  });
+  await engine.execute("init", { project_id: "fixture.project" });
+  const job = await engine.execute("ingest", {
+    sources: ["source.md"],
+    idempotency_key: "cancel-race",
+  });
+  await entered;
+  const cancellation = await engine.execute("job_cancel", { id: job.id });
+  assert.equal(cancellation.cancellation_requested, true);
+  release();
+  await engine.drain();
+  const final = await engine.execute("job_status", { id: job.id });
+  assert.equal(final.state, "cancelled");
+  assert.equal(final.result, null);
+  await engine.close();
+});
+
+test("FEAT-006 dead worker lease recovers with one externally idempotent effect", async (t) => {
+  const root = await temporary(t);
+  const setup = new KdlcEngine({ root });
+  await setup.execute("init", { project_id: "fixture.project" });
+  await setup.close();
+  const moduleUrl = pathToFileURL(
+    resolve(repository, "packages/cli/index.mjs"),
+  ).href;
+  const effect = resolve(root, "effect.txt");
+  const source = `import {KdlcEngine} from ${JSON.stringify(moduleUrl)};import {writeFile} from 'node:fs/promises';const e=new KdlcEngine({root:${JSON.stringify(root)},handlers:{ingest:async(_i,{durableIdempotencyKey})=>{try{await writeFile(${JSON.stringify(effect)},durableIdempotencyKey,{flag:'wx'})}catch(x){if(x.code!=='EEXIST')throw x}process.stdout.write('effect\\n');await new Promise(()=>{})}}});await e.execute('ingest',{sources:['source.md'],idempotency_key:'crash-key'});await e.drain();`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await once(child.stdout, "data");
+  child.kill("SIGKILL");
+  await once(child, "exit");
+  let replayCalls = 0;
+  const recovered = new KdlcEngine({
+    root,
+    handlers: {
+      ingest: async (_i, { durableIdempotencyKey }) => {
+        replayCalls++;
+        try {
+          await import("node:fs/promises").then(({ writeFile }) =>
+            writeFile(effect, durableIdempotencyKey, { flag: "wx" }),
+          );
+        } catch (error) {
+          if (error.code !== "EEXIST") throw error;
+        }
+        return { recovered: true };
+      },
+    },
+  });
+  await recovered.execute("jobs");
+  await recovered.drain();
+  assert.equal(await readFile(effect, "utf8"), "crash-key");
+  assert.equal(replayCalls, 1);
+  const jobs = (await recovered.execute("jobs")).jobs;
+  assert.equal(jobs[0].state, "completed");
+  assert.equal(jobs[0].attempts.length, 2);
+  await recovered.close();
+});
+
 test("FEAT-006 one engine produces equivalent direct, MCP, and generated-adapter outcomes", async (t) => {
   const root = await temporary(t);
   const base = new KdlcEngine({ root, clock });
@@ -266,20 +349,14 @@ test("FEAT-006 generated Claude and Codex adapter fixtures execute the governed 
   const engine = new KdlcEngine({ root, clock });
   await engine.execute("init", { project_id: "fixture.project" });
   const fixtures = [
-    resolve(repository, "distribution/claude-code/commands/kdlc-status.md"),
-    resolve(repository, "distribution/codex/SKILL.md"),
+    resolve(repository, "distribution/claude-code/run.mjs"),
+    resolve(repository, "distribution/codex/run.mjs"),
   ];
+  const envelopes = [];
   for (const fixture of fixtures) {
-    const contents = await readFile(fixture, "utf8");
-    assert(contents.includes("kdlc"));
     const child = spawn(
       process.execPath,
-      [
-        resolve(repository, "packages/cli/bin.mjs"),
-        "status",
-        "--output",
-        "json",
-      ],
+      [fixture, "status", "--output", "json"],
       { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
     );
     let stdout = "";
@@ -289,9 +366,11 @@ test("FEAT-006 generated Claude and Codex adapter fixtures execute the governed 
     const [code] = await once(child, "exit");
     assert.equal(code, 0);
     const envelope = JSON.parse(stdout);
+    envelopes.push(envelope);
     assert.equal(envelope.ok, true);
     assert.equal(envelope.operation, "status");
   }
+  assert.deepEqual(envelopes[0], envelopes[1]);
 });
 
 test("FEAT-006 served HTTP maps principals and scopes server-side before disclosure", async (t) => {
@@ -306,7 +385,11 @@ test("FEAT-006 served HTTP maps principals and scopes server-side before disclos
       issuer: "https://id.example",
     },
   ]);
-  const server = new McpProjectServer({ root, projectId: "fixture.project" });
+  const server = new McpProjectServer({
+    root,
+    projectId: "fixture.project",
+    engineFactory: createLocalProjectEngine,
+  });
   await assert.rejects(
     () =>
       createStreamableHttpServer({
@@ -512,7 +595,11 @@ test("FEAT-006 MCP resources, schemas, metadata, doctor, and generated drift are
   const engine = new KdlcEngine({ root, clock });
   await engine.execute("init", { project_id: "fixture.project" });
   const job = await engine.execute("refresh", { idempotency_key: "refresh-1" });
-  const server = new McpProjectServer({ root, projectId: "fixture.project" });
+  const server = new McpProjectServer({
+    root,
+    projectId: "fixture.project",
+    engineFactory: createLocalProjectEngine,
+  });
   assert.equal((await server.resource("kdlc://server/info")).label, "kdlc");
   assert.equal((await server.resource(`kdlc://jobs/${job.id}`)).id, job.id);
   assert.equal(
