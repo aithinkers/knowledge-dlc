@@ -18,7 +18,15 @@ export const CONTRACT_SCHEMA_PATHS = Object.freeze({
   claim: "core/schemas/artifacts/claim.schema.json",
   claimSidecarEntry: "core/schemas/artifacts/claim-sidecar-entry.schema.json",
   reviewPacket: "core/schemas/artifacts/review-packet.schema.json",
-  reviewReceipt: "core/schemas/artifacts/review-receipt.schema.json"
+  reviewReceipt: "core/schemas/artifacts/review-receipt.schema.json",
+  lifecycleStage: "core/schemas/lifecycle/stage.schema.json",
+  lifecycleWorkflow: "core/schemas/lifecycle/workflow.schema.json",
+  lifecycleCheckpoint: "core/schemas/lifecycle/checkpoint.schema.json",
+  lifecycleJob: "core/schemas/lifecycle/job.schema.json",
+  lifecycleTransaction: "core/schemas/lifecycle/transaction.schema.json",
+  lifecycleAuditEvent: "core/schemas/lifecycle/audit-event.schema.json",
+  lifecycleLeaseLock: "core/schemas/lifecycle/lease-lock.schema.json",
+  lifecycleSensorResult: "core/schemas/lifecycle/sensor-result.schema.json"
 });
 
 export async function loadContractSchemas(root = moduleRoot) {

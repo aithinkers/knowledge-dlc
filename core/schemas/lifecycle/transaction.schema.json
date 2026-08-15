@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/transaction-1.json",
+  "type": "object",
+  "required": ["version", "transaction_id", "workflow_id", "state", "targets", "created_at", "updated_at"],
+  "properties": {
+    "version": {"const": 1}, "transaction_id": {"type": "string"}, "workflow_id": {"type": "string"},
+    "state": {"enum": ["prepared", "applying", "finalizing", "committed", "rolling_back", "rolled_back", "failed"]},
+    "targets": {"type": "array", "items": {"type": "object", "required": ["path", "expected_token", "next_content", "lock_lease_id", "applying", "applied"], "properties": {"path": {"type": "string"}, "expected_token": {"type": ["string", "null"]}, "next_content": {"type": "string"}, "prior_content": {"type": ["string", "null"]}, "lock_lease_id": {"type": "string", "minLength": 1}, "applying": {"type": "boolean"}, "applied": {"type": "boolean"}}, "additionalProperties": false}},
+    "created_at": {"type": "string", "format": "date-time"}, "updated_at": {"type": "string", "format": "date-time"}, "error": {"type": "string"}
+  },
+  "additionalProperties": false
+}

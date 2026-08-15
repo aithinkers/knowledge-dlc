@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/lifecycle/audit-event-1.json",
+  "type": "object",
+  "required": ["event_id", "sequence", "timestamp", "workflow_id", "actor", "action", "result"],
+  "properties": {
+    "event_id": {"type": "string"}, "sequence": {"type": "integer", "minimum": 1},
+    "timestamp": {"type": "string", "format": "date-time"}, "workflow_id": {"type": "string"},
+    "project": {"type": "string"}, "stage": {"type": "string"}, "actor": {"type": "string"},
+    "action": {"type": "string"}, "subject": {"type": "string"}, "input_hash": {"type": "string"},
+    "result": {"type": "string"}, "policy_version": {"type": "string"}
+  },
+  "additionalProperties": true
+}
