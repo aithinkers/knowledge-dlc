@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 
 import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateScorerBinding, validateStatisticalEvidence, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
+const execute = promisify(execFile);
 async function perfectCapture(index, evidenceRoot = root) {
   const state = await loadPreregistration(evidenceRoot);
   const trial_id = `trial-${String(index).padStart(3, "0")}`;
@@ -76,6 +79,28 @@ test("REL-001 qualified lifecycle accepts 30 exact trials and rejects missing ca
   await writeFile(resolve(candidate, "distribution/release/statistical/capture-status.json"), `${JSON.stringify(status, null, 2)}\n`);
   assert.deepEqual(await validateStatisticalEvidence(candidate), { phase: "qualified", failures: [] });
   await rm(resolve(capturesPath, "trial-030.json")); assert.equal((await validateStatisticalEvidence(candidate)).phase, "invalid");
+});
+
+test("REL-001 protected matrix-cell release command accepts a coherent qualified candidate precheck", async (context) => {
+  const candidate = await mkdtemp(resolve(tmpdir(), "kdlc-qualified-command-")); context.after(() => rm(candidate, { recursive: true, force: true }));
+  for (const path of ["core", "distribution", "docs", "packages", "scripts", "tests"]) { await mkdir(resolve(candidate, path, ".."), { recursive: true }); await cp(resolve(root, path), resolve(candidate, path), { recursive: true }); }
+  await cp(resolve(root, "package.json"), resolve(candidate, "package.json")); await cp(resolve(root, "package-lock.json"), resolve(candidate, "package-lock.json"));
+  const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json"); const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
+  const model = JSON.parse(await readFile(modelPath, "utf8")); Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
+  const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes); const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+  const capturesPath = resolve(candidate, "distribution/release/statistical/captures"); await mkdir(capturesPath); const captures = [];
+  for (let index = 1; index <= 30; index += 1) { const capture = await perfectCapture(index, candidate); captures.push(capture); await writeFile(resolve(capturesPath, `${capture.trial_id}.json`), `${JSON.stringify(capture)}\n`); }
+  const statisticalReport = await scoreCaptures(candidate, captures); const statisticalReportBytes = `${JSON.stringify(statisticalReport)}\n`; await writeFile(resolve(candidate, "distribution/release/statistical/report.json"), statisticalReportBytes);
+  await writeFile(resolve(candidate, "distribution/release/statistical/capture-status.json"), `${JSON.stringify({ api_version: "kdlc.dev/statistical-capture-status/v1alpha1", status: "qualified", reason: "Thirty complete provider trials passed the preregistered gate.", required_trials: 30, required_full_corpus_cases_per_trial: 12, captured_trials: 30, exclusions_allowed: false, captures_path: "distribution/release/statistical/captures", report_path: "distribution/release/statistical/report.json", report_hash: sha256(statisticalReportBytes) }, null, 2)}\n`);
+  const version = "1.0.0"; const packageDocument = JSON.parse(await readFile(resolve(candidate, "package.json"), "utf8")); packageDocument.version = version; packageDocument.private = false; await writeFile(resolve(candidate, "package.json"), `${JSON.stringify(packageDocument, null, 2)}\n`);
+  const lock = JSON.parse(await readFile(resolve(candidate, "package-lock.json"), "utf8")); lock.version = version; lock.packages[""].version = version; await writeFile(resolve(candidate, "package-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
+  const evaluationPath = resolve(candidate, "distribution/release/evaluation-report.json"); const evaluation = JSON.parse(await readFile(evaluationPath, "utf8")); Object.assign(evaluation, { release_status: "release-candidate", implementation_version: version, statistical_suite: { status: "qualified", release_blocking: false }, pending_release_evidence: [] }); const evaluationBytes = `${JSON.stringify(evaluation, null, 2)}\n`; await writeFile(evaluationPath, evaluationBytes);
+  const tracePath = resolve(candidate, "docs/traceability.json"); const trace = JSON.parse(await readFile(tracePath, "utf8")); trace.requirements.find(({ id }) => id === "REL-001").status = "verified"; const traceBytes = `${JSON.stringify(trace, null, 2)}\n`; await writeFile(tracePath, traceBytes);
+  const conformancePath = resolve(candidate, "distribution/release/conformance-statement.json"); const conformance = JSON.parse(await readFile(conformancePath, "utf8")); Object.assign(conformance, { release_status: "release-candidate", pending_requirements: [] }); Object.assign(conformance.implementation, { version, private: false });
+  for (const item of conformance.evidence) { if (item.path === "distribution/release/evaluation-report.json") item.sha256 = sha256(evaluationBytes); if (item.path === "docs/traceability.json") item.sha256 = sha256(traceBytes); }
+  await writeFile(conformancePath, `${JSON.stringify(conformance, null, 2)}\n`); const changelog = `# Changelog\n\n## ${version}\n`; await writeFile(resolve(candidate, "CHANGELOG.md"), changelog);
+  await writeFile(resolve(candidate, "distribution/release/release-candidate-evidence.json"), `${JSON.stringify({ api_version: "kdlc.dev/release-candidate-evidence/v1alpha1", version, changelog: { path: "CHANGELOG.md", sha256: sha256(changelog) } }, null, 2)}\n`);
+  await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "check:release-evidence"], { cwd: root, env: { ...process.env, KDLC_CANDIDATE_ROOT: candidate, KDLC_RELEASE_MATRIX_PRECHECK: "1" }, ...(process.platform === "win32" ? { shell: true } : {}), maxBuffer: 16 * 1024 * 1024 });
 });
 
 test("REL-001 offline scorer derives declared Wilson bounds from all 30 complete trials", async () => {

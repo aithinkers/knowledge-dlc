@@ -8,9 +8,14 @@ import YAML from "yaml";
 export const protectedHarnessFiles = Object.freeze([
   ".github/workflows/governance.yml",
   ".github/workflows/candidate-tests.yml",
+  ".github/workflows/codeql.yml",
+  ".github/workflows/dependency-review.yml",
   ".github/workflows/release-matrix.yml",
+  ".github/workflows/secret-history.yml",
+  ".github/workflows/supply-chain.yml",
   "scripts/governance-validation.mjs",
   "scripts/verify-governance.mjs",
+  "scripts/verify-pr-traceability.mjs",
   "scripts/release-matrix-definition.mjs",
   "scripts/run-release-matrix-cell.mjs",
   "scripts/derive-release-artifacts.mjs",
@@ -48,7 +53,13 @@ export const protectedHarnessFiles = Object.freeze([
 export const protectedHarnessScripts = Object.freeze(["test", "check:governance", "test:governance", "test:release-evaluation", "check:release-evidence", "check:statistical-evidence"]);
 const reservedContexts = Object.freeze([
   Object.freeze({ name: "Candidate tests", workflow: "candidate-tests.yml" }),
-  Object.freeze({ name: "Release matrix", workflow: "release-matrix.yml" })
+  Object.freeze({ name: "CodeQL (JavaScript/TypeScript)", workflow: "codeql.yml" }),
+  Object.freeze({ name: "Dependency review", workflow: "dependency-review.yml" }),
+  Object.freeze({ name: "Pull request traceability", workflow: "governance.yml" }),
+  Object.freeze({ name: "Release matrix", workflow: "release-matrix.yml" }),
+  Object.freeze({ name: "Repository policy", workflow: "governance.yml" }),
+  Object.freeze({ name: "Secret history scan", workflow: "secret-history.yml" }),
+  Object.freeze({ name: "Supply-chain verification", workflow: "supply-chain.yml" })
 ]);
 
 function inspectReservedContexts(content, entryName) {
@@ -58,7 +69,9 @@ function inspectReservedContexts(content, entryName) {
   const workflow = document.toJS({ maxAliasCount: 100 });
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) return [`candidate workflow is not a mapping: ${entryName}`];
   const isProtectedOwner = reservedContexts.some(({ workflow: owner }) => entryName === owner);
+  if (!isProtectedOwner && (workflow.permissions?.statuses === "write" || workflow.permissions?.checks === "write")) failures.push(`candidate workflow cannot mint check or status contexts: ${entryName}`);
   if (!isProtectedOwner && workflow.jobs && typeof workflow.jobs === "object" && !Array.isArray(workflow.jobs)) for (const [jobId, job] of Object.entries(workflow.jobs)) {
+    if (job && typeof job === "object" && !Array.isArray(job) && (job.permissions?.statuses === "write" || job.permissions?.checks === "write")) failures.push(`candidate workflow job cannot mint check or status contexts: ${entryName}#${jobId}`);
     if (job && typeof job === "object" && !Array.isArray(job) && typeof job.name === "string" && job.name.includes("${{")) {
       failures.push(`dynamic job name is forbidden outside a protected workflow: ${entryName}#${jobId}`);
     }
