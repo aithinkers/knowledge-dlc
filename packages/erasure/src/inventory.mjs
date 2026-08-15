@@ -26,6 +26,19 @@ function referencesSource(surface, source) {
   return surface.bindings.source_ids.includes(source.id) || surface.bindings.source_hashes.includes(source.hash);
 }
 
+export function surfaceIdentity(surface) {
+  return {
+    id: surface.id,
+    kind: surface.kind,
+    strategy: surface.strategy,
+    path: surface.path ?? null,
+    ...(surface.processor ? { processor: surface.processor, object_id: surface.object_id } : {}),
+    bindings: surface.bindings,
+    depends_on: surface.depends_on,
+    retained_until: surface.retained_until ?? null,
+  };
+}
+
 export class SurfaceInventory {
   constructor({ store, list }) {
     if (!store || typeof list !== "function") throw invalid("Surface inventory requires a trusted store and enumerator");
@@ -62,7 +75,7 @@ export class SurfaceInventory {
       } else if (!ID.test(candidate.processor ?? "") || !ID.test(candidate.object_id ?? "")) {
         throw incomplete("External surface lacks a processor/object identity", { id: candidate.id });
       }
-      surfaces.push({
+      const surface = {
         id: candidate.id,
         kind: candidate.kind,
         strategy: candidate.strategy,
@@ -75,7 +88,9 @@ export class SurfaceInventory {
         },
         depends_on: [...new Set(candidate.depends_on)].sort(),
         retained_until: candidate.retained_until ?? null,
-      });
+      };
+      surface.identity_hash = artifactHash(surfaceIdentity(surface));
+      surfaces.push(surface);
     }
     for (const surface of surfaces) for (const dependency of surface.depends_on)
       if (!ids.has(dependency)) throw incomplete("Surface inventory contains an unresolved provenance edge", { id: surface.id, dependency });
@@ -104,6 +119,7 @@ export function resolveImpact(snapshot, source) {
     kind: surface.kind,
     strategy: surface.strategy,
     retained_until: surface.retained_until,
+    identity_hash: surface.identity_hash,
     depends_on: surface.depends_on.filter((dependency) => impacted.has(dependency)),
   }));
   const edges = nodes.flatMap((node) => node.depends_on.map((dependency) => ({ from: dependency, to: node.id })));

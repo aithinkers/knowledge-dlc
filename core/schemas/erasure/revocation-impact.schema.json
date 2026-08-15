@@ -15,12 +15,13 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "kind", "strategy", "retained_until", "depends_on"],
+        "required": ["id", "kind", "strategy", "retained_until", "identity_hash", "depends_on"],
         "properties": {
           "id": {"$ref": "#/$defs/id"},
           "kind": {"enum": ["original", "normalized", "claim", "concept", "quote", "cache", "index", "embedding", "graph", "export", "log", "backup", "proposal", "receipt", "audit"]},
           "strategy": {"enum": ["purge", "tombstone", "external-delete"]},
           "retained_until": {"type": ["string", "null"], "format": "date-time"},
+          "identity_hash": {"$ref": "#/$defs/hash"},
           "depends_on": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
         }
       }

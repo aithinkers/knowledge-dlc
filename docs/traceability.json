@@ -170,6 +170,8 @@
           "packages/erasure/src/engine.mjs",
           "packages/erasure/src/guard.mjs",
           "packages/erasure/src/inventory.mjs",
+          "packages/erasure/src/project.mjs",
+          "packages/retrieval/src/internal-source-bindings.mjs",
           "packages/cli/index.mjs"
         ],
         "tests": [

@@ -10,6 +10,8 @@ import { createLocalProjectEngine, KdlcEngine } from "../../packages/cli/index.m
 import { GovernanceControlAuthority, GovernanceControlEngine } from "../../packages/governance/index.mjs";
 import {
   RetentionDecisionAuthority,
+  GovernedErasureOperation,
+  ProjectProvenanceInventory,
   RevocationEngine,
   RevocationGuard,
   SurfaceInventory,
@@ -208,7 +210,8 @@ test("FEAT-009 the shipped project engine enforces a newly installed barrier wit
   const root = await mkdtemp(join(tmpdir(), "kdlc-erasure-cli-"));
   context.after(() => removeTree(root));
   await new KdlcEngine({ root, clock }).execute("init", { project_id: "revocation.project" });
-  const concept = `---\ntype: Policy\ntitle: Private Control\nstatus: stable\naccess: { classification: public }\nsources:\n  - id: ${source.id}\n    resource: file:sources/private.md\n    source_hash: ${source.hash}\n    access: { classification: public }\n    rights: { license: Apache-2.0, redistribution: allowed, derivative_use: allowed, commercial_use: allowed }\n---\nThe secret control remains active.\n`;
+  const hiddenSource = { id: "src_hidden", hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" };
+  const concept = `---\ntype: Policy\ntitle: Private Control\nstatus: stable\naccess: { classification: public }\nsources:\n  - id: ${source.id}\n    resource: file:sources/private.md\n    source_hash: ${source.hash}\n    access: { classification: public }\n    rights: { license: Apache-2.0, redistribution: allowed, derivative_use: allowed, commercial_use: allowed }\n  - id: ${hiddenSource.id}\n    resource: file:sources/hidden.md\n    source_hash: ${hiddenSource.hash}\n    access: { classification: restricted }\n    rights: { license: Apache-2.0, redistribution: allowed, derivative_use: allowed, commercial_use: allowed }\n---\nThe secret control remains active.\n`;
   await writeFile(join(root, "knowledge/primary/private.md"), concept);
   await writeFile(join(root, "knowledge/primary/index.md"), "# Knowledge\n\n* [Private Control](private.md)\n");
   await writeFile(join(root, "knowledge/primary/retrieval-catalog.json"), `${JSON.stringify({ version: "kdlc-retrieval-catalog-1", concepts: [{ id: "private", path: "private.md", byte_hash: byteHash(Buffer.from(concept)), access: { classification: "public" } }] })}\n`);
@@ -220,6 +223,13 @@ test("FEAT-009 the shipped project engine enforces a newly installed barrier wit
   assert.equal((await engine.execute("query", { question: "secret control" })).status, "ok");
   const store = new NodeFileStore(root);
   const guard = new RevocationGuard({ store });
+  await store.writeJsonAtomic(guard.path(hiddenSource.id), {
+    api_version: "kdlc.dev/revocation-barrier/v1alpha1", source: hiddenSource, state: "revoked",
+    workflow_id: "wf_hidden", job_id: "job_hidden", impact_hash: artifactHash("hidden-impact"),
+    decision_hash: artifactHash("hidden-decision"), activated_at: now,
+  });
+  assert.equal((await engine.execute("query", { question: "secret control" })).status, "not_found");
+  await store.remove(guard.path(hiddenSource.id));
   await store.writeJsonAtomic(guard.path(source.id), {
     api_version: "kdlc.dev/revocation-barrier/v1alpha1",
     source,
@@ -319,6 +329,53 @@ test("FEAT-009 audit/receipt finalization crash gaps recover forward exactly onc
   }
 });
 
+test("FEAT-009 same-ID path substitution and post-audit late copies cannot receive a receipt", async (context) => {
+  for (const substitution of ["same-id", "new-id"]) {
+    let state;
+    let injected = false;
+    state = await fixture(context, { fault: async ({ phase }) => {
+      if (phase !== "after-audit-before-receipt" || injected) return;
+      injected = true;
+      const late = { id: substitution === "same-id" ? "original" : "late-copy", kind: "original", path: `sources/original/${substitution}.txt`, strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] };
+      await state.store.writeTextAtomic(late.path, "SECRET-123 late copy\n");
+      if (substitution === "same-id") state.surfaces.splice(state.surfaces.findIndex(({ id }) => id === "original"), 1, late);
+      else state.surfaces.push(late);
+    } });
+    const started = await state.engine.start(await request(state, { workflowId: `wf_${substitution}`, idempotencyKey: `key-${substitution}` }));
+    await assert.rejects(state.engine.run(started.job.workflow_id, started.job.job_id), (error) => error.code === "KDLC_ERASURE_INCOMPLETE");
+    assert.equal(await state.store.exists(state.engine.receiptPath(started.job.workflow_id, started.job.job_id)), false);
+    assert.equal(await state.store.exists(`sources/original/${substitution}.txt`), true);
+  }
+});
+
+test("FEAT-009 durable generation fails retrieval closed through an interrupted barrier install", async (context) => {
+  const state = await fixture(context);
+  const guard = new RevocationGuard({ store: state.store });
+  await state.store.writeJsonAtomic(guard.generationPath(), { generation: 7 });
+  const guarded = guardRetriever({ async search() { return { status: "ok", results: [{ citation: { concept: "kb://base@r/private" }, source_citations: [{ id: source.id, source_hash: source.hash }] }], citations: [], conflicts: [], warnings: [], timing_class: "bounded-floor" }; } }, guard);
+  assert.equal((await guarded.search({ includeSources: true })).status, "not_found");
+});
+
+test("FEAT-009 shipped complete project inventory rejects unknown files and operation consumes FEAT-008 tokens", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-project-inventory-"));
+  context.after(() => removeTree(root));
+  const store = new NodeFileStore(root);
+  await store.writeTextAtomic("sources/private.txt", "private\n");
+  assert.throws(() => new ProjectProvenanceInventory({ store, governedRoots: ["sources"] }), (error) => error.code === "KDLC_ERASURE_INPUT_INVALID");
+  const inventory = new ProjectProvenanceInventory({ store });
+  const surfaces = [{ id: "original", kind: "original", path: "sources/private.txt", strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] }];
+  await inventory.replaceManifest(surfaces, { clock });
+  assert.equal((await inventory.snapshot()).surfaces.length, 1);
+  await store.writeTextAtomic("sources/unknown.txt", "untracked\n");
+  await assert.rejects(inventory.snapshot(), (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && error.details.unknown.includes("sources/unknown.txt"));
+
+  const state = await fixture(context);
+  const operation = new GovernedErasureOperation({ engine: state.engine, governanceControls: state.governance });
+  const result = await operation.execute(await request(state, { workflowId: "wf_adapter", idempotencyKey: "adapter-erase" }));
+  assert.equal(result.status, "erased");
+  assert.equal(state.authority.evidenceVerifier().resolve(result.completion).receipt_hash, artifactHash(result.receipt));
+});
+
 test("FEAT-009 verification detects a late partial copy and refuses success until it is removed from the trusted inventory", async (context) => {
   const state = await fixture(context);
   const started = await state.engine.start(await request(state));
@@ -375,6 +432,24 @@ test("FEAT-009 a concurrent retrieval finishing after barrier installation canno
   const result = await query;
   assert.equal(result.status, "not_found");
   assert.deepEqual(result.results, []);
+});
+
+test("FEAT-009 one generation snapshot covers every result in a retrieval response", async (context) => {
+  const state = await fixture(context);
+  const guard = new RevocationGuard({ store: state.store });
+  let checked = 0;
+  const original = guard.allowedCitations.bind(guard);
+  guard.allowedCitations = async (citations) => {
+    const allowed = await original(citations);
+    checked += 1;
+    if (checked === 1) await state.engine.start(await request(state, { idempotencyKey: "multi-result-race" }));
+    return allowed;
+  };
+  const guarded = guardRetriever({ async search() { return {
+    status: "ok", results: ["one", "two"].map((id) => ({ id, citation: { concept: `kb://base@r/${id}` }, source_citations: [{ id: source.id, source_hash: source.hash }] })),
+    citations: [], conflicts: [], warnings: [], timing_class: "bounded-floor",
+  }; } }, guard);
+  assert.equal((await guarded.search({ includeSources: true })).status, "not_found");
 });
 
 test("FEAT-009 a legal hold activated after planning stops purge before any copy is treated", async (context) => {

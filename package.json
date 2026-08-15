@@ -33,6 +33,7 @@
     "./extensions": "./packages/extensions/index.mjs",
     "./cli": "./packages/cli/index.mjs",
     "./mcp": "./packages/mcp/index.mjs",
+    "./erasure": "./packages/erasure/index.mjs",
     "./adapters": "./packages/adapters/index.mjs"
   },
   "bin": {"kdlc": "./packages/cli/bin.mjs"},

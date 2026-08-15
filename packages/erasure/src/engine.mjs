@@ -82,7 +82,29 @@ export class RevocationEngine {
     }, action);
   }
 
-  async #installBarrier(plan, state = plan.request.action === "erase" ? "erasure-pending" : "revoked") {
+  coordinateInventory(action) {
+    return this.store.withMutex("governance/erasure-inventory-lock", {
+      owner: `erasure-inventory:${this.ids.next("coord")}`,
+      clock: this.clock,
+      ...this.coordination,
+    }, action);
+  }
+
+  async #barrierMutation(action) {
+    return this.coordinateInventory(async () => {
+      const path = this.guard.generationPath();
+      const current = await this.guard.generation();
+      if (current === null) throw incomplete("Revocation barrier generation is invalid");
+      const begun = current % 2 === 0 ? current + 1 : current + 2;
+      await this.store.writeJsonAtomic(path, { generation: begun });
+      const result = await action();
+      await this.store.writeJsonAtomic(path, { generation: begun + 1 });
+      return result;
+    });
+  }
+
+  async #installBarrier(plan, state = plan.request.action === "erase" ? "erasure-pending" : "revoked", coordinated = false) {
+    if (!coordinated) return this.#barrierMutation(() => this.#installBarrier(plan, state, true));
     const path = this.guard.path(plan.source.id);
     const barrier = {
       api_version: "kdlc.dev/revocation-barrier/v1alpha1",
@@ -282,6 +304,12 @@ export class RevocationEngine {
         added: [...currentIds].filter((id) => !plannedIds.has(id)).sort(),
         missing: [...plannedIds].filter((id) => !currentIds.has(id)).sort(),
       });
+    const currentById = new Map(current.surfaces.map((surface) => [surface.id, surface]));
+    for (const surface of plan.surfaces) {
+      const currentSurface = currentById.get(surface.id);
+      if (!currentSurface || currentSurface.identity_hash !== surface.identity_hash)
+        throw incomplete("Inventoried surface identity changed during erasure", { surface_id: surface.id });
+    }
     if (!(await this.guard.revoked(plan.source.id, plan.source.hash)))
       throw incomplete("Revocation barrier is missing");
     if (plan.request.action === "revoke") {
@@ -372,37 +400,43 @@ export class RevocationEngine {
       plan.updated_at = this.clock.now();
       await this.store.writeJsonAtomic(planPath, plan);
       await this.fault({ phase: "before-verification", plan: structuredClone(plan) });
-      const verification = await this.#verify(plan);
-      const receipt = {
-        api_version: "kdlc.dev/erasure-receipt/v1alpha1",
-        job_id: jobId,
-        workflow_id: workflowId,
-        action: plan.request.action,
-        source: structuredClone(plan.source),
-        result: plan.request.action === "erase" ? "erased" : "revoked",
-        impact_hash: artifactHash(plan.impact),
-        decision_hash: artifactHash(plan.decision),
-        verification_hash: artifactHash(verification),
-        treated: {
-          total: plan.surfaces.length,
-          by_kind: Object.fromEntries([...new Set(plan.surfaces.map(({ kind }) => kind))].sort().map((kind) => [kind, plan.surfaces.filter((surface) => surface.kind === kind).length])),
-        },
-        completed_at: this.clock.now(),
-      };
-      if (typeof this.authority.attestReceipt !== "function") throw denied("Erasure receipt authority is unavailable");
-      receipt.proof = this.authority.attestReceipt(receipt);
-      await this.audit.append(workflowId, {
-        actor: plan.decision.authority.actor,
-        action: plan.request.action === "erase" ? "erasure.completed" : "source.revocation-completed",
-        subject: opaque(plan.source.id),
-        input_hash: artifactHash(plan.impact),
-        receipt_hash: artifactHash(receipt),
-        result: receipt.result,
-        policy_version: `${plan.decision.policy.id}@${plan.decision.policy.version}`,
-        idempotency_key: `erasure-complete:${jobId}`,
+      const receipt = await this.coordinateInventory(async () => {
+        const verification = await this.#verify(plan);
+        const candidate = {
+          api_version: "kdlc.dev/erasure-receipt/v1alpha1",
+          job_id: jobId,
+          workflow_id: workflowId,
+          action: plan.request.action,
+          source: structuredClone(plan.source),
+          result: plan.request.action === "erase" ? "erased" : "revoked",
+          impact_hash: artifactHash(plan.impact),
+          decision_hash: artifactHash(plan.decision),
+          verification_hash: artifactHash(verification),
+          treated: {
+            total: plan.surfaces.length,
+            by_kind: Object.fromEntries([...new Set(plan.surfaces.map(({ kind }) => kind))].sort().map((kind) => [kind, plan.surfaces.filter((surface) => surface.kind === kind).length])),
+          },
+          completed_at: this.clock.now(),
+        };
+        if (typeof this.authority.attestReceipt !== "function") throw denied("Erasure receipt authority is unavailable");
+        candidate.proof = this.authority.attestReceipt(candidate);
+        await this.audit.append(workflowId, {
+          actor: plan.decision.authority.actor,
+          action: plan.request.action === "erase" ? "erasure.completed" : "source.revocation-completed",
+          subject: opaque(plan.source.id),
+          input_hash: artifactHash(plan.impact),
+          receipt_hash: artifactHash(candidate),
+          result: candidate.result,
+          policy_version: `${plan.decision.policy.id}@${plan.decision.policy.version}`,
+          idempotency_key: `erasure-complete:${jobId}`,
+        });
+        await this.fault({ phase: "after-audit-before-receipt", plan: structuredClone(plan), receipt: structuredClone(candidate) });
+        const finalVerification = await this.#verify(plan);
+        if (artifactHash(finalVerification) !== candidate.verification_hash)
+          throw incomplete("Erasure inventory changed before receipt commit");
+        await this.store.writeJsonAtomic(this.receiptPath(workflowId, jobId), candidate);
+        return candidate;
       });
-      await this.fault({ phase: "after-audit-before-receipt", plan: structuredClone(plan), receipt: structuredClone(receipt) });
-      await this.store.writeJsonAtomic(this.receiptPath(workflowId, jobId), receipt);
       await this.fault({ phase: "after-receipt-before-finalization", plan: structuredClone(plan), receipt: structuredClone(receipt) });
       await this.#installBarrier(plan, plan.request.action === "erase" ? "erased" : "revoked");
       plan.state = "completed";
