@@ -26,7 +26,7 @@
       "additionalProperties": false,
       "required": ["before", "after"],
       "properties": {
-        "before": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+        "before": {"anyOf": [{"type": "object", "properties": {"frontmatter": {"type": "object", "properties": {"stale_after": {"$ref": "../common.schema.json#/$defs/date"}}}}}, {"type": "null"}]},
         "after": {"type": "object", "required": ["frontmatter", "body"], "properties": {"frontmatter": {"type": "object", "properties": {"stale_after": {"$ref": "../common.schema.json#/$defs/date"}}}, "body": {"type": "string"}}, "additionalProperties": false}
       }
     },

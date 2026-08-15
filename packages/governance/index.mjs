@@ -79,6 +79,7 @@ export function createReviewPacket({ proposal, claims, evidence, sensors, impact
 
 export function createReviewReceipt({ packet, decision, session, receiptId, reviewedAt, validator }) {
   requireValid(validator, "governedReviewPacket", packet);
+  if (!isRfc3339Instant(reviewedAt)) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Review receipt timestamp must be a strict RFC3339 known instant", { contract: "reviewReceipt", field: "reviewed_at" });
   const { reviewer } = resolveAuthenticatedReviewSession(session);
   const receipt = {
     api_version: "kdlc.dev/review-receipt/v1alpha1",
