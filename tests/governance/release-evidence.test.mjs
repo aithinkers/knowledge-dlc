@@ -259,12 +259,18 @@ test("REL-001 release lifecycle accepts only coherent prerelease and qualified f
   const pending = { id: "REL-001", status: "in-progress" }; const verified = { id: "REL-001", status: "verified" };
   const prerelease = { release_status: "not-ready", implementation: { version: "0.0.0-private", private: true }, pending_requirements: [{ id: "REL-001" }] };
   const candidate = { release_status: "release-candidate", implementation: { version: "1.0.0", private: false }, pending_requirements: [] };
-  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "0.0.0-private", private: true }, conformance: prerelease, rel: pending, statisticalPhase: "pending" }), []);
-  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "1.0.0", private: false }, conformance: candidate, rel: verified, statisticalPhase: "qualified" }), []);
+  const pendingReport = { release_status: "not-ready", implementation_version: "0.0.0-private", summary: { structural_gate: "passed" }, statistical_suite: { status: "pending", release_blocking: true }, pending_release_evidence: ["statistical-quality-report"] };
+  const candidateReport = { release_status: "release-candidate", implementation_version: "1.0.0", summary: { structural_gate: "passed" }, statistical_suite: { status: "qualified", release_blocking: false }, pending_release_evidence: [] };
+  const privateLock = { version: "0.0.0-private", packages: { "": { version: "0.0.0-private" } } }; const candidateLock = { version: "1.0.0", packages: { "": { version: "1.0.0" } } };
+  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "0.0.0-private", private: true }, lock: privateLock, conformance: prerelease, report: pendingReport, rel: pending, statisticalPhase: "pending" }), []);
+  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: candidateReport, rel: verified, statisticalPhase: "qualified" }), []);
   for (const mutation of [
-    { manifest: { version: "1.0.0", private: false }, conformance: candidate, rel: verified, statisticalPhase: "pending" },
-    { manifest: { version: "1.0.0", private: false }, conformance: { ...candidate, implementation: { version: "2.0.0", private: false } }, rel: verified, statisticalPhase: "qualified" },
-    { manifest: { version: "1.0.0", private: false }, conformance: candidate, rel: { ...verified, status: "released" }, statisticalPhase: "qualified" },
-    { manifest: { version: "0.0.0-private", private: true }, conformance: { ...prerelease, pending_requirements: [] }, rel: pending, statisticalPhase: "pending" }
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: candidateReport, rel: verified, statisticalPhase: "pending" },
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: pendingReport, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: { ...candidate, pending_requirements: [{ id: "FEAT-999" }] }, report: candidateReport, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, lock: { ...candidateLock, version: "2.0.0" }, conformance: candidate, report: candidateReport, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.01.0", private: false }, lock: { version: "1.01.0", packages: { "": { version: "1.01.0" } } }, conformance: { ...candidate, implementation: { version: "1.01.0", private: false } }, report: { ...candidateReport, implementation_version: "1.01.0" }, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: candidateReport, rel: { ...verified, status: "released" }, statisticalPhase: "qualified" },
+    { manifest: { version: "0.0.0-private", private: true }, lock: privateLock, conformance: { ...prerelease, pending_requirements: [] }, report: pendingReport, rel: pending, statisticalPhase: "pending" }
   ]) assert.ok(validateReleaseLifecycle(mutation).length > 0);
 });

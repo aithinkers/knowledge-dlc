@@ -32,12 +32,12 @@ function same(left, right) { return JSON.stringify(left) === JSON.stringify(righ
 async function bytes(root, path) { return readTrustedFile(root, path); }
 async function json(root, path) { return JSON.parse((await bytes(root, path)).toString("utf8")); }
 
-export function validateReleaseLifecycle({ manifest, conformance, rel, statisticalPhase }) {
+export function validateReleaseLifecycle({ manifest, lock, conformance, report, rel, statisticalPhase }) {
   const failures = [];
-  const prerelease = manifest?.private === true && manifest?.version === "0.0.0-private" && conformance?.release_status === "not-ready" && rel?.status === "in-progress" && conformance?.pending_requirements?.some(({ id }) => id === "REL-001") && statisticalPhase === "pending";
-  const candidate = manifest?.private === false && /^[1-9][0-9]*\.[0-9]+\.[0-9]+$/u.test(manifest?.version ?? "") && conformance?.implementation?.version === manifest.version && conformance?.implementation?.private === false && conformance?.release_status === "release-candidate" && rel?.status === "verified" && !conformance?.pending_requirements?.some(({ id }) => id === "REL-001") && statisticalPhase === "qualified";
+  const exactVersions = lock?.version === manifest?.version && lock?.packages?.[""]?.version === manifest?.version && conformance?.implementation?.version === manifest?.version && report?.implementation_version === manifest?.version;
+  const prerelease = manifest?.private === true && manifest?.version === "0.0.0-private" && exactVersions && conformance?.implementation?.private === true && conformance?.release_status === "not-ready" && report?.release_status === "not-ready" && report?.statistical_suite?.status === "pending" && report?.statistical_suite?.release_blocking === true && report?.pending_release_evidence?.length > 0 && rel?.status === "in-progress" && conformance?.pending_requirements?.some(({ id }) => id === "REL-001") && statisticalPhase === "pending";
+  const candidate = manifest?.private === false && /^[1-9][0-9]*\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u.test(manifest?.version ?? "") && exactVersions && conformance?.implementation?.private === false && conformance?.release_status === "release-candidate" && conformance?.pending_requirements?.length === 0 && report?.release_status === "release-candidate" && report?.statistical_suite?.status === "qualified" && report?.statistical_suite?.release_blocking === false && report?.pending_release_evidence?.length === 0 && report?.summary?.structural_gate === "passed" && rel?.status === "verified" && statisticalPhase === "qualified";
   if (!prerelease && !candidate) failures.push("release lifecycle phase is inconsistent or attempts an unsupported publication/released state");
-  if (prerelease && (conformance.implementation?.version !== manifest.version || conformance.implementation?.private !== manifest.private)) failures.push("prerelease conformance does not exact-bind package metadata");
   return failures;
 }
 
@@ -128,15 +128,15 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
     const advertised = await json(root, "distribution/conformance.json");
     if (!same(advertised.tools, conformance.tools) || !same(advertised.transports, conformance.transports) || !same(advertised.modules, moduleNames) || !same(advertised.formats, conformance.format_profiles)) failures.push("release statement differs from exact generated distribution conformance");
   } catch (error) { failures.push(`generated distribution conformance is unavailable: ${error.message}`); }
-  let manifest;
-  try { manifest = await json(root, "package.json"); }
+  let manifest; let lock;
+  try { manifest = await json(root, "package.json"); lock = await json(root, "package-lock.json"); }
   catch (error) { failures.push(`package metadata is unavailable: ${error.message}`); }
   try {
     const traceability = await json(root, "docs/traceability.json");
     const rel = traceability.requirements?.find(({ id }) => id === "REL-001");
     const erasure = traceability.requirements?.find(({ id }) => id === "FEAT-009");
     if (rel?.issue !== 10) failures.push("REL-001 traceability must remain bound to issue #10");
-    failures.push(...validateReleaseLifecycle({ manifest, conformance, rel, statisticalPhase: statistical.phase }));
+    failures.push(...validateReleaseLifecycle({ manifest, lock, conformance, report, rel, statisticalPhase: statistical.phase }));
     if (erasure?.issue !== 24 || !["implemented", "verified", "released"].includes(erasure.status) || !erasure.evidence?.tests?.includes("tests/governance/revocation-erasure.test.mjs")) failures.push("Governed conformance requires traceable merged FEAT-009 erasure evidence");
     for (const module of conformance.modules) for (const id of module.requirement_ids) {
       const traced = traceability.requirements?.find((entry) => entry.id === id);

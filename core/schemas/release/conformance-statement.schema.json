@@ -12,7 +12,7 @@
     },
     "implementation": {
       "type": "object", "additionalProperties": false, "required": ["name", "version", "private"],
-      "properties": {"name": {"const": "knowledge-dlc"}, "version": {"anyOf": [{"const": "0.0.0-private"}, {"type": "string", "pattern": "^[1-9][0-9]*\\.[0-9]+\\.[0-9]+$"}]}, "private": {"type": "boolean"}}
+      "properties": {"name": {"const": "knowledge-dlc"}, "version": {"anyOf": [{"const": "0.0.0-private"}, {"type": "string", "pattern": "^[1-9][0-9]*\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"}]}, "private": {"type": "boolean"}}
     },
     "release_status": {"enum": ["not-ready", "release-candidate"]},
     "modules": {
