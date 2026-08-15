@@ -270,7 +270,11 @@ export class NodeFileStore {
             await rm(await this.safePath(recovery), { recursive: true, force: true });
             continue;
           } catch (recoveryError) {
-            if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(recoveryError?.code)) throw recoveryError;
+            // Windows can transiently refuse a directory rename while another
+            // contender is closing a handle beneath it. Treat that as ordinary
+            // contention and retry; the claim and owner-token checks still
+            // fence stale recovery before a later rename can succeed.
+            if (!["ENOENT", "EEXIST", "ENOTEMPTY", "EPERM", "EACCES"].includes(recoveryError?.code)) throw recoveryError;
           } finally {
             if (ownsClaim) await rm(await this.safePath(claimPath), { force: true }).catch(() => {});
           }
