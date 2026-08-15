@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
 import { normalizeNpmPackPath } from "./supply-chain-validation.mjs";
+import { removeReleaseTemporary, withReleaseCleanup } from "./release-artifact-cleanup.mjs";
 
 const execute = promisify(execFile); const [candidateArgument, outputArgument] = process.argv.slice(2);
 if (!candidateArgument || !outputArgument || process.argv.length !== 4) throw new Error("usage: node scripts/derive-release-artifacts.mjs <candidate-root> <output.json>");
@@ -13,7 +14,7 @@ const candidate = resolve(candidateArgument); const output = resolve(outputArgum
 const npm = process.platform === "win32" ? "npm.cmd" : "npm"; const npmOptions = process.platform === "win32" ? { shell: true } : {};
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const safeEnvironment = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP, npm_config_cache: resolve(temporary, "npm-cache") };
-try {
+await withReleaseCleanup(async () => {
   await execute(process.execPath, [resolve(import.meta.dirname, "verify-supply-chain.mjs")], { cwd: import.meta.dirname, env: { ...safeEnvironment, KDLC_CANDIDATE_ROOT: candidate }, maxBuffer: 32 * 1024 * 1024 });
   const destinations = [resolve(temporary, "pack-one"), resolve(temporary, "pack-two")]; await Promise.all(destinations.map((path) => mkdir(path)));
   const builds = [];
@@ -35,4 +36,4 @@ try {
   if (!/^[0-9a-f]{40}$/u.test(head ?? "")) throw new Error("trusted candidate head is unavailable");
   const result = { head_sha: head, package: { first_sha256: builds[0].sha256, second_sha256: builds[1].sha256, manifest_sha256: builds[0].manifest_sha256, file_count: builds[0].file_count }, supply_chain: { sbom_sha256: digest(await readFile(resolve(candidate, policy.sbom))), notices_sha256: digest(await readFile(resolve(candidate, policy.notices))) }, smoke: { cli: true, imports: true } };
   await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
-} finally { await rm(temporary, { recursive: true, force: true }); }
+}, () => removeReleaseTemporary(temporary));

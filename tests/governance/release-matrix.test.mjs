@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import { releaseMatrixCells, releaseMatrixCommandIds, releaseMatrixDifferences } from "../../scripts/release-matrix-definition.mjs";
+import { removeReleaseTemporary, withReleaseCleanup } from "../../scripts/release-artifact-cleanup.mjs";
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -71,4 +72,12 @@ test("REL-001 release matrix requires exact OS-bound platform differences", asyn
     }
     await assert.rejects(execute(process.execPath, ["scripts/verify-release-matrix.mjs", directory], { cwd: root, env: await verifierEnvironment(directory) }), undefined, mutation);
   }
+});
+
+test("REL-001 trusted artifact derivation removes readonly output without masking a primary failure", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "kdlc-derived-cleanup-")); await mkdir(resolve(directory, "nested")); await writeFile(resolve(directory, "nested/readonly.json"), "{}\n"); await chmod(resolve(directory, "nested/readonly.json"), 0o400); await chmod(resolve(directory, "nested"), 0o500);
+  await removeReleaseTemporary(directory);
+  const primary = new Error("primary"); const cleanup = new Error("cleanup");
+  await assert.rejects(withReleaseCleanup(async () => { throw primary; }, async () => { throw cleanup; }), (error) => error === primary);
+  await assert.rejects(withReleaseCleanup(async () => "ok", async () => { throw cleanup; }), (error) => error === cleanup);
 });

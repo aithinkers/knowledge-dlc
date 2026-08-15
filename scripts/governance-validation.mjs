@@ -19,6 +19,7 @@ export const protectedHarnessFiles = Object.freeze([
   "scripts/release-matrix-definition.mjs",
   "scripts/run-release-matrix-cell.mjs",
   "scripts/derive-release-artifacts.mjs",
+  "scripts/release-artifact-cleanup.mjs",
   "scripts/verify-release-matrix.mjs",
   "scripts/collect-release-state.mjs",
   "scripts/release-state-derivation.mjs",
