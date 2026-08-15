@@ -14,6 +14,8 @@ import { descriptors, normalize, portableArtifacts, runRestrictedNormalizer } fr
 
 const root = process.cwd();
 const fixture = (name) => readFile(join(root, "fixtures/normalization", name));
+const manifestAjv = new Ajv2020({ strict: true, allErrors: true }); addFormats(manifestAjv);
+const manifestValidator = manifestAjv.compile(JSON.parse(await readFile(join(root, "core/schemas/normalization/normalization-manifest.schema.json"), "utf8")));
 
 function makePdf(value = "Hello PDF", catalogAction = "") {
   const objects = [
@@ -137,8 +139,14 @@ test("FEAT-003 trusted ceilings, package identity, provenance, and portable path
   assert.throws(() => portableArtifacts(safe, "different"), /does not match/);
   const badMetadata = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "../escape", normalizedAt: "not-a-time" });
   assert.equal(badMetadata.manifest.status, "quarantined"); assert.match(badMetadata.manifest.source_id, /^source-/); assert.equal(badMetadata.manifest.normalized_at, "1970-01-01T00:00:00.000Z");
+  for (const settings of [[], null]) {
+    const invalidSettings = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", settings });
+    assert.equal(invalidSettings.manifest.quarantine.code, "invalid-settings"); assert.deepEqual(invalidSettings.manifest.settings, {}); assert.equal(manifestValidator(invalidSettings.manifest), true, JSON.stringify(manifestValidator.errors));
+  }
+  const invalidCalendar = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", normalizedAt: "2026-02-30T00:00:00Z" });
+  assert.equal(invalidCalendar.manifest.quarantine.code, "invalid-source-metadata"); assert.equal(invalidCalendar.manifest.normalized_at, "1970-01-01T00:00:00.000Z"); assert.equal(manifestValidator(invalidCalendar.manifest), true, JSON.stringify(manifestValidator.errors));
   const valid = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "source-7", normalizedAt: "2026-08-15T00:00:00Z" });
-  assert.equal(valid.manifest.source_id, "source-7"); assert.equal(valid.manifest.normalized_at, "2026-08-15T00:00:00Z");
+  assert.equal(valid.manifest.source_id, "source-7"); assert.equal(valid.manifest.normalized_at, "2026-08-15T00:00:00Z"); assert.equal(manifestValidator(valid.manifest), true, JSON.stringify(manifestValidator.errors));
   const changedUnit = structuredClone(valid); changedUnit.units[0].source_hash = `sha256:${"0".repeat(64)}`;
   assert.throws(() => portableArtifacts(changedUnit, "source-7"), /source-unbound/);
   const changedManifest = structuredClone(valid); changedManifest.manifest.outputs[0].hash = `sha256:${"0".repeat(64)}`;

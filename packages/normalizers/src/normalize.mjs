@@ -17,7 +17,19 @@ unitAjv.addSchema(JSON.parse(await readFile(new URL("../../../core/schemas/commo
 const validateUnit = unitAjv.compile(JSON.parse(await readFile(new URL("../../../core/schemas/normalization/normalized-unit.schema.json", import.meta.url), "utf8")));
 const validateManifest = unitAjv.compile(JSON.parse(await readFile(new URL("../../../core/schemas/normalization/normalization-manifest.schema.json", import.meta.url), "utf8")));
 const portableSourceId = /^[a-z0-9][a-z0-9._-]{0,127}$/;
-const rfc3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const rfc3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+const plainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+function validRfc3339(value) {
+  if (typeof value !== "string") return false;
+  const match = rfc3339.exec(value); if (!match) return false;
+  const [, year, month, day, hour, minute, second, , offsetHour = "00", offsetMinute = "00"] = match;
+  const numbers = [year, month, day, hour, minute, second, offsetHour, offsetMinute].map(Number);
+  const [y, m, d, h, min, sec, oh, om] = numbers;
+  if (m < 1 || m > 12 || h > 23 || min > 59 || sec > 59 || oh > 23 || om > 59) return false;
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return d >= 1 && d <= days[m - 1];
+}
 
 class Quarantine extends Error { constructor(code, message, details = {}) { super(message); this.code = code; this.details = details; } }
 const exceed = (name, actual, maximum) => { if (actual > maximum) throw new Quarantine("limit-exceeded", `${name} exceeds configured limit`, { limit: name, actual, maximum }); };
@@ -193,14 +205,15 @@ function gifProfile(bytes, sourceHash, settings, limits) {
 
 function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJson(value)); } catch { return fallback; } }
 function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error) {
-  return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: serializable(settings), coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
+  return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: plainObject(settings) ? serializable(settings) : {}, coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
 }
 
 export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
   if (process.env.KDLC_RESTRICTED_WORKER !== "1" || !process.permission || process.permission.has("child") || process.permission.has("fs.write", "/")) throw new Error("Direct normalization requires the restricted worker capability boundary");
   const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes); const computedHash = byteHash(input); const hash = computedHash; sourceId ??= `source-${hash.slice(7, 23)}`;
   try {
-    if (typeof sourceId !== "string" || !portableSourceId.test(sourceId) || typeof normalizedAt !== "string" || !rfc3339.test(normalizedAt) || !Number.isFinite(Date.parse(normalizedAt))) throw new Quarantine("invalid-source-metadata", "Portable source ID and RFC3339 normalization timestamp are required");
+    if (typeof sourceId !== "string" || !portableSourceId.test(sourceId) || !validRfc3339(normalizedAt)) throw new Quarantine("invalid-source-metadata", "Portable source ID and RFC3339 normalization timestamp are required");
+    if (!plainObject(settings)) throw new Quarantine("invalid-settings", "Normalization settings must be a plain JSON object");
     const resolvedLimits = { ...defaultLimits };
     for (const [name, value] of Object.entries(limits)) { if (!(name in defaultLimits) || !Number.isSafeInteger(value) || value <= 0 || value > defaultLimits[name]) throw new Quarantine("invalid-limits", "Normalizer limits may only tighten trusted ceilings", { limit: name }); resolvedLimits[name] = value; }
     if (sourceHash && sourceHash !== computedHash) throw new Quarantine("source-hash-mismatch", "Declared source hash does not match input bytes", { declared: sourceHash, actual: computedHash });
@@ -225,12 +238,16 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     if (probabilisticUnits.length) { const derived = `${probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}\n`; exceed("output_bytes", Buffer.byteLength(deterministicBytes) + Buffer.byteLength(derived), resolvedLimits.output_bytes); exceed("shapes", probabilisticUnits.length, resolvedLimits.shapes); exceed("processing_ms", performance.now() - started, resolvedLimits.processing_ms); outputs.push({ path: "probabilistic-units.jsonl", hash: byteHash(derived), bytes: Buffer.byteLength(derived), mode: "probabilistic" }); }
     const qualityWarnings = [...new Set([...result.warnings, ...result.units.flatMap((unit) => unit.quality_warnings)])].sort();
     const omissions = qualityWarnings.filter((warning) => /sampled|scanned|omitted|excluded/i.test(warning)).map((reason) => ({ reason }));
-    return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest: { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security } };
+    const manifest = { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security };
+    if (!validateManifest(manifest)) throw new Quarantine("invalid-output-schema", "Normalizer manifest failed its schema contract");
+    return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest };
   } catch (error) {
     const quarantined = error instanceof Quarantine ? error : new Quarantine("malformed", "Normalizer failed safely", { parser: error.message });
     const safeSourceId = typeof sourceId === "string" && portableSourceId.test(sourceId) ? sourceId : `source-${hash.slice(7, 23)}`;
-    const safeNormalizedAt = typeof normalizedAt === "string" && rfc3339.test(normalizedAt) && Number.isFinite(Date.parse(normalizedAt)) ? normalizedAt : "1970-01-01T00:00:00.000Z";
-    return { descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(safeSourceId, hash, safeNormalizedAt, settings, quarantined) };
+    const safeNormalizedAt = validRfc3339(normalizedAt) ? normalizedAt : "1970-01-01T00:00:00.000Z";
+    const manifest = quarantineManifest(safeSourceId, hash, safeNormalizedAt, settings, quarantined);
+    if (!validateManifest(manifest)) throw new Error("Quarantine manifest failed its schema contract");
+    return { descriptor: null, units: [], probabilisticUnits: [], manifest };
   }
 }
 
