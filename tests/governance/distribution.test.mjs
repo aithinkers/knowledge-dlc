@@ -634,4 +634,5 @@ test("FEAT-006 MCP resources, schemas, metadata, doctor, and generated drift are
   );
   const [code] = await once(child, "exit");
   assert.equal(code, 0);
+  await server.close();
 });

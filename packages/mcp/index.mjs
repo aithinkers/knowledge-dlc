@@ -146,9 +146,22 @@ export class McpProjectServer {
     this.projectId = projectId;
     this.principal = structuredClone(principal);
     this.engineFactory = engineFactory;
+    this.engines = new Map();
   }
   engine(principal = this.principal) {
-    return this.engineFactory({ root: this.root, principal });
+    const key = JSON.stringify({
+      actor: principal.actor,
+      scopes: [...principal.scopes].sort(),
+      mode: principal.principal_mode ?? null,
+    });
+    if (!this.engines.has(key))
+      this.engines.set(key, this.engineFactory({ root: this.root, principal }));
+    return this.engines.get(key);
+  }
+  async close() {
+    await Promise.all(
+      [...this.engines.values()].map((engine) => engine.close?.()),
+    );
   }
   available(tool, principal = this.principal) {
     return (
