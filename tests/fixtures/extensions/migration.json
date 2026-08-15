@@ -1,0 +1,12 @@
+{
+  "api_version": "kdlc.dev/migration/v1alpha1",
+  "id": "acme-quality-v2",
+  "plugin": "acme-quality",
+  "from": "1.4.0",
+  "to": "2.0.0",
+  "reversible": true,
+  "operations": [
+    {"kind": "rename", "from": "profiles/quality.json", "to": "profiles/assurance.json", "semantic_effect": {"category": "validation", "description": "Renames the active validation profile."}},
+    {"kind": "replace-json", "path": "settings/plugin.json", "pointer": "/minimum_trust", "before": "machine-confirmed", "after": "human-reviewed", "semantic_effect": {"category": "trust", "description": "Raises the minimum accepted verification tier."}}
+  ]
+}

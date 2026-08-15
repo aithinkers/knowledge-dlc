@@ -1,0 +1,7 @@
+{
+  "package_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "executables": [
+    {"id": "normalizer-custom", "type": "normalizer", "entrypoint": "tools/normalizer.mjs", "isolation": "sandboxed", "permissions": {"filesystem": [{"root": "sources/staging", "access": "read"}], "network": [], "credentials": [], "subprocess": false, "macros": false, "resources": {"memory_bytes": 134217728, "cpu_ms": 5000, "output_bytes": 10000000}}},
+    {"id": "sensor-audit", "type": "sensor", "entrypoint": "tools/sensor.mjs", "isolation": "sandboxed", "permissions": {"filesystem": [{"root": "workflow/runs", "access": "read"}], "network": [], "credentials": [], "subprocess": false, "macros": false, "resources": {"memory_bytes": 67108864, "cpu_ms": 1000, "output_bytes": 1000000}}}
+  ]
+}

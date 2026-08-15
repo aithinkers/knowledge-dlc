@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/extensions/plugin-manifest.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "kind", "metadata", "compatibility", "dependencies", "contributions", "executables"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/plugin/v1alpha1"}, "kind": {"const": "Plugin"},
+    "metadata": {"type": "object", "additionalProperties": false, "required": ["name", "version", "publisher", "license"], "properties": {"name": {"$ref": "#/$defs/name"}, "version": {"$ref": "#/$defs/version"}, "publisher": {"type": "string", "minLength": 1}, "license": {"type": "string", "minLength": 1}}},
+    "compatibility": {"type": "object", "additionalProperties": false, "required": ["framework"], "properties": {"framework": {"type": "string", "minLength": 1}, "okf": {"type": "string", "minLength": 1}}},
+    "dependencies": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "range"], "properties": {"name": {"$ref": "#/$defs/name"}, "range": {"type": "string", "minLength": 1}, "optional": {"type": "boolean"}}}},
+    "contributions": {"type": "object", "additionalProperties": false, "required": ["templates", "profiles", "scopes", "sensors", "normalizers"], "properties": {
+      "templates": {"type": "array", "items": {"$ref": "https://kdlc.dev/schemas/v1alpha1/extensions/template.schema.json"}},
+      "profiles": {"type": "array", "items": {"$ref": "https://kdlc.dev/schemas/v1alpha1/extensions/profile.schema.json"}},
+      "scopes": {"type": "array", "items": {"$ref": "https://kdlc.dev/schemas/v1alpha1/extensions/scope.schema.json"}},
+      "sensors": {"type": "array", "items": {"$ref": "https://kdlc.dev/schemas/v1alpha1/extensions/sensor.schema.json"}},
+      "normalizers": {"type": "array", "items": {"$ref": "https://kdlc.dev/schemas/v1alpha1/extensions/normalizer.schema.json"}}
+    }},
+    "executables": {"type": "array", "items": {"$ref": "#/$defs/executable"}}
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+    "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[A-Za-z0-9._/-]+\\.mjs$"},
+    "permissions": {"type": "object", "additionalProperties": false, "required": ["filesystem", "network", "credentials", "subprocess", "macros", "resources"], "properties": {
+      "filesystem": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["root", "access"], "properties": {"root": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[A-Za-z0-9._/-]+$"}, "access": {"enum": ["read", "write"]}}}},
+      "network": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:https|wss)://[^/\\s]+$"}},
+      "credentials": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"}},
+      "subprocess": {"type": "boolean"}, "macros": {"type": "boolean"},
+      "resources": {"type": "object", "additionalProperties": false, "required": ["memory_bytes", "cpu_ms", "output_bytes"], "properties": {"memory_bytes": {"type": "integer", "minimum": 1048576}, "cpu_ms": {"type": "integer", "minimum": 1}, "output_bytes": {"type": "integer", "minimum": 1}}}
+    }},
+    "executable": {"type": "object", "additionalProperties": false, "required": ["id", "type", "entrypoint", "isolation", "permissions"], "properties": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]*$"}, "type": {"enum": ["tool", "sensor", "normalizer", "renderer", "connector"]}, "entrypoint": {"$ref": "#/$defs/path"}, "isolation": {"enum": ["sandboxed", "unsandboxed"]}, "permissions": {"$ref": "#/$defs/permissions"}},
+      "allOf": [{"if": {"properties": {"type": {"const": "normalizer"}}, "required": ["type"]}, "then": {"properties": {"permissions": {"type": "object", "properties": {"network": {"type": "array", "maxItems": 0}, "credentials": {"type": "array", "maxItems": 0}, "subprocess": {"type": "boolean", "const": false}, "macros": {"type": "boolean", "const": false}}}}}}]
+    }
+  }
+}

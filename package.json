@@ -5,7 +5,8 @@
   "description": "K-DLC development and governance tooling",
   "type": "module",
   "exports": {
-    "./normalizers": "./packages/normalizers/index.mjs"
+    "./normalizers": "./packages/normalizers/index.mjs",
+    "./extensions": "./packages/extensions/index.mjs"
   },
   "packageManager": "npm@11.5.1",
   "engines": {
@@ -14,6 +15,7 @@
   },
   "scripts": {
     "check:governance": "node scripts/verify-governance.mjs",
+    "test:extensions": "node --test tests/governance/extensions.test.mjs",
     "test:governance": "node --test tests/governance/*.test.mjs",
     "test": "npm run check:governance && npm run test:governance"
   },
@@ -25,6 +27,7 @@
     "gifuct-js": "2.1.2",
     "pdfjs-dist": "6.2.108",
     "saxes": "6.0.0",
+    "semver": "7.7.2",
     "yaml": "2.9.0"
   },
   "devDependencies": {
