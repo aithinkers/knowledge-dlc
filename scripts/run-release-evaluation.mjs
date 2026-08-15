@@ -24,14 +24,15 @@ const results = [];
 let externalNetworkCalls = 0; let liveModelCalls = 0;
 for (const recorded of run.results) {
   const releaseCase = corpus.cases.find(({ id }) => id === recorded.case_id);
+  const allowNormalizer = recorded.case_id === "bounded-normalization";
   let status = "passed";
   const boundaryRoot = await mkdtemp(resolve(tmpdir(), "kdlc-release-boundary-"));
   const boundaryReport = resolve(boundaryRoot, "observations.json");
   try {
     const pattern = `^(?:${releaseCase.executable_evidence.test_ids.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`;
-    const { stdout } = await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", resolve(root, "scripts/release-offline-guard.mjs"), "--test", "--test-isolation=none", "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
+    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", resolve(root, "scripts/release-offline-guard.mjs"), "--test", "--test-isolation=none", "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
       cwd: root,
-      env: scrubbedReleaseEnvironment(boundaryReport),
+      env: scrubbedReleaseEnvironment(boundaryReport, { root, allowNormalizer }),
       maxBuffer: 32 * 1024 * 1024,
     });
     const pass = Number(/(?:#|ℹ)\s*pass\s+(\d+)/.exec(stdout)?.[1] ?? -1); const skipped = Number(/(?:#|ℹ)\s*skipped\s+(\d+)/.exec(stdout)?.[1] ?? 0);

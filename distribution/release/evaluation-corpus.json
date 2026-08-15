@@ -53,7 +53,7 @@
       "category": "retrieval",
       "requirement_ids": ["FEAT-005", "FEAT-008"],
       "fixtures": [{"path": "tests/governance/federation-retrieval.test.mjs", "sha256": "sha256:93fc47f5b611034d888fcf1bdb2c1ea4b8001c1b307660adb841f2dfbc27fd0f"}],
-      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:5116f7e5833fcec804720560c94fd301b640939c4c519bf01fad960686b1baf4", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:efea5423d0a9759c51a71baac898a61ae1c4b3bf09479370a69c7c54457956bc", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
       "expected": ["unauthorized and absent responses are externally equivalent", "cache and mount drift fail closed", "qualified conflicts remain deterministic"],
       "security": true
     },
@@ -79,8 +79,14 @@
       "id": "clean-rebuild",
       "category": "rebuild",
       "requirement_ids": ["FEAT-001", "FEAT-005"],
-      "fixtures": [{"path": "tests/fixtures/federation/base-primary/retrieval-catalog.json", "sha256": "sha256:c63dfa1e176cb686704813a203da897facc971d423d4afc8fb5bdcaa6fd29c69"}],
-      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:5116f7e5833fcec804720560c94fd301b640939c4c519bf01fad960686b1baf4", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
+      "fixtures": [
+        {"path": "tests/fixtures/federation/base-primary/retrieval-catalog.json", "sha256": "sha256:c63dfa1e176cb686704813a203da897facc971d423d4afc8fb5bdcaa6fd29c69"},
+        {"path": "tests/fixtures/federation/base-primary/index.md", "sha256": "sha256:e36010c85d8d2c96c1687440b8959759ac7f0fb39408b026cc49b2ed5e75aa0a"},
+        {"path": "tests/fixtures/federation/base-primary/policies/index.md", "sha256": "sha256:156e6989f8f3c94b9c2ef902870cb975a6fadfbf003d93220689b712aad15d37"},
+        {"path": "tests/fixtures/federation/base-primary/references/index.md", "sha256": "sha256:877cc3f4b741e1af3d061dc90e8541939fb51736178e4bc1b2a0dd743f5e1e19"},
+        {"path": "tests/fixtures/federation/base-primary/references/sources/index.md", "sha256": "sha256:b3dacbade91ef79e8f5aa9154831b1d9d5b96be3afb14fa3fadd8f1fb8ff795a"}
+      ],
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:efea5423d0a9759c51a71baac898a61ae1c4b3bf09479370a69c7c54457956bc", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
       "expected": ["indexes rebuild byte-identically", "resolved retrieval records remain equivalent"],
       "security": false
     },

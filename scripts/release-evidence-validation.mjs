@@ -66,6 +66,7 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
     if (!mandatory || !same(entry.requirement_ids, mandatory.requirements) || entry.executable_evidence?.path !== mandatory.evidence || !same(entry.executable_evidence?.test_ids, mandatory.tests)) {
       failures.push(`${entry.id}: immutable requirements or executable evidence were substituted`);
     }
+    if (mandatory?.fixtures && !same(entry.fixtures, mandatory.fixtures)) failures.push(`${entry.id}: committed clean-rebuild fixture set or hashes were substituted`);
     try {
       const evidenceBytes = await bytes(root, entry.executable_evidence.path);
       if (digest(evidenceBytes) !== entry.executable_evidence.sha256) failures.push(`${entry.id}: executable evidence hash drift`);

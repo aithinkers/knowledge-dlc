@@ -12,6 +12,7 @@ import { GovernanceControlAuthority, GovernanceControlEngine } from "../../packa
 import { FederatedRetriever } from "../../packages/retrieval/index.mjs";
 import { validateReleaseEvidence, releaseEvidenceFiles, releaseEvidenceSchemas } from "../../scripts/release-evidence-validation.mjs";
 import { scrubbedReleaseEnvironment } from "../../scripts/release-evaluation-boundary.mjs";
+import { cleanRebuildIndexes } from "../../scripts/release-evidence-definition.mjs";
 
 const execute = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
@@ -21,6 +22,28 @@ async function makeRemovable(path) {
   let metadata; try { metadata = await lstat(path); } catch { return; }
   if (metadata.isDirectory()) { await chmod(path, 0o700); const directory = await opendir(path); for await (const entry of directory) await makeRemovable(resolve(path, entry.name)); }
   else if (!metadata.isSymbolicLink()) await chmod(path, 0o600);
+}
+async function listIndexFiles(directory, prefix = "") {
+  const paths = []; const handle = await opendir(directory);
+  for await (const entry of handle) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name; const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) paths.push(...await listIndexFiles(path, relative));
+    else if (entry.isFile() && entry.name === "index.md") paths.push(relative);
+  }
+  return paths.sort();
+}
+async function deriveIndexesFromSources(primary) {
+  const catalog = await readJson(primary, "retrieval-catalog.json"); const concepts = [];
+  for (const entry of catalog.concepts) {
+    const parsed = parseMarkdownConcept(await readFile(resolve(primary, entry.path)));
+    concepts.push({ path: entry.path, title: parsed.frontmatter.title, description: parsed.frontmatter.description });
+  }
+  return generateHierarchicalIndexes(concepts);
+}
+const committedIndexDefinitions = cleanRebuildIndexes.map(({ path, sha256 }) => ({ path: path.replace("tests/fixtures/federation/base-primary/", ""), sha256 }));
+async function assertCommittedIndexes(primary) {
+  assert.deepEqual(await listIndexFiles(primary), committedIndexDefinitions.map(({ path }) => path).sort());
+  for (const expected of committedIndexDefinitions) assert.equal(byteHash(await readFile(resolve(primary, expected.path))), expected.sha256, expected.path);
 }
 
 async function copyCandidate(target) {
@@ -97,10 +120,10 @@ test("REL-001 mandatory cases, requirements, status, and executable evidence can
 test("REL-001 replay boundary scrubs credentials and observes caught network or process attempts", async (context) => {
   const directory = await mkdtemp(resolve(tmpdir(), "kdlc-release-boundary-test-")); context.after(() => rm(directory, { recursive: true, force: true }));
   const report = resolve(directory, "report.json"); const probe = resolve(root, "tests/fixtures/release/offline-probe.mjs");
-  const environment = scrubbedReleaseEnvironment(report);
+  const environment = scrubbedReleaseEnvironment(report, { root, allowNormalizer: true });
   for (const secret of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY", "HTTP_PROXY", "HTTPS_PROXY"]) assert.equal(environment[secret], undefined);
-  await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, `--allow-fs-read=${dirname(tmpdir())}`, `--allow-fs-write=${directory}`, "--import", resolve(root, "scripts/release-offline-guard.mjs"), probe], { cwd: root, env: { ...environment, OPENAI_API_KEY: undefined } });
-  assert.deepEqual(await readJson(directory, "report.json"), { external_network_calls: 1, live_model_calls: 1, blocked_process_calls: 1 });
+  await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, `--allow-fs-read=${process.platform === "darwin" ? "/var" : tmpdir()}`, `--allow-fs-write=${directory}`, "--import", resolve(root, "scripts/release-offline-guard.mjs"), probe], { cwd: root, env: { ...environment, OPENAI_API_KEY: undefined } });
+  assert.deepEqual(await readJson(directory, "report.json"), { external_network_calls: 6, live_model_calls: 6, blocked_process_calls: 6 });
 });
 
 test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes", async (context) => {
@@ -108,18 +131,15 @@ test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval
   context.after(async () => { await makeRemovable(projectRoot); await rm(projectRoot, { recursive: true, force: true }); });
   const primary = resolve(projectRoot, "primary");
   await cp(resolve(root, "tests/fixtures/federation/base-primary"), primary, { recursive: true });
-  const catalog = await readJson(primary, "retrieval-catalog.json");
-  const concepts = [];
-  for (const entry of catalog.concepts) {
-    const parsed = parseMarkdownConcept(await readFile(resolve(primary, entry.path)));
-    concepts.push({ path: entry.path, title: parsed.frontmatter.title, description: parsed.frontmatter.description });
-  }
-  const generated = [...generateHierarchicalIndexes(concepts)];
-  const materializeIndexes = async () => {
-    for (const [path, content] of generated) { await mkdir(dirname(resolve(primary, path)), { recursive: true }); await writeFile(resolve(primary, path), content); }
-  };
-  await materializeIndexes();
-  const expectedIndexes = Object.fromEntries(await Promise.all(generated.map(async ([path]) => [path, byteHash(await readFile(resolve(primary, path)))])));
+  await assertCommittedIndexes(primary);
+  const driftPath = resolve(primary, committedIndexDefinitions[0].path); const committedBytes = await readFile(driftPath);
+  await writeFile(driftPath, `${committedBytes.toString("utf8")}drift\n`); await assert.rejects(() => assertCommittedIndexes(primary)); await writeFile(driftPath, committedBytes);
+  const missingPath = resolve(primary, committedIndexDefinitions.at(-1).path); const missingBytes = await readFile(missingPath);
+  await rm(missingPath); await assert.rejects(() => assertCommittedIndexes(primary)); await writeFile(missingPath, missingBytes);
+  await assertCommittedIndexes(primary);
+  const baselineGenerated = await deriveIndexesFromSources(primary);
+  assert.deepEqual([...baselineGenerated.keys()].sort(), committedIndexDefinitions.map(({ path }) => path).sort());
+  for (const [path, content] of baselineGenerated) assert.equal(Buffer.compare(Buffer.from(content), await readFile(resolve(primary, path))), 0, path);
   const project = { api_version: "kdlc.dev/v1alpha1", kind: "Project", metadata: { name: "release-rebuild" }, purpose: "./purpose.md", profile: "base@1", knowledge_bases: [{ name: "primary", uri: "./primary", mode: "maintain", role: "primary", priority: 100 }] };
   const clock = { now: () => "2026-08-15T00:00:00.000Z" };
   const governancePolicy = { api_version: "kdlc.dev/governance-policy/v1alpha1", id: "release-rebuild", version: 1, minimum_independent_sources: 1, required_erasure_surfaces: [], waiver_authorities: {}, declassification_authorities: {}, erasure_policy_refs: {}, external_models: {} };
@@ -137,13 +157,14 @@ test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval
   await makeRemovable(resolve(projectRoot, ".kdlc"));
   await rm(resolve(projectRoot, ".kdlc"), { recursive: true, force: true });
   await rm(resolve(projectRoot, "knowledge.lock"), { force: true });
-  for (const [path] of generated) await rm(resolve(primary, path), { force: true });
-  await materializeIndexes();
-  const rebuiltIndexes = Object.fromEntries(await Promise.all(generated.map(async ([path]) => [path, byteHash(await readFile(resolve(primary, path)))])));
+  for (const { path } of committedIndexDefinitions) await rm(resolve(primary, path));
+  const rebuilt = await deriveIndexesFromSources(primary);
+  for (const [path, content] of rebuilt) { await mkdir(dirname(resolve(primary, path)), { recursive: true }); await writeFile(resolve(primary, path), content); }
+  await assertCommittedIndexes(primary);
   const after = await retrieve();
-  assert.deepEqual(rebuiltIndexes, expectedIndexes);
   assert.equal(artifactHash(after), beforeHash);
   assert.equal(canonicalJson(after), canonicalJson(before));
+  assert.throws(() => assert.equal(canonicalJson({ ...after, status: "not_found" }), canonicalJson(before)));
 });
 
 test("REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift", async (context) => {

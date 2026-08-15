@@ -1,3 +1,10 @@
+export const cleanRebuildIndexes = Object.freeze([
+  Object.freeze({ path: "tests/fixtures/federation/base-primary/index.md", sha256: "sha256:e36010c85d8d2c96c1687440b8959759ac7f0fb39408b026cc49b2ed5e75aa0a" }),
+  Object.freeze({ path: "tests/fixtures/federation/base-primary/policies/index.md", sha256: "sha256:156e6989f8f3c94b9c2ef902870cb975a6fadfbf003d93220689b712aad15d37" }),
+  Object.freeze({ path: "tests/fixtures/federation/base-primary/references/index.md", sha256: "sha256:877cc3f4b741e1af3d061dc90e8541939fb51736178e4bc1b2a0dd743f5e1e19" }),
+  Object.freeze({ path: "tests/fixtures/federation/base-primary/references/sources/index.md", sha256: "sha256:b3dacbade91ef79e8f5aa9154831b1d9d5b96be3afb14fa3fadd8f1fb8ff795a" }),
+]);
+
 export const mandatoryReleaseCases = Object.freeze({
   "recorded-ingest": Object.freeze({ requirements: ["FEAT-004"], evidence: "tests/governance/agent-workflows.test.mjs", tests: [
     "FEAT-004 ingest and adoption replay schema-valid recorded model outputs",
@@ -24,7 +31,10 @@ export const mandatoryReleaseCases = Object.freeze({
   "transport-equivalence": Object.freeze({ requirements: ["FEAT-006"], evidence: "tests/governance/distribution.test.mjs", tests: [
     "FEAT-006 one engine produces equivalent direct, MCP, and generated-adapter outcomes",
   ] }),
-  "clean-rebuild": Object.freeze({ requirements: ["FEAT-001", "FEAT-005"], evidence: "tests/governance/release-evidence.test.mjs", tests: [
+  "clean-rebuild": Object.freeze({ requirements: ["FEAT-001", "FEAT-005"], fixtures: Object.freeze([
+    Object.freeze({ path: "tests/fixtures/federation/base-primary/retrieval-catalog.json", sha256: "sha256:c63dfa1e176cb686704813a203da897facc971d423d4afc8fb5bdcaa6fd29c69" }),
+    ...cleanRebuildIndexes,
+  ]), evidence: "tests/governance/release-evidence.test.mjs", tests: [
     "REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes",
   ] }),
   "governed-revocation-erasure": Object.freeze({ requirements: ["FEAT-008", "FEAT-009"], evidence: "tests/governance/revocation-erasure.test.mjs", tests: [
