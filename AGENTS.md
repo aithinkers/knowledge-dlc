@@ -147,10 +147,11 @@ The complete PR #49 diff is limited to that workflow transition, its focused
 release-matrix regression, and the issue #44 traceability gate transition.
 Candidate tests and every non-self required/security check must pass, and an
 independent agent must approve the exact head with no unresolved critical or
-high finding. Only `Repository policy` rejection of the protected workflow
-byte and `Trusted release state`/aggregate `Release matrix` failures caused by
-trusted `main` lacking this exact dependency step may be bypassed; the owner
-record must name them as self-transition failures. This authority does not
+high finding. Only `Repository policy` rejection of the protected workflow byte
+may be bypassed on PR #49; the owner record must name that exact self-transition
+failure. `Trusted release state` and aggregate `Release matrix` must pass on PR
+#49 using the candidate-defined but exact-authorized workflow with trusted-base
+bytes and dependencies. This authority does not
 permit trigger, permission, token, attestation, checkout, toolchain version,
 candidate-test, governance-verifier, collector, validator, package, or lockfile
 changes. It is consumed and expires immediately when PR #49 merges. A later
