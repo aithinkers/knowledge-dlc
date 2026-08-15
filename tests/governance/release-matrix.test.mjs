@@ -13,7 +13,20 @@ const root = resolve(import.meta.dirname, "../..");
 const execute = promisify(execFile);
 const evidence = { package: { first_sha256: "a".repeat(64), second_sha256: "a".repeat(64), manifest_sha256: "b".repeat(64), content_sha256: "f".repeat(64), file_count: 178 }, supply_chain: { sbom_sha256: "c".repeat(64), notices_sha256: "d".repeat(64) }, smoke: { cli: true, imports: true } };
 const matrixResult = (expected, differences = releaseMatrixDifferences(expected.os)) => { const observed = structuredClone(evidence); if (expected.os === "win32") { observed.package.first_sha256 = observed.package.second_sha256 = "9".repeat(64); observed.package.manifest_sha256 = "8".repeat(64); } return { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell: expected.cell, head_sha: "e".repeat(40), runtime: { node: expected.node, npm: "11.5.1" }, platform: { os: expected.os, arch: "test" }, commands: releaseMatrixCommandIds.map((id) => ({ id, status: "passed" })), differences, observed_evidence: observed }; };
-const verifierEnvironment = async (directory) => { const path = resolve(directory, "derived.json"); await writeFile(path, JSON.stringify({ head_sha: "e".repeat(40), ...evidence })); return { ...process.env, KDLC_HEAD_SHA: "e".repeat(40), KDLC_TRUSTED_ARTIFACT_EVIDENCE: path }; };
+const verifierEnvironment = async (directory) => {
+  const path = resolve(directory, "derived.json"); await writeFile(path, JSON.stringify({ head_sha: "e".repeat(40), ...evidence }));
+  // Candidate lifecycle also demands trusted live-state evidence; synthesize a current attestation.
+  const { createAdminSettingsCapture, issueAdminSettingsAttestation } = await import("../../scripts/release-state-derivation.mjs");
+  const actions = { default_workflow_permissions: "read", can_approve_pull_request_reviews: false };
+  const capturedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString(); const confirmedAt = new Date().toISOString();
+  const capture = createAdminSettingsCapture({ repository: "aithinkers/knowledge-dlc", capturedAt, actor: "release-owner", responseBytes: Buffer.from(JSON.stringify(actions)) });
+  const record = issueAdminSettingsAttestation({ capture, confirmedAt, actor: "release-owner" });
+  const settings = { visibility: "public", actions, admin_attestation: { status: "current", record }, release_blocking_issues_closed: true, ruleset: { ids: [1], active: true, default_branch: true, prevents_deletion: true, prevents_non_fast_forward: true, linear_history: true, pull_request: { required_approvals: 1, require_code_owner_review: true, dismiss_stale_reviews: true, require_last_push_approval: true, require_thread_resolution: true, allowed_merge_methods: ["squash"] }, strict_status_checks: true, required_checks: ["Candidate tests", "CodeQL (JavaScript/TypeScript)", "Dependency review", "Pull request traceability", "Release matrix", "Repository policy", "Secret history scan", "Supply-chain verification"], direct_push_bypass: false } };
+  const review = { head_sha: "e".repeat(40), decision: "approved", evidence_kind: "independent-agent-comment", evidence_id: 42, evidence_url: "https://github.test/review/42", actor: "review-agent", observed_at: confirmedAt };
+  const settingsPath = resolve(directory, "settings.json"); const reviewPath = resolve(directory, "review.json");
+  await writeFile(settingsPath, JSON.stringify(settings)); await writeFile(reviewPath, JSON.stringify(review));
+  return { ...process.env, GITHUB_REPOSITORY: "aithinkers/knowledge-dlc", KDLC_HEAD_SHA: "e".repeat(40), KDLC_TRUSTED_ARTIFACT_EVIDENCE: path, KDLC_TRUSTED_REPOSITORY_SNAPSHOT: settingsPath, KDLC_TRUSTED_REVIEW_RECORD: reviewPath };
+};
 test("REL-001 release matrix declares exact six platform/runtime cells and stable aggregator", async () => {
   assert.deepEqual(releaseMatrixCells.map(({ cell }) => cell), ["ubuntu-node22", "ubuntu-node24", "windows-node22", "windows-node24", "macos-node22", "macos-node24"]);
   assert.deepEqual(new Set(releaseMatrixCells.map(({ node }) => node)), new Set(["22.23.2", "24.5.0"]));

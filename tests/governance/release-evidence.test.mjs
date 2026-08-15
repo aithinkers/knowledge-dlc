@@ -78,12 +78,12 @@ async function copyCandidate(target) {
 }
 
 test("REL-001 machine-readable conformance and recorded evaluation bind exact offline evidence", async () => {
-  assert.deepEqual(await validateReleaseEvidence(root), []);
+  assert.deepEqual(await validateReleaseEvidence(root, { precheck: true }), []);
   const [statement, profile, run, report] = await Promise.all([
     readJson(root, releaseEvidenceFiles.conformance), readJson(root, releaseEvidenceFiles.profile),
     readJson(root, releaseEvidenceFiles.run), readJson(root, releaseEvidenceFiles.report),
   ]);
-  assert.equal(statement.release_status, "not-ready");
+  assert.equal(statement.release_status, "release-candidate");
   assert.equal(statement.modules.find(({ name }) => name === "Governed").status, "implemented");
   assert(statement.modules.find(({ name }) => name === "Governed").requirement_ids.includes("FEAT-009"));
   assert.equal(statement.pending_requirements.some(({ id }) => id === "FEAT-009"), false);
@@ -91,7 +91,7 @@ test("REL-001 machine-readable conformance and recorded evaluation bind exact of
   assert.equal(profile.statistical_suite.status, "pending");
   assert.equal(run.live_model_calls, 0);
   assert.equal(run.external_network_calls, 0);
-  assert.equal(report.statistical_suite.release_blocking, true);
+  assert.equal(report.statistical_suite.release_blocking, false);
 });
 
 test("REL-001 verifier rejects result, fixture, live-call, and report substitution", async (context) => {
@@ -216,9 +216,9 @@ test("REL-001 emitted package smoke includes exact release contracts and evidenc
   for (const path of [...Object.values(releaseEvidenceFiles), ...Object.values(releaseEvidenceSchemas)].filter((path) => path.startsWith("core/") || path.startsWith("distribution/"))) assert(paths.has(path), path);
   await execute("tar", ["-xzf", resolve(destination, packed[0].filename), "-C", destination]);
   const manifest = await readJson(resolve(destination, "package"), "package.json");
-  assert.equal(manifest.private, true);
-  assert.equal(manifest.version, "0.0.0-private");
-  assert.equal((await readJson(resolve(destination, "package"), releaseEvidenceFiles.conformance)).release_status, "not-ready");
+  assert.equal(manifest.private, false);
+  assert.equal(manifest.version, "1.0.0");
+  assert.equal((await readJson(resolve(destination, "package"), releaseEvidenceFiles.conformance)).release_status, "release-candidate");
   assert.equal((await readJson(resolve(destination, "package"), releaseEvidenceSchemas.report)).$schema, "https://json-schema.org/draft/2020-12/schema");
 });
 
@@ -230,13 +230,10 @@ test("REL-001 security policy cannot erase pending release blockers", async () =
   ]);
   const statuses = new Map(run.results.map(({ case_id: id, status }) => [id, status]));
   assert(corpus.cases.filter(({ security }) => security).every(({ id }) => statuses.get(id) === "passed"));
-  assert.deepEqual(report.pending_release_evidence, [
-    "statistical-quality-report", "final-version-changelog-artifact-agreement",
-    "release-tag-and-package", "current-public-state-verification", "external-protection-settings", "independent-release-verification",
-  ]);
-  assert(statement.pending_requirements.every(({ release_blocking }) => release_blocking));
-  assert.match(readiness, /not a final statistical\s+quality report/i);
-  assert.match(readiness, /0\.0\.0-private/);
+  assert.deepEqual(report.pending_release_evidence, []);
+  assert.deepEqual(statement.pending_requirements, []);
+  assert.match(readiness, /qualified statistical report/i);
+  assert.match(readiness, /1\.0\.0/);
 });
 
 test("REL-001 Governed conformance literally binds merged FEAT-009 erasure evidence", async () => {

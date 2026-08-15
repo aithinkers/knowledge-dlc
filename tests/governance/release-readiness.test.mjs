@@ -61,8 +61,8 @@ test("REL-001 npm updates, installed licenses, dependency graph, and exact packa
   const [manifest, dependabot, policy, notices, sbom, packageFiles] = await Promise.all([
     json("package.json"), text(".github/dependabot.yml"), json("security/supply-chain-policy.json"), text("THIRD_PARTY_NOTICES.md"), json("docs/supply-chain/sbom.spdx.json"), json("security/npm-package-files.json")
   ]);
-  assert.equal(manifest.private, true);
-  assert.equal(manifest.version, "0.0.0-private");
+  assert.equal(manifest.private, false);
+  assert.equal(manifest.version, "1.0.0");
   assert.equal(manifest.license, "MIT");
   assert.deepEqual(manifest.files, policy.package_files);
   assert.ok(manifest.files.includes("distribution/"));

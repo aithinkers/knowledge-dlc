@@ -1,7 +1,7 @@
 {
   "name": "knowledge-dlc",
-  "version": "0.0.0-private",
-  "private": true,
+  "version": "1.0.0",
+  "private": false,
   "description": "K-DLC development and governance tooling",
   "license": "MIT",
   "author": "AIThinkers",

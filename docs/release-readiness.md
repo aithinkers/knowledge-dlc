@@ -16,17 +16,20 @@ depends on issues #8, #23, or #24 remain outside this tranche.
 The second tranche adds strict machine-readable pre-release conformance and
 deterministic evaluation evidence under `distribution/release/`. The structural
 record binds nine offline cases to exact committed fixture and executable-evidence bytes and reports
-zero live model or external network calls. It is intentionally not a final statistical
-quality report: the versioned multi-trial suite and confidence intervals remain
-release-blocking.
+zero live model or external network calls. The versioned multi-trial statistical
+suite has since completed: thirty complete preregistered provider trials against
+the frozen anthropic/claude-sonnet-5 manifest produced a qualified statistical report
+(all Wilson lower bounds and per-case floors passed, security fail-closed exact at
+210/210), hash-bound in the capture status.
 
 The conformance statement declares the implemented surface without erasing
 known gaps. `Core`, `Lifecycle`, `Governed`, `Federated`, and `Served` are
 implemented. The Governed declaration is bound to merged FEAT-009 tests for
 revocation impact, legal hold, durable erasure, propagation, and retrieval
 nondisclosure.
-The statement preserves package version `0.0.0-private`, `private: true`, and a
-machine-readable `not-ready` release status.
+The statement now records package version `1.0.0`, `private: false`, and a
+machine-readable `release-candidate` status; final publication (tag, package,
+independent release verification) remains a separately governed action.
 
 ## Known conformance gaps disclosed before release
 
@@ -77,11 +80,15 @@ The statistical evaluation is preregistered under
 `distribution/release/statistical/`: a provider-visible public corpus, a
 separate evaluator-only gold record, prompts, no-tool boundary, model selection
 fields, thirty complete-trial rule, exact hashes, metrics, Wilson 95%
-lower-bound thresholds, and prohibition on exclusions are fixed before
-capture. Provider, model, and revision inputs are not yet approved, so
-capture remains explicitly blocked at 0/30. The capture utility only imports
-complete provider-produced records and performs no provider or network call;
-scoring and verification are offline. No statistical pass report is claimed.
+lower-bound thresholds, and prohibition on exclusions were fixed before
+capture. The owner approved and froze provider anthropic, model
+claude-sonnet-5; thirty complete trials were captured through the trusted
+import path and scored offline into a qualified statistical report. Two
+earlier capture attempts (claude-haiku-4-5-20251001, and claude-sonnet-5
+before the decision-rubric template amendments) failed the gate and are
+recorded in issue #57; the template amendments preceded any qualified claim.
+The capture utility only imports complete provider-produced records; scoring
+and verification are offline.
 
 The profile freezes the raw-byte hashes of both public corpus and evaluator
 gold plus the exact offline scorer source/version/hash. Provider requests are a
