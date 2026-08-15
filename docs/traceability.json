@@ -250,6 +250,30 @@
       }
     },
     {
+      "id": "REQ-EVAL-001",
+      "title": "Keep evaluator-only statistical gold out of provider requests",
+      "issue": 41,
+      "specification_sections": ["36"],
+      "status": "in-progress",
+      "evidence": {
+        "implementation": [
+          "core/schemas/release/statistical-corpus.schema.json",
+          "core/schemas/release/statistical-gold.schema.json",
+          "core/schemas/release/statistical-provider-request.schema.json",
+          "core/schemas/release/statistical-profile.schema.json",
+          "core/schemas/release/statistical-capture.schema.json",
+          "core/schemas/release/statistical-report.schema.json",
+          "distribution/release/statistical/corpus.json",
+          "distribution/release/statistical/gold.json",
+          "distribution/release/statistical/profile.json",
+          "scripts/statistical-evidence-validation.mjs"
+        ],
+        "tests": [
+          "tests/governance/statistical-release.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REQ-SUPPLY-001",
       "title": "Refresh dependency and GitHub Action runtimes before release",
       "issue": 36,
