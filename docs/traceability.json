@@ -693,6 +693,23 @@
           "tests/governance/release-readiness.test.mjs"
         ]
       }
+    },
+    {
+      "id": "REL-002",
+      "title": "Freeze provider inputs and capture the 30-trial statistical release evaluation",
+      "issue": 57,
+      "specification_sections": [
+        "36"
+      ],
+      "status": "in-progress",
+      "evidence": {
+        "implementation": [
+          "docs/release-readiness.md"
+        ],
+        "tests": [
+          "tests/governance/statistical-release.test.mjs"
+        ]
+      }
     }
   ]
 }
