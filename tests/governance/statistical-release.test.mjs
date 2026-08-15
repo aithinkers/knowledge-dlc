@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateGoldSemantics, validateScorerBinding, validateStatisticalEvidence, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
+import { affirmativelyContains, loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateGoldSemantics, validateScorerBinding, validateStatisticalEvidence, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const execute = promisify(execFile);
@@ -39,9 +39,14 @@ test("REQ-EVAL-001 provider requests contain only public projections and never e
     const parsed = JSON.parse(request);
     assert.deepEqual(Object.keys(parsed), ["api_version", "case", "prompt", "tool", "model"]);
     assert.deepEqual(Object.keys(parsed.case), ["input", "context"]);
-    for (const forbidden of ["expected", "required_terms", "security_gate", "category", "case_key", "trial_id", "profile_hash", "evaluator_gold_hash"]) assert.equal(request.includes(`\"${forbidden}\"`), false, forbidden);
+    for (const forbidden of ["expected", "required_terms", "required_answer_phrases", "security_gate", "category", "case_key", "trial_id", "profile_hash", "evaluator_gold_hash"]) assert.equal(request.includes(`\"${forbidden}\"`), false, forbidden);
     assert.equal(request.includes(JSON.stringify(state.documents.gold)), false);
   }
+  const restrictedRequest = JSON.parse(providerRequestBytes(state, { input: state.documents.corpus.cases[4].input, context: state.documents.corpus.cases[4].context }));
+  assert.equal(restrictedRequest.case.context.evidence[0].classification, "confidential");
+  assert.deepEqual(restrictedRequest.case.context.principal.access_labels, ["public"]);
+  const readiness = await readFile(resolve(root, "docs/release-readiness.md"), "utf8");
+  assert.match(readiness, /synthetic test data/); assert.match(readiness, /explicitly approved for that\s+external statistical route/);
   const first = state.documents.corpus.cases[0]; const baseline = providerRequestBytes(state, { input: first.input, context: first.context });
   const mutatedGold = structuredClone(state.documents.gold); mutatedGold.cases[0].expected.decision = "deny";
   assert.notEqual(sha256(`${JSON.stringify(mutatedGold)}\n`), state.hashes.gold);
@@ -59,6 +64,20 @@ test("REQ-EVAL-001 request construction rejects full cases, nested evaluator key
   assert.throws(() => providerRequestBytes(state, accessor), /accessor/);
   const hooked = { input: first.input, context: first.context, toJSON() { return state.documents.gold; } };
   assert.throws(() => providerRequestBytes(state, hooked), /executable/);
+});
+
+test("REQ-EVAL-001 prompt, capture, gold, and corpus share the strict response and per-kind locator contract", async () => {
+  const state = await loadPreregistration(root); const validateResponse = state.ajv.getSchema("https://kdlc.dev/schemas/release/statistical-response-1.json");
+  const expected = state.documents.gold.cases[0].expected;
+  const valid = { decision: "answer", answer: "30 days", assertions: expected.assertions, citations: expected.citations };
+  assert.equal(validateResponse(valid), true);
+  const crossKind = structuredClone(valid); Object.assign(crossKind.citations[0].locator, { table: "retention", row: 1, column: 1 });
+  assert.equal(validateResponse(crossKind), false);
+  const emptyAssertion = structuredClone(valid); emptyAssertion.assertions[0].object = "";
+  assert.equal(validateResponse(emptyAssertion), false);
+  const emptyLocator = structuredClone(valid); emptyLocator.citations[0].locator.section = "";
+  assert.equal(validateResponse(emptyLocator), false);
+  assert.deepEqual(state.documents.prompt.configuration.response_schema, JSON.parse(await readFile(resolve(root, "core/schemas/release/statistical-response.schema.json"), "utf8")));
 });
 
 test("REQ-EVAL-001 evaluator gold rejects missing decisive public evidence and misaligned keys", async () => {
@@ -202,6 +221,22 @@ test("REQ-EVAL-001 scorer gives no grounded credit for wrong decisions, echoed/n
   assert.equal(report.metrics.find(({ id }) => id === "grounded_fact_accuracy").successes, 60);
   assert.equal(report.metrics.find(({ id }) => id === "locator_accuracy").successes, 60);
   assert.deepEqual(report.case_results[0], { ...report.case_results[0], successes: 0, rate: 0, passed: false });
+  assert.equal(report.gate, "failed");
+});
+
+test("REQ-EVAL-001 answer scoring rejects unrelated, negated, quoted-only, and confusable renderings despite exact structured fields", async () => {
+  assert.equal(affirmativelyContains("The period is 30 DAYS.", "30 days"), true);
+  assert.equal(affirmativelyContains("El período es 30 di\u0301as.", "30 días"), true);
+  for (const answer of ["THIS ANSWER IS FALSE AND UNRELATED", "not 30 days", "30 days is false", "the source says ‘30 days’", "30 dаys", "no son 30 días"]) assert.equal(affirmativelyContains(answer, answer.includes("días") ? "30 días" : "30 days"), false, answer);
+  const captures = await Promise.all(Array.from({ length: 30 }, (_, index) => perfectCapture(index + 1)));
+  for (const capture of captures) {
+    for (const [index, answer] of [[0, "THIS ANSWER IS FALSE AND UNRELATED"], [7, "not 30 days"], [9, "la fuente dice ‘30 días’"]]) {
+      const result = capture.results[index]; result.response.answer = answer; result.raw_output = JSON.stringify(result.response); result.raw_output_hash = sha256(result.raw_output);
+    }
+  }
+  const report = await scoreCaptures(root, captures);
+  assert.equal(report.metrics.find(({ id }) => id === "grounded_fact_accuracy").successes, 0);
+  assert.equal(report.case_results.filter(({ passed }) => !passed).length, 3);
   assert.equal(report.gate, "failed");
 });
 

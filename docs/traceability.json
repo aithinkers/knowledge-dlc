@@ -260,6 +260,7 @@
           "core/schemas/release/statistical-corpus.schema.json",
           "core/schemas/release/statistical-gold.schema.json",
           "core/schemas/release/statistical-provider-request.schema.json",
+          "core/schemas/release/statistical-response.schema.json",
           "core/schemas/release/statistical-profile.schema.json",
           "core/schemas/release/statistical-capture.schema.json",
           "core/schemas/release/statistical-report.schema.json",

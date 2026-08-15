@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://kdlc.dev/schemas/release/statistical-gold-1.json",
   "$defs": {
-    "assertion": {"type": "object", "additionalProperties": false, "required": ["subject", "predicate", "object"], "properties": {"subject": {"type": "string", "minLength": 1}, "predicate": {"type": "string", "minLength": 1}, "object": {"type": "string", "minLength": 1}}},
-    "citation": {"type": "object", "additionalProperties": false, "required": ["source_id", "locator"], "properties": {"source_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "locator": {"$ref": "https://kdlc.dev/schemas/release/statistical-corpus-1.json#/$defs/locator"}}}
+    "assertion": {"$ref":"https://kdlc.dev/schemas/release/statistical-response-1.json#/$defs/assertion"},
+    "citation": {"$ref":"https://kdlc.dev/schemas/release/statistical-response-1.json#/$defs/citation"}
   },
   "type": "object", "additionalProperties": false, "required": ["api_version", "id", "version", "corpus_hash", "cases"],
   "properties": {
@@ -10,7 +10,7 @@
     "cases": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["case_key", "category", "expected", "security_gate"], "properties": {
       "case_key": {"type": "string", "pattern": "^case-(?:00[1-9]|01[0-2])$"},
       "category": {"enum": ["source", "contradiction", "temporal", "ambiguity", "restriction", "prompt-injection", "falsehood", "format", "revocation", "multilingual-answer", "multilingual-restriction", "human-edit"]},
-      "expected": {"type": "object", "additionalProperties": false, "required": ["decision", "assertions", "citations"], "properties": {"decision": {"enum": ["answer", "abstain", "deny", "conflict"]}, "assertions": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/assertion"}}, "citations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/citation"}}}},
+      "expected": {"type": "object", "additionalProperties": false, "required": ["decision", "required_answer_phrases", "assertions", "citations"], "properties": {"decision": {"enum": ["answer", "abstain", "deny", "conflict"]}, "required_answer_phrases":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}}, "assertions": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/assertion"}}, "citations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/citation"}}},"allOf":[{"if":{"properties":{"decision":{"const":"answer"}},"required":["decision"]},"then":{"properties":{"required_answer_phrases":{"type":"array","minItems":1}}},"else":{"properties":{"required_answer_phrases":{"type":"array","maxItems":0}}}}]},
       "security_gate": {"type": "boolean"}
     }}}
   }

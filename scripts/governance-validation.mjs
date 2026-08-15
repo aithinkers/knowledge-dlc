@@ -44,6 +44,7 @@ export const protectedHarnessFiles = Object.freeze([
   "core/schemas/release/statistical-gold.schema.json",
   "core/schemas/release/statistical-manifest.schema.json",
   "core/schemas/release/statistical-provider-request.schema.json",
+  "core/schemas/release/statistical-response.schema.json",
   "core/schemas/release/statistical-profile.schema.json",
   "core/schemas/release/statistical-capture.schema.json",
   "core/schemas/release/statistical-capture-status.schema.json",
