@@ -1,8 +1,8 @@
 {
   "api_version": "kdlc.dev/recorded-release-run/v1alpha1",
   "id": "pre-release-recorded-1",
-  "corpus_hash": "sha256:e9d61ae1cc10f53ed97e7e2de40490bae309bbef6b4435e63e283dac1fa51968",
-  "profile_hash": "sha256:3b0421e391a734a98d1c1c216ad07b86ab7e4402019debb30dc2d3750549cef4",
+  "corpus_hash": "sha256:49e682a01da2a3aa949091be7ee362fabc47b4081b0b335629e50738aea2fb5f",
+  "profile_hash": "sha256:44d67c715e6f51ee22fca24a952d0543c1253125eade6ccd63f29363edfbcc6f",
   "runtime": {
     "node": "24.5.0",
     "npm": "11.5.1"
@@ -48,12 +48,12 @@
     },
     {
       "case_id": "federated-nondisclosure",
-      "case_hash": "sha256:acfcc5b01fe8b565704fe6c9f8dedf20a1b8a2a87ad4633dffa6dcfe154e9774",
+      "case_hash": "sha256:11b3b28811cc694aaf40cc89e2fe070e3d4430dc3d21d124676d2086fbaf1a02",
       "status": "passed",
       "observations": [
         "Pre-query authorization, integrity, conflict, and nondisclosure cases pass."
       ],
-      "evidence_hash": "sha256:9c7946c11a2bec9c1043cd4f81fc7c3e8dda3fd09db72c302653dfd916e65241"
+      "evidence_hash": "sha256:8a8c477787a7d7076b35e9602e8b98067f1620ee3b0dd008b04ac6964fcbf832"
     },
     {
       "case_id": "durable-concurrency",
@@ -75,12 +75,12 @@
     },
     {
       "case_id": "clean-rebuild",
-      "case_hash": "sha256:79a4e573e09916e77cbb1c357fca074115351f8f0cda5c3ae35b5d5f223a0f48",
+      "case_hash": "sha256:72b7aa7e4c2401bf89bb3ec3a455c16b4304687f29a842fe020cc2fc606f13f9",
       "status": "passed",
       "observations": [
         "Clean deterministic index generation reproduces committed bytes and exact retrieval records after cache removal."
       ],
-      "evidence_hash": "sha256:9c7946c11a2bec9c1043cd4f81fc7c3e8dda3fd09db72c302653dfd916e65241"
+      "evidence_hash": "sha256:8a8c477787a7d7076b35e9602e8b98067f1620ee3b0dd008b04ac6964fcbf832"
     },
     {
       "case_id": "governed-revocation-erasure",

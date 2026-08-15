@@ -1,0 +1,8 @@
+{
+ "api_version": "kdlc.dev/release-candidate-evidence/v1alpha1",
+ "version": "1.0.0",
+ "changelog": {
+  "path": "CHANGELOG.md",
+  "sha256": "sha256:9a59fe38d7e98840d630242944cedc23ee9d1d4d8378fff09ad5c467c570f8fe"
+ }
+}

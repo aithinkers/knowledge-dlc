@@ -571,7 +571,7 @@
         "35",
         "36"
       ],
-      "status": "in-progress",
+      "status": "verified",
       "evidence": {
         "implementation": [
           "core/schemas/release/conformance-statement.schema.json",
@@ -701,10 +701,12 @@
       "specification_sections": [
         "36"
       ],
-      "status": "in-progress",
+      "status": "implemented",
       "evidence": {
         "implementation": [
-          "docs/release-readiness.md"
+          "distribution/release/statistical/model-manifest.json",
+          "distribution/release/statistical/report.json",
+          "scripts/statistical-capture-producer.mjs"
         ],
         "tests": [
           "tests/governance/statistical-release.test.mjs"

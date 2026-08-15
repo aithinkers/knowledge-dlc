@@ -22,14 +22,17 @@ async function perfectCapture(index, evidenceRoot = root) {
   return { api_version: "kdlc.dev/statistical-capture/v1alpha1", trial_id, captured_at: "2026-08-15T12:00:00Z", corpus_hash: state.hashes.corpus, evaluator_gold_hash: state.hashes.gold, profile_hash: state.hashes.profile, manifest_hashes: state.documents.profile.manifest_hashes, results, exclusions: [] };
 }
 
-test("REL-001 preregisters exact 30-trial full-corpus statistical evidence without fabricated capture", async () => {
+test("REL-002 preregistered 30-trial full-corpus statistical evidence stays exact after the frozen capture", async () => {
   const state = await loadPreregistration(root); const status = JSON.parse(await readFile(resolve(root, "distribution/release/statistical/capture-status.json"), "utf8"));
   assert.equal(state.documents.profile.required_trials, 30); assert.equal(state.documents.corpus.cases.length, 12);
-  assert.deepEqual(state.documents.profile.exclusions, { allowed: false, post_hoc: false }); assert.equal(state.documents.model.status, "awaiting-provider-inputs");
+  assert.deepEqual(state.documents.profile.exclusions, { allowed: false, post_hoc: false }); assert.equal(state.documents.model.status, "frozen");
+  assert.deepEqual(state.documents.model.configuration, { provider: "anthropic", model: "claude-sonnet-5", revision: "claude-sonnet-5", temperature: 0, seed: 421 });
   assert.equal(state.documents.profile.scorer.sha256, state.hashes.scorer);
   const substituted = structuredClone(state.documents.profile); substituted.scorer.sha256 = `sha256:${"0".repeat(64)}`;
   await assert.rejects(validateScorerBinding(root, substituted), /exact-bind/);
-  assert.deepEqual({ status: status.status, captured: status.captured_trials }, { status: "blocked", captured: 0 });
+  assert.deepEqual({ status: status.status, captured: status.captured_trials }, { status: "qualified", captured: 30 });
+  const evidence = await validateStatisticalEvidence(root);
+  assert.deepEqual(evidence, { phase: "qualified", failures: [] });
 });
 
 test("REQ-EVAL-001 provider requests contain only public projections and never evaluator gold or semantic labels", async () => {
@@ -111,17 +114,27 @@ test("REQ-EVAL-001 every policy scenario fails closed when its decisive public f
 });
 
 test("REL-001 trusted preregistration permits the frozen-model transition but rejects a substituted hash chain", async (context) => {
+  // The live repo's manifest is frozen; reconstruct the awaiting trusted base in a sandbox.
+  const trusted = await mkdtemp(resolve(tmpdir(), "kdlc-awaiting-model-")); context.after(() => rm(trusted, { recursive: true, force: true }));
+  await cp(resolve(root, "core"), resolve(trusted, "core"), { recursive: true });
+  await cp(resolve(root, "distribution/release/statistical"), resolve(trusted, "distribution/release/statistical"), { recursive: true });
+  await mkdir(resolve(trusted, "scripts")); await cp(resolve(root, "scripts/statistical-evidence-validation.mjs"), resolve(trusted, "scripts/statistical-evidence-validation.mjs"));
+  const trustedModelPath = resolve(trusted, "distribution/release/statistical/model-manifest.json");
+  const trustedModel = JSON.parse(await readFile(trustedModelPath, "utf8"));
+  Object.assign(trustedModel, { id: "provider-selection-pending", status: "awaiting-provider-inputs", configuration: { provider: null, model: null, revision: null, temperature: 0, seed: 421 } });
+  const trustedModelBytes = `${JSON.stringify(trustedModel, null, 2)}\n`; await writeFile(trustedModelPath, trustedModelBytes);
+  const trustedProfilePath = resolve(trusted, "distribution/release/statistical/profile.json");
+  const trustedProfile = JSON.parse(await readFile(trustedProfilePath, "utf8")); trustedProfile.manifest_hashes.model = sha256(trustedModelBytes);
+  await writeFile(trustedProfilePath, `${JSON.stringify(trustedProfile, null, 2)}\n`);
   const candidate = await mkdtemp(resolve(tmpdir(), "kdlc-frozen-model-")); context.after(() => rm(candidate, { recursive: true, force: true }));
-  await cp(resolve(root, "core"), resolve(candidate, "core"), { recursive: true });
-  await cp(resolve(root, "distribution/release/statistical"), resolve(candidate, "distribution/release/statistical"), { recursive: true });
-  await mkdir(resolve(candidate, "scripts")); await cp(resolve(root, "scripts/statistical-evidence-validation.mjs"), resolve(candidate, "scripts/statistical-evidence-validation.mjs"));
+  await cp(trusted, candidate, { recursive: true });
   const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json");
   const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
   const model = JSON.parse(await readFile(modelPath, "utf8"));
   Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
   const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes);
   const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
-  assert.equal((await validateCandidatePreregistration(root, candidate)).documents.model.status, "frozen");
+  assert.equal((await validateCandidatePreregistration(trusted, candidate)).documents.model.status, "frozen");
   profile.manifest_hashes.model = `sha256:${"0".repeat(64)}`; await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
   await assert.rejects(loadPreregistration(candidate), /exact-bind preregistered corpus\/manifests/);
 });
@@ -151,7 +164,7 @@ test("REL-001 qualified lifecycle accepts 30 exact trials and rejects missing ca
   const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json"); const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
   const model = JSON.parse(await readFile(modelPath, "utf8")); Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
   const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes); const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
-  const capturesPath = resolve(candidate, "distribution/release/statistical/captures"); await mkdir(capturesPath);
+  const capturesPath = resolve(candidate, "distribution/release/statistical/captures"); await mkdir(capturesPath, { recursive: true });
   const captures = []; for (let index = 1; index <= 30; index += 1) { const capture = await perfectCapture(index, candidate); captures.push(capture); await writeFile(resolve(capturesPath, `${capture.trial_id}.json`), `${JSON.stringify(capture)}\n`); }
   const report = await scoreCaptures(candidate, captures); const reportBytes = `${JSON.stringify(report)}\n`; await writeFile(resolve(candidate, "distribution/release/statistical/report.json"), reportBytes);
   const status = { api_version: "kdlc.dev/statistical-capture-status/v1alpha1", status: "qualified", reason: "Thirty complete provider trials passed the preregistered gate.", required_trials: 30, required_full_corpus_cases_per_trial: 12, captured_trials: 30, exclusions_allowed: false, captures_path: "distribution/release/statistical/captures", report_path: "distribution/release/statistical/report.json", report_hash: sha256(reportBytes) };
@@ -167,7 +180,7 @@ test("REL-001 protected matrix-cell release command accepts a coherent qualified
   const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json"); const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
   const model = JSON.parse(await readFile(modelPath, "utf8")); Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
   const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes); const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
-  const capturesPath = resolve(candidate, "distribution/release/statistical/captures"); await mkdir(capturesPath); const captures = [];
+  const capturesPath = resolve(candidate, "distribution/release/statistical/captures"); await mkdir(capturesPath, { recursive: true }); const captures = [];
   for (let index = 1; index <= 30; index += 1) { const capture = await perfectCapture(index, candidate); captures.push(capture); await writeFile(resolve(capturesPath, `${capture.trial_id}.json`), `${JSON.stringify(capture)}\n`); }
   const statisticalReport = await scoreCaptures(candidate, captures); const statisticalReportBytes = `${JSON.stringify(statisticalReport)}\n`; await writeFile(resolve(candidate, "distribution/release/statistical/report.json"), statisticalReportBytes);
   await writeFile(resolve(candidate, "distribution/release/statistical/capture-status.json"), `${JSON.stringify({ api_version: "kdlc.dev/statistical-capture-status/v1alpha1", status: "qualified", reason: "Thirty complete provider trials passed the preregistered gate.", required_trials: 30, required_full_corpus_cases_per_trial: 12, captured_trials: 30, exclusions_allowed: false, captures_path: "distribution/release/statistical/captures", report_path: "distribution/release/statistical/report.json", report_hash: sha256(statisticalReportBytes) }, null, 2)}\n`);

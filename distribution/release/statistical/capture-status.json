@@ -1,9 +1,12 @@
 {
-  "api_version": "kdlc.dev/statistical-capture-status/v1alpha1",
-  "status": "blocked",
-  "reason": "Provider, exact model revision, and independently supplied provider capture inputs have not been approved. No live calls or model outputs were produced by this tranche.",
-  "required_trials": 30,
-  "required_full_corpus_cases_per_trial": 12,
-  "captured_trials": 0,
-  "exclusions_allowed": false
+ "api_version": "kdlc.dev/statistical-capture-status/v1alpha1",
+ "status": "qualified",
+ "reason": "Thirty complete preregistered full-corpus trials were captured against the frozen anthropic/claude-sonnet-5 manifest and scored offline; every metric and per-case Wilson floor passed.",
+ "required_trials": 30,
+ "required_full_corpus_cases_per_trial": 12,
+ "captured_trials": 30,
+ "exclusions_allowed": false,
+ "captures_path": "distribution/release/statistical/captures",
+ "report_path": "distribution/release/statistical/report.json",
+ "report_hash": "sha256:fc246eb19e42e769d11b5ab7a2e270b2b1c951964dbc6b57457d8ca070074c15"
 }
