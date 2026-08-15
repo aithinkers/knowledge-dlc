@@ -1,0 +1,68 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import test from "node:test";
+
+import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
+
+const root = resolve(import.meta.dirname, "../..");
+const text = (path) => readFile(resolve(root, path), "utf8");
+const json = async (path) => JSON.parse(await text(path));
+
+test("REL-001 public policies provide actionable low-disclosure security and conduct channels", async () => {
+  const [readme, security, conduct, support, config] = await Promise.all([
+    text("README.md"), text("SECURITY.md"), text("CODE_OF_CONDUCT.md"), text("SUPPORT.md"), text(".github/ISSUE_TEMPLATE/config.yml")
+  ]);
+  assert.doesNotMatch(`${readme}\n${security}\n${support}`, /private (?:MVP|`main` branch)/i);
+  assert.match(security, /mailto:connect@aithinkers\.com\?subject=K-DLC%20confidential%20security%20report/);
+  assert.match(conduct, /mailto:connect@aithinkers\.com\?subject=K-DLC%20confidential%20conduct%20report/);
+  assert.match(security, /before sending reproduction details/i);
+  assert.match(conduct, /Do not\s+file a public issue/i);
+  const parsed = parseYamlArtifact(config);
+  assert.equal(parsed.blank_issues_enabled, false);
+  assert.deepEqual(parsed.contact_links.map(({ name }) => name), ["Security vulnerability", "Confidential conduct report"]);
+  assert.equal(parsed.contact_links.every(({ url }) => url.startsWith("https://")), true);
+});
+
+test("REL-001 security workflows pin executable actions and scan complete Git history", async () => {
+  const workflows = ["secret-history.yml", "codeql.yml", "dependency-review.yml", "supply-chain.yml"];
+  for (const name of workflows) {
+    const source = await text(`.github/workflows/${name}`);
+    parseYamlArtifact(source);
+    for (const reference of source.matchAll(/uses:\s*([^\s#]+)/g)) assert.match(reference[1], /^[^@\s]+@[0-9a-f]{40}$/, `${name}: ${reference[1]}`);
+    assert.doesNotMatch(source, /pull_request_target/);
+  }
+  const secret = await text(".github/workflows/secret-history.yml");
+  assert.match(secret, /fetch-depth: 0/);
+  assert.match(secret, /--log-opts="--all"/);
+  assert.match(secret, /a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb/);
+  const config = await text(".gitleaks.toml");
+  assert.match(config, /useDefault = true/);
+  assert.doesNotMatch(config, /allowlist|allowlists|regexes|paths/);
+});
+
+test("REL-001 npm updates, license policy, notices, SBOM, and package contents are bounded", async () => {
+  const [manifest, dependabot, policy, notices, sbom] = await Promise.all([
+    json("package.json"), text(".github/dependabot.yml"), json("security/supply-chain-policy.json"), text("THIRD_PARTY_NOTICES.md"), json("docs/supply-chain/sbom.spdx.json")
+  ]);
+  assert.equal(manifest.private, true);
+  assert.equal(manifest.version, "0.0.0-private");
+  assert.equal(manifest.license, "MIT");
+  assert.deepEqual(manifest.files, policy.package_files);
+  assert.ok(manifest.files.includes("distribution/"));
+  assert.equal(parseYamlArtifact(dependabot).updates.some((entry) => entry["package-ecosystem"] === "npm"), true);
+  assert.deepEqual(policy.allowed_licenses, ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT"]);
+  assert.match(notices, /Inventory hash: `sha256:[0-9a-f]{64}`/);
+  assert.equal(sbom.spdxVersion, "SPDX-2.3");
+  assert.equal(sbom.dataLicense, "CC0-1.0");
+  assert.ok(sbom.packages.length > 1);
+  assert.deepEqual(sbom.documentDescribes, ["SPDXRef-Root"]);
+});
+
+test("REL-001 readiness record keeps final release gates explicitly open", async () => {
+  const readiness = await text("docs/release-readiness.md");
+  assert.match(readiness, /not a conformance statement,\s+release announcement, or evidence that REL-001 is complete/i);
+  assert.match(readiness, /private vulnerability reporting/i);
+  assert.match(readiness, /secret scanning, non-provider patterns, validity checks, and\s+push protection/i);
+  assert.match(readiness, /Final REL-001 blockers/);
+});

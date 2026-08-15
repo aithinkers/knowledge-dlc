@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "allowed_licenses": ["Apache-2.0", "BSD-3-Clause", "ISC", "MIT"],
+  "package_files": [
+    "core/",
+    "distribution/",
+    "packages/",
+    "workers/",
+    "docs/supply-chain/sbom.spdx.json",
+    "README.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "notices": "THIRD_PARTY_NOTICES.md",
+  "sbom": "docs/supply-chain/sbom.spdx.json"
+}
