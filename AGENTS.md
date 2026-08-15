@@ -89,6 +89,62 @@ identify that self-difference as its sole failed check and bypass reason. This
 authority is consumed and expires immediately when PR #39 merges, and it does
 not authorize any later harness, reporter, workflow, or verifier change.
 
+PR #43, linked to issue #41, may establish a one-time protected statistical-
+evaluation transition contract for implementation PR #42. The contract applies
+only to PR #42 head `301e742ee62839241817ee4626c31900e80553bf`, based on
+`3f64a1af3e638e01a5160ed0c3a886edc3e7cdb4`, and only to these protected
+before/after SHA-256 byte transitions (`absent` means a newly protected file):
+
+- `core/schemas/release/statistical-capture.schema.json`:
+  `f881a21b2659437fd4047fcd0ec660837d014dc77250d155d673bf88e60122bb` to
+  `77b0741cc5d25c50488d9d5a83b481050ed2227fb092454448434cb229539c82`.
+- `core/schemas/release/statistical-corpus.schema.json`:
+  `c8bf55d47a048aedb1cf0fdcc46a770180b569679aa175f93cad2fa513155897` to
+  `e8efb77055d90e7aed5f3ddbb607dce521d008266e5eb293b19459855d373857`.
+- `core/schemas/release/statistical-gold.schema.json`: `absent` to
+  `8e29bb5e08f1ce0d8ced7369162068a1b52a967221be1c622ebfc66651fd71a4`.
+- `core/schemas/release/statistical-profile.schema.json`:
+  `f635bc1bb3653ef3de93361234a66cbc29c826ca346a719bc5209c58f5004a6b` to
+  `b0f3cb5836149b4845fbecd0d72b36742eb8a00b32fc68affcc63773195f5be4`.
+- `core/schemas/release/statistical-provider-request.schema.json`: `absent` to
+  `be70ddad6b44da946f05a352fb113d55911d94aa33356e80f1f87c900dcca1b2`.
+- `core/schemas/release/statistical-report.schema.json`:
+  `84eb37936aaf355b25777edf056def3b49beacc01b5a98d6f6c84be125c62dff` to
+  `6dee99ad861c2bacb34dc877d0183c838916d1b8fc3a91c67df3151acada9ba2`.
+- `distribution/release/statistical/corpus.json`:
+  `8cc7c6cf561e062bae2df5d5dfa019a2d4cb4d6696fdd3928386b57c50c12f44` to
+  `4a365c3be2c23706de04d7ae94b9c0797873e1c4e461a9ce0242160d43c904a0`.
+- `distribution/release/statistical/gold.json`: `absent` to
+  `71329eb5e6df521ef9d3da55d3300290d0933f7dd83681fca063818aacb659b2`.
+- `distribution/release/statistical/prompt-manifest.json`:
+  `e3335cc871f02582efdbd469afbd14fc38326ff9271422efe3c601f47710ca3f` to
+  `4e8eac9c417d02c6dc47198ae3453a0f3c0568e3e0891a1e179c72de629f7aa3`.
+- `scripts/governance-validation.mjs`:
+  `56822bc96cfd3dd3cd9ba4f5ba45af2b204a9009f79bff1c89aac8195bf11ea0` to
+  `7d85f52bfb4537e8a8949e2d77b5f55fbf393989bbee309c918ae7b6e16c8b4d`.
+- `scripts/statistical-evidence-validation.mjs`:
+  `4c77651cbb0c9c68162540c6443f9cf91f4334fdb9a2c8b2cfdbadbe177e28c1` to
+  `854db9bab1dec0e36a628d147610c392b8dbd0facfb5e83726b9d31c209d174c`.
+
+PR #42 must contain exactly 17 changed paths and 377 additions/142 deletions.
+Besides the protected transitions above, its only permitted paths are
+`distribution/release/conformance-statement.json`,
+`distribution/release/statistical/profile.json`, `docs/release-readiness.md`,
+`docs/traceability.json`, `security/npm-package-files.json`, and
+`tests/governance/statistical-release.test.mjs`. Candidate tests and every
+required or security check other than the expected `Repository policy` and
+`Release matrix` self-differences must pass. The exact head must pass the full
+Node 24 suite, focused statistical tests, recorded evaluation, statistical,
+release, supply-chain, distribution, audit, and diff checks locally, and an
+independent read-only agent must approve that exact head with no unresolved
+critical or high finding. The transition must retain capture status at 0/30,
+make no provider or network call, and record those two self-differences as the
+only bypass reasons. Any rebase, amendment, different byte hash, extra path,
+unexpected failed check, live capture, or missing exact-head review is
+unauthorized. This authority is usable only after PR #43 merges, is consumed
+and expires immediately when PR #42 merges, and authorizes no later statistical
+corpus, gold, prompt, schema, scorer, verifier, or protected-list change.
+
 Repository administrators, write collaborators, and repository-configured
 GitHub Actions are inside the current CI trust boundary. Bare commit-status
 contexts are therefore enforcement against ordinary candidate changes, not a
