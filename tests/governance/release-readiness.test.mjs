@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash } from "../../scripts/supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const text = (path) => readFile(resolve(root, path), "utf8");
@@ -82,4 +83,35 @@ test("REL-001 readiness record keeps final release gates explicitly open", async
   assert.match(readiness, /private vulnerability reporting/i);
   assert.match(readiness, /secret scanning, non-provider patterns, validity checks, and\s+push protection/i);
   assert.match(readiness, /Final REL-001 blockers/);
+});
+
+test("REL-001 package evidence reads are descriptor-pinned, no-follow, ancestry-bound, and leak-free", async (context) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "kdlc-supply-read-"));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  await mkdir(resolve(directory, "package"));
+  await writeFile(resolve(directory, "package/metadata.json"), "trusted");
+  assert.equal((await readTrustedFile(directory, "package/metadata.json")).toString(), "trusted");
+  await symlink(resolve(directory, "package/metadata.json"), resolve(directory, "link.json"));
+  await assert.rejects(readTrustedFile(directory, "link.json"));
+
+  await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async ({ target }) => {
+    await rename(target, `${target}.old`);
+    await symlink(resolve(directory, "link.json"), target);
+  } }), /identity changed|ELOOP/);
+  await rm(resolve(directory, "package/metadata.json"), { force: true });
+  await rename(resolve(directory, "package/metadata.json.old"), resolve(directory, "package/metadata.json"));
+
+  await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => {
+    await rename(resolve(directory, "package"), resolve(directory, "package.old"));
+    await mkdir(resolve(directory, "package"));
+    await writeFile(resolve(directory, "package/metadata.json"), "substituted");
+  } }), /identity changed|parent identity changed/);
+  await rm(resolve(directory, "package"), { recursive: true, force: true });
+  await rename(resolve(directory, "package.old"), resolve(directory, "package"));
+
+  const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+  const before = (await readdir(descriptorDirectory)).length;
+  for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
+  const after = (await readdir(descriptorDirectory)).length;
+  assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
 });

@@ -1,19 +1,19 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, lstat, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, lstat, readdir, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash } from "./supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const writing = process.argv.slice(2).includes("--write");
 if (process.argv.slice(2).some((argument) => argument !== "--write")) throw new Error("usage: node scripts/verify-supply-chain.mjs [--write]");
 
-const bytes = async (path) => readFile(resolve(root, path));
-const json = async (path) => JSON.parse(await readFile(resolve(root, path), "utf8"));
+const bytes = async (path) => readTrustedFile(root, path);
+const json = async (path) => JSON.parse((await bytes(path)).toString("utf8"));
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const spdxId = (name, version) => `SPDXRef-Package-${digest(`${name}@${version}`).slice(0, 20)}`;
 const exists = async (path) => { try { await access(resolve(root, path)); return true; } catch { return false; } };
@@ -26,13 +26,12 @@ function safeInstalledPath(path) {
 async function installedTreeEvidence(path) {
   const base = resolve(root, path); const entries = [];
   const visit = async (directory) => {
-    for (const name of (await readdir(directory)).sort()) {
-      if (name === "node_modules") continue;
-      const absolute = resolve(directory, name); const rel = relative(base, absolute).split(sep).join("/");
-      const metadata = await lstat(absolute);
-      if (metadata.isSymbolicLink() || (!metadata.isDirectory() && !metadata.isFile())) throw new Error(`unsupported installed entry: ${rel}`);
-      if (metadata.isDirectory()) await visit(absolute);
-      else { const content = await readFile(absolute); entries.push({ path: rel, size: content.byteLength, sha256: digest(content) }); }
+    for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name, "en"))) {
+      if (entry.name === "node_modules") continue;
+      const absolute = resolve(directory, entry.name); const rel = relative(base, absolute).split(sep).join("/");
+      if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) throw new Error(`unsupported installed entry: ${rel}`);
+      if (entry.isDirectory()) await visit(absolute);
+      else { const content = await readTrustedFile(root, `${path}/${rel}`); entries.push({ path: rel, size: content.byteLength, sha256: digest(content) }); }
     }
   };
   await visit(base);
@@ -171,7 +170,7 @@ if (failures.length) {
 } else {
   for (const [path, generated] of [[policy.notices, notices], [policy.sbom, sbomText]]) {
     let committed;
-    try { committed = await readFile(resolve(root, path), "utf8"); } catch { failures.push(`missing generated supply-chain evidence: ${path}`); continue; }
+    try { committed = (await bytes(path)).toString("utf8"); } catch { failures.push(`missing generated supply-chain evidence: ${path}`); continue; }
     if (committed !== generated) failures.push(`generated supply-chain evidence drift: ${path}`);
   }
   if (failures.length) {
