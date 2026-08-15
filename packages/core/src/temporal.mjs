@@ -15,7 +15,10 @@ export function isRfc3339Instant(value) {
   if (!match || !isGregorianDate(`${match[1]}-${match[2]}-${match[3]}`)) return false;
   const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
   const offsetHour = Number(match[10] ?? 0), offsetMinute = Number(match[11] ?? 0);
-  if (hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) return false;
+  if (hour > 23 || minute > 59 || second > 59 || offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)) return false;
+  // RFC 3339 permits -00:00 to mean an unknown local offset. K-DLC event
+  // timestamps must identify a known instant, so only +00:00 or Z represent UTC.
+  if (match[9] === "-" && offsetHour === 0 && offsetMinute === 0) return false;
   return Number.isFinite(Date.parse(value));
 }
 
