@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/governed-review-packet.schema.json",
+  "allOf": [
+    {"$ref": "./review-packet.schema.json"},
+    {"type": "object", "required": ["claim_binding", "governance_requirements"], "properties": {"claim_binding": {}, "governance_requirements": {}}}
+  ]
+}

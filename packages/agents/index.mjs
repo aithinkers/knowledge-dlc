@@ -9,13 +9,17 @@ const packageRoot = dirname(fileURLToPath(import.meta.url));
 const roleRoot = resolve(packageRoot, "roles");
 const safeSegment = /^[A-Za-z0-9._-]+$/;
 const reviewerRoles = new Set(["trust-reviewer", "governance-reviewer"]);
+const authenticatedSessions = new WeakSet();
 
 export const AGENT_WORKFLOW_SCHEMA_PATHS = Object.freeze({
   conceptProposal: "core/schemas/artifacts/concept-proposal.schema.json",
   recordedNormalizedFixture: "core/schemas/agents/recorded-normalized-fixture.schema.json",
   recordedModelOutput: "core/schemas/agents/recorded-model-output.schema.json",
   roleDescriptor: "core/schemas/agents/role-descriptor.schema.json",
-  publicationIntent: "core/schemas/artifacts/publication-intent.schema.json"
+  publicationIntent: "core/schemas/artifacts/publication-intent.schema.json",
+  governedReviewPacket: "core/schemas/artifacts/governed-review-packet.schema.json",
+  reviewDecision: "core/schemas/artifacts/review-decision.schema.json",
+  freshnessAuthorization: "core/schemas/artifacts/freshness-authorization.schema.json"
 });
 
 export class AgentPolicyError extends Error {
@@ -101,7 +105,8 @@ export class CapabilityRuntime {
     if (operation !== "read" && operation !== "write") throw new AgentPolicyError("KDLC_CAPABILITY_INVALID", `Unknown capability operation: ${operation}`);
     const descriptor = this.descriptor(role);
     safePath(path);
-    if (reviewerRoles.has(role) && operation === "write" && !matches("workflow/runs/**/receipts/**", path)) {
+    const reviewerWrite = matches("workflow/runs/**/receipts/**", path) || matches("workflow/runs/**/reviews/**/decision.json", path) || matches("workflow/runs/**/reviews/**/freshness-authorization.json", path);
+    if (reviewerRoles.has(role) && operation === "write" && !reviewerWrite) {
       throw new AgentPolicyError("KDLC_REVIEWER_READ_ONLY", `${role} cannot mutate reviewed artifacts`, { operation, path });
     }
     if (!descriptor.permissions[operation].some((pattern) => matches(pattern, path))) {
@@ -110,10 +115,40 @@ export class CapabilityRuntime {
     return true;
   }
 
-  async run(role, operations, action) {
-    if (!Array.isArray(operations) || typeof action !== "function") throw new TypeError("Capability run requires operations and an action");
-    for (const { operation, path } of operations) this.authorize(role, operation, path);
-    return action();
+}
+
+function cloneJson(value) { return JSON.parse(canonicalJson(value)); }
+
+export class MediatedAgentRuntime {
+  #capabilities;
+  #store;
+  #tools;
+
+  constructor({ capabilities, store, tools = new Map() }) {
+    if (!capabilities || typeof store?.get !== "function" || typeof store?.put !== "function") throw new TypeError("Mediated runtime requires capabilities and a read/write store");
+    this.#capabilities = capabilities;
+    this.#store = store;
+    this.#tools = new Map(tools);
+  }
+
+  async read(role, path) {
+    this.#capabilities.authorize(role, "read", path);
+    return cloneJson(await this.#store.get(path));
+  }
+
+  async write(role, path, value) {
+    this.#capabilities.authorize(role, "write", path);
+    const safeValue = cloneJson(value);
+    await this.#store.put(path, safeValue);
+    return safeValue;
+  }
+
+  async invoke(role, toolName, input) {
+    const descriptor = this.#capabilities.descriptor(role);
+    if (!descriptor.permissions.tools.includes(toolName)) throw new AgentPolicyError("KDLC_TOOL_DENIED", `${role} cannot invoke ${toolName}`, { role, tool: toolName });
+    const handler = this.#tools.get(toolName);
+    if (typeof handler !== "function") throw new AgentPolicyError("KDLC_TOOL_UNAVAILABLE", `Authorized tool is unavailable: ${toolName}`);
+    return cloneJson(await handler(cloneJson(input)));
   }
 }
 
@@ -152,8 +187,8 @@ export class PrincipalAuthority {
     if (!Array.isArray(principals)) throw new TypeError("PrincipalAuthority requires trusted principal records");
     this.#principals = new Map();
     for (const principal of principals) {
-      const allowed = new Set(["id", "actor", "principal_mode", "issuer"]);
-      if (!principal || typeof principal.id !== "string" || !/^(?:human|process):[A-Za-z0-9._@/-]+$/.test(principal.actor ?? "") || !["local", "served", "automation"].includes(principal.principal_mode) || Object.keys(principal).some((key) => !allowed.has(key)) || (principal.principal_mode === "served" && typeof principal.issuer !== "string")) {
+      const allowed = new Set(["id", "actor", "principal_mode", "issuer", "review_roles"]);
+      if (!principal || typeof principal.id !== "string" || !/^(?:human|process):[A-Za-z0-9._@/-]+$/.test(principal.actor ?? "") || !["local", "served", "automation"].includes(principal.principal_mode) || !Array.isArray(principal.review_roles) || principal.review_roles.some((role) => !reviewerRoles.has(role)) || new Set(principal.review_roles).size !== principal.review_roles.length || Object.keys(principal).some((key) => !allowed.has(key)) || (principal.principal_mode === "served" && typeof principal.issuer !== "string")) {
         throw new AgentPolicyError("KDLC_PRINCIPAL_INVALID", "Trusted principal record is invalid");
       }
       if (this.#principals.has(principal.id)) throw new AgentPolicyError("KDLC_PRINCIPAL_INVALID", `Duplicate trusted principal: ${principal.id}`);
@@ -161,10 +196,18 @@ export class PrincipalAuthority {
     }
   }
 
-  resolve(id) {
+  establishReviewSession(id, role) {
     const principal = this.#principals.get(id);
     if (!principal) throw new AgentPolicyError("KDLC_PRINCIPAL_UNRESOLVED", `Review principal is not established by the trusted runtime: ${id}`);
-    const { id: ignored, ...reviewer } = principal;
-    return structuredClone(reviewer);
+    if (!principal.review_roles.includes(role)) throw new AgentPolicyError("KDLC_REVIEW_ROLE_DENIED", `Principal ${id} is not authenticated for ${role}`);
+    const { id: ignored, review_roles: ignoredRoles, ...reviewer } = principal;
+    const session = Object.freeze({ role, reviewer: Object.freeze(structuredClone(reviewer)) });
+    authenticatedSessions.add(session);
+    return session;
   }
+}
+
+export function resolveAuthenticatedReviewSession(session) {
+  if (!session || !authenticatedSessions.has(session) || !reviewerRoles.has(session.role)) throw new AgentPolicyError("KDLC_SESSION_INVALID", "Review decision requires a trusted authenticated session");
+  return { role: session.role, reviewer: structuredClone(session.reviewer) };
 }

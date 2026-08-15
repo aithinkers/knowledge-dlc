@@ -13,10 +13,11 @@
     "permissions": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["read", "write"],
+      "required": ["read", "write", "tools"],
       "properties": {
         "read": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "write": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        "write": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "tools": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9.-]+$"}}
       }
     }
   }
