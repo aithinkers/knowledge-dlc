@@ -124,6 +124,12 @@ test("FEAT-003 restricted JSONL worker refuses active policy and returns bounded
   await assert.rejects(runRestrictedNormalizer({ id: "getter", bytes_base64: "", probabilisticUnits: [getterUnit] }), /accessors/); assert.equal(getterCalls, 0);
   let toJsonCalls = 0; const toJsonUnit = { toJSON() { toJsonCalls += 1; return { text: "changed" }; } };
   await assert.rejects(runRestrictedNormalizer({ id: "tojson", bytes_base64: "", probabilisticUnits: [toJsonUnit] }), /toJSON/); assert.equal(toJsonCalls, 0);
+  await assert.rejects(runRestrictedNormalizer({ id: "nul-wire", bytes_base64: "", filename: "\0".repeat(6_700_000) }), /line exceeds/);
+  const sparse = []; sparse.length = 100_000; sparse[99_999] = null;
+  await assert.rejects(runRestrictedNormalizer({ id: "sparse", bytes_base64: "", probabilisticUnits: sparse }), /sparse or oversized/);
+  const oversizedArray = []; oversizedArray.length = 100_001;
+  await assert.rejects(runRestrictedNormalizer({ id: "array-length", bytes_base64: "", probabilisticUnits: oversizedArray }), /sparse or oversized/);
+  await assert.rejects(runRestrictedNormalizer({ id: "epipe", bytes_base64: "", filename: "x".repeat(20_000_000) }, { timeoutMs: 1 }), /worker .*failed|time or memory/i);
 });
 
 test("FEAT-003 trusted ceilings, package identity, provenance, and portable paths fail closed", async () => {
@@ -146,6 +152,12 @@ test("FEAT-003 trusted ceilings, package identity, provenance, and portable path
   assert.throws(() => portableArtifacts(safe, "different"), /does not match/);
   const badMetadata = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "../escape", normalizedAt: "not-a-time" });
   assert.equal(badMetadata.manifest.status, "quarantined"); assert.match(badMetadata.manifest.source_id, /^source-/); assert.equal(badMetadata.manifest.normalized_at, "1970-01-01T00:00:00.000Z");
+  const badCombined = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "../escape", settings: { unknown: true } });
+  assert.equal(badCombined.manifest.status, "quarantined"); assert.deepEqual(badCombined.manifest.settings, {}); assert.equal(manifestValidator(badCombined.manifest), true, JSON.stringify(manifestValidator.errors));
+  const badDelimiter = await normalize({ bytes: Buffer.from("a,b"), filename: "safe.csv", settings: { delimiter: "xx" } });
+  assert.equal(badDelimiter.manifest.status, "quarantined"); assert.deepEqual(badDelimiter.manifest.settings, {}); assert.equal(manifestValidator(badDelimiter.manifest), true, JSON.stringify(manifestValidator.errors));
+  const emptyMarkdown = await normalize({ bytes: Buffer.alloc(0), filename: "empty.md" });
+  assert.equal(emptyMarkdown.manifest.status, "complete"); assert.deepEqual(emptyMarkdown.manifest.coverage, { discovered: 0, emitted: 0 }); assert.equal(manifestValidator(emptyMarkdown.manifest), true, JSON.stringify(manifestValidator.errors));
   for (const settings of [[], null]) {
     const invalidSettings = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", settings });
     assert.equal(invalidSettings.manifest.quarantine.code, "invalid-settings"); assert.deepEqual(invalidSettings.manifest.settings, {}); assert.equal(manifestValidator(invalidSettings.manifest), true, JSON.stringify(manifestValidator.errors));

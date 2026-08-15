@@ -204,8 +204,14 @@ function gifProfile(bytes, sourceHash, settings, limits) {
 }
 
 function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJson(value)); } catch { return fallback; } }
+function safeQuarantineSettings(settings) {
+  if (!plainObject(settings)) return {};
+  const safe = serializable(settings); if (!plainObject(safe) || Object.keys(safe).some((name) => !["language", "delimiter", "sample_rows", "sample_frames"].includes(name))) return {};
+  if ((safe.language !== undefined && !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(safe.language)) || (safe.delimiter !== undefined && (typeof safe.delimiter !== "string" || safe.delimiter.length !== 1 || /[\r\n"']/.test(safe.delimiter))) || [safe.sample_rows, safe.sample_frames].some((value) => value !== undefined && (!Number.isSafeInteger(value) || value <= 0))) return {};
+  return safe;
+}
 function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error) {
-  return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: plainObject(settings) ? serializable(settings) : {}, coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
+  return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: safeQuarantineSettings(settings), coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
 }
 function semanticIdentity({ descriptor, units, probabilisticUnits, manifest }) { const { semantics_hash: ignored, ...manifestSemantics } = manifest; return byteHash(canonicalJson({ descriptor, units, probabilisticUnits, manifest: manifestSemantics })); }
 function bindSemanticIdentity(normalized) { normalized.manifest.semantics_hash = semanticIdentity(normalized); return normalized; }
@@ -213,7 +219,7 @@ function assertSupportedSemantics(format, settings, coverage, emitted) {
   const allowed = { csv: new Set(["delimiter", "sample_rows", "language"]), gif: new Set(["sample_frames", "language"]) }[format] ?? new Set(["language"]);
   if (Object.keys(settings).some((name) => !allowed.has(name)) || (settings.language !== undefined && !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(settings.language)) || (settings.delimiter !== undefined && (typeof settings.delimiter !== "string" || settings.delimiter.length !== 1 || /[\r\n"']/.test(settings.delimiter))) || [settings.sample_rows, settings.sample_frames].some((value) => value !== undefined && (!Number.isSafeInteger(value) || value <= 0))) throw new Error("Manifest settings do not match the supported format profile");
   const expectedCoverage = format === "gif" ? ["discovered", "duration_ms", "emitted", "height", "width"] : ["discovered", "emitted"];
-  if (canonicalJson(Object.keys(coverage).sort()) !== canonicalJson(expectedCoverage) || coverage.emitted !== emitted || !Number.isSafeInteger(coverage.discovered) || coverage.discovered < 1) throw new Error("Manifest coverage does not match the supported format profile");
+  if (canonicalJson(Object.keys(coverage).sort()) !== canonicalJson(expectedCoverage) || coverage.emitted !== emitted || !Number.isSafeInteger(coverage.discovered) || coverage.discovered < 0 || (coverage.discovered === 0 && (format !== "markdown" || emitted !== 0))) throw new Error("Manifest coverage does not match the supported format profile");
 }
 
 export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
