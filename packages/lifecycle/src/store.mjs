@@ -145,7 +145,7 @@ export class NodeFileStore {
     catch (error) { if (error?.code !== "EEXIST") throw error; }
   }
 
-  async withMutex(relativePath, { owner, clock, leaseMs = 30_000, timeoutMs = 2_000, retryMs = 2 }, action) {
+  async withMutex(relativePath, { owner, clock, leaseMs = 30_000, timeoutMs = 10_000, retryMs = 2 }, action) {
     if (!owner || !clock?.millis) throw invalid("Filesystem mutex requires owner and clock");
     const started = Date.now();
     const leasePath = `${relativePath}/owner.json`;
