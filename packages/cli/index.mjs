@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  realpath,
   rename,
   stat,
   writeFile,
@@ -23,6 +24,7 @@ import {
 } from "../contracts/index.mjs";
 import { FederationResolver } from "../federation/index.mjs";
 import { NodeFileStore } from "../lifecycle/src/index.mjs";
+import { normalize } from "../normalizers/index.mjs";
 import { FederatedRetriever } from "../retrieval/index.mjs";
 
 export const CLI_COMMANDS = Object.freeze([
@@ -847,6 +849,40 @@ export function createLocalProjectEngine(options = {}) {
       ],
     };
   };
+  const ingest = async (
+    { sources },
+    { durableIdempotencyKey, cancellationPoint },
+  ) => {
+    const canonicalRoot = await realpath(root);
+    const normalized = [];
+    for (const [index, source] of sources.entries()) {
+      if (await cancellationPoint())
+        throw Object.assign(new Error("cancelled"), { code: "KDLC_CANCELLED" });
+      const candidate = await realpath(resolve(root, source));
+      if (
+        !(
+          candidate === canonicalRoot ||
+          candidate.startsWith(`${canonicalRoot}/`)
+        )
+      )
+        throw new EngineError(
+          "KDLC_POLICY_DENIED",
+          "Source escapes the project root",
+          EXIT.policy,
+        );
+      const bytes = await readFile(candidate);
+      const sourceId = `src_${createHash("sha256").update(`${durableIdempotencyKey}:${index}:${source}`).digest("hex").slice(0, 16)}`;
+      normalized.push(
+        await normalize({
+          bytes,
+          filename: basename(candidate),
+          sourceId,
+          normalizedAt: new Date().toISOString(),
+        }),
+      );
+    }
+    return { idempotency_key: durableIdempotencyKey, normalized };
+  };
   const handlers = policy
     ? {
         query: search,
@@ -854,6 +890,44 @@ export function createLocalProjectEngine(options = {}) {
         kb_fetch: fetchConcept,
         trace: fetchConcept,
         kb_trace: fetchConcept,
+        ingest,
+        adopt: ingest,
+        lint: async () => {
+          const contracts = await createContractValidator();
+          const project = parseYamlArtifact(
+            await readFile(resolve(root, "knowledge-project.yaml"), "utf8"),
+          );
+          const result = contracts.validate("project", project);
+          return { valid: result.valid, issues: result.errors };
+        },
+        kb_conflicts: async () => {
+          const result = await search({
+            query: "conflict contradiction",
+            mode: "audit",
+          });
+          return { conflicts: result.conflicts, citations: result.citations };
+        },
+        conflicts: async () => {
+          const result = await search({
+            query: "conflict contradiction",
+            mode: "audit",
+          });
+          return { conflicts: result.conflicts, citations: result.citations };
+        },
+        kb_gaps: async () => {
+          const result = await search({
+            query: "gap missing todo",
+            mode: "audit",
+          });
+          return { gaps: result.results, citations: result.citations };
+        },
+        gaps: async () => {
+          const result = await search({
+            query: "gap missing todo",
+            mode: "audit",
+          });
+          return { gaps: result.results, citations: result.citations };
+        },
         refresh: async () => {
           const resolved = await resolveMounts();
           return {
