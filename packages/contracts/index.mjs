@@ -29,17 +29,23 @@ export const CONTRACT_SCHEMA_PATHS = Object.freeze({
   lifecycleSensorResult: "core/schemas/lifecycle/sensor-result.schema.json"
 });
 
-export async function loadContractSchemas(root = moduleRoot) {
-  return Promise.all(Object.entries(CONTRACT_SCHEMA_PATHS).map(async ([name, relativePath]) => {
+export async function loadContractSchemas(root = moduleRoot, additionalPaths = {}) {
+  for (const [name, relativePath] of Object.entries(additionalPaths)) {
+    if (Object.hasOwn(CONTRACT_SCHEMA_PATHS, name)) throw new TypeError(`additional contract cannot replace core contract: ${name}`);
+    if (typeof relativePath !== "string" || !/^core\/schemas\/[A-Za-z0-9._/-]+\.json$/.test(relativePath) || relativePath.split("/").includes("..")) {
+      throw new TypeError(`unsafe additional contract path: ${relativePath}`);
+    }
+  }
+  return Promise.all(Object.entries({ ...CONTRACT_SCHEMA_PATHS, ...additionalPaths }).map(async ([name, relativePath]) => {
     const schema = JSON.parse(await readFile(resolve(root, relativePath), "utf8"));
     return { name, relativePath, schema };
   }));
 }
 
-export async function createContractValidator(root = moduleRoot) {
+export async function createContractValidator(root = moduleRoot, additionalPaths = {}) {
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   addFormats(ajv);
-  const schemas = await loadContractSchemas(root);
+  const schemas = await loadContractSchemas(root, additionalPaths);
   for (const { schema } of schemas) ajv.addSchema(schema);
 
   const validators = Object.fromEntries(schemas

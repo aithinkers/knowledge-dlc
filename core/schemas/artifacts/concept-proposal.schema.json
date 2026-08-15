@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/concept-proposal.schema.json",
+  "title": "K-DLC concept proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "id", "workflow_id", "task", "state", "target", "concept", "claim_ids", "claim_decisions", "created_by"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/concept-proposal/v1alpha1"},
+    "id": {"type": "string", "pattern": "^pr_[a-z0-9]+$"},
+    "workflow_id": {"type": "string", "pattern": "^wf_[a-z0-9]+$"},
+    "task": {"enum": ["ingest", "adopt", "reconcile-direct-edit"]},
+    "state": {"enum": ["candidate", "planned", "drafted", "review_pending", "approved", "rejected", "changes_requested", "published", "superseded"]},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["knowledge_base_id", "revision", "subject"],
+      "properties": {
+        "knowledge_base_id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
+        "revision": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "subject": {"type": "string", "pattern": "^kb://[^/]+/.+$"}
+      }
+    },
+    "concept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+        "after": {"type": "object", "required": ["frontmatter", "body"], "properties": {"frontmatter": {"type": "object"}, "body": {"type": "string"}}, "additionalProperties": false}
+      }
+    },
+    "claim_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^clm_[a-z0-9]+$"}},
+    "claim_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["claim_id", "disposition", "rationale"],
+        "properties": {
+          "claim_id": {"type": "string", "pattern": "^clm_[a-z0-9]+$"},
+          "disposition": {"enum": ["accepted", "rejected", "merged", "superseded", "conflict"]},
+          "rationale": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+        }
+      }
+    },
+    "created_by": {"$ref": "../common.schema.json#/$defs/actor"},
+    "direct_edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_review_hash", "current_review_hash", "structural_diff", "textual_diff"],
+      "properties": {
+        "expected_review_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+        "current_review_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+        "structural_diff": {"type": "array"},
+        "textual_diff": {"type": "string"}
+      }
+    }
+  }
+}

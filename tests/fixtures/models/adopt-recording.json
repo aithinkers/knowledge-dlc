@@ -1,0 +1,18 @@
+{
+  "api_version": "kdlc.dev/recorded-model-output/v1alpha1",
+  "fixture_id": "adopt-existing-v1",
+  "task": "adopt",
+  "model": {"provider": "recorded", "model": "fixture-model-1", "prompt": "adopt-existing-v1", "recorded_at": "2026-08-14T12:05:00Z"},
+  "input_hashes": {"normalized_evidence": "sha256:ed9e33eba4571e3c11fcfeb7ecb7cb1990b24c8df2228da923ace9f4150af738"},
+  "claims": [
+    {"id":"clm_beta","text":"The service is maintained by the platform team.","source_id":"src_beta","source_hash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","locator":{"heading":"Ownership"},"extraction":"explicit","status":"accepted"}
+  ],
+  "proposals": [
+    {
+      "api_version":"kdlc.dev/concept-proposal/v1alpha1","id":"pr_beta","workflow_id":"wf_adopt","task":"adopt","state":"drafted",
+      "target":{"knowledge_base_id":"acme.docs","revision":"rev-1","subject":"kb://acme.docs/systems/platform-service"},
+      "concept":{"before":{"frontmatter":{"type":"System","title":"Platform service","description":"Existing service.","status":"draft","generated":{"by":"human:author","at":"2026-08-01T00:00:00Z"}},"body":"# Platform service"},"after":{"frontmatter":{"type":"System","title":"Platform service","description":"Existing service owned by Platform.","status":"draft","generated":{"by":"kdlc-integrator/0.2.0","at":"2026-08-14T12:05:00Z"},"sources":[{"id":"beta","source_hash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"stale_after":"2030-01-01T00:00:00Z"},"body":"# Platform service\n\nOwned by the platform team."}},
+      "claim_ids":["clm_beta"],"claim_decisions":[{"claim_id":"clm_beta","disposition":"accepted","rationale":"The existing concept omitted explicit ownership supported by the source."}],"created_by":"kdlc-integrator/0.2.0"
+    }
+  ]
+}

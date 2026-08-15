@@ -1,0 +1,18 @@
+{
+  "api_version": "kdlc.dev/recorded-model-output/v1alpha1",
+  "fixture_id": "ingest-policy-v1",
+  "task": "ingest",
+  "model": {"provider": "recorded", "model": "fixture-model-1", "prompt": "extract-and-plan-v1", "recorded_at": "2026-08-14T12:00:00Z"},
+  "input_hashes": {"normalized_evidence": "sha256:34d3efe02e0e1e38d4e87507edc1310baa1a9cc4ae8f1982bec76c98e45ead99"},
+  "claims": [
+    {"id":"clm_alpha","text":"Production API tokens expire after 60 minutes.","source_id":"src_alpha","source_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","locator":{"heading":"Token lifetime"},"extraction":"explicit","status":"accepted"}
+  ],
+  "proposals": [
+    {
+      "api_version":"kdlc.dev/concept-proposal/v1alpha1","id":"pr_alpha","workflow_id":"wf_ingest","task":"ingest","state":"review_pending",
+      "target":{"knowledge_base_id":"acme.docs","revision":"rev-1","subject":"kb://acme.docs/policies/api-tokens"},
+      "concept":{"before":null,"after":{"frontmatter":{"type":"Policy","title":"API token lifetime","description":"Production token lifetime policy.","status":"stable","generated":{"by":"kdlc-integrator/0.2.0","at":"2026-08-14T12:00:00Z"},"sources":[{"id":"alpha","source_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"stale_after":"2030-01-01T00:00:00Z"},"body":"# Policy\n\nProduction API tokens expire after 60 minutes."}},
+      "claim_ids":["clm_alpha"],"claim_decisions":[{"claim_id":"clm_alpha","disposition":"accepted","rationale":"The assertion is explicit and directly anchored."}],"created_by":"kdlc-integrator/0.2.0"
+    }
+  ]
+}

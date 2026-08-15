@@ -1,0 +1,1 @@
+{"api_version":"kdlc.dev/agent-role/v1alpha1","role":"trust-reviewer","actor":"kdlc-trust-reviewer/0.2.0","review_only":true,"permissions":{"read":["sources/normalized/**","workflow/runs/**","knowledge-bases/**"],"write":["workflow/runs/**/receipts/**"]}}

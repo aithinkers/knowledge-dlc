@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/agents/recorded-model-output.schema.json",
+  "title": "K-DLC recorded model output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "fixture_id", "task", "model", "input_hashes", "claims", "proposals"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/recorded-model-output/v1alpha1"},
+    "fixture_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "task": {"enum": ["ingest", "adopt"]},
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "prompt", "recorded_at"],
+      "properties": {
+        "provider": {"const": "recorded"},
+        "model": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "prompt": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "recorded_at": {"$ref": "../common.schema.json#/$defs/dateTime"}
+      }
+    },
+    "input_hashes": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "../common.schema.json#/$defs/digest"}},
+    "claims": {"type": "array", "items": {"$ref": "../artifacts/claim.schema.json"}},
+    "proposals": {"type": "array", "items": {"$ref": "../artifacts/concept-proposal.schema.json"}}
+  }
+}
