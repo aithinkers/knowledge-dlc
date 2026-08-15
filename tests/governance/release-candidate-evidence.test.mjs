@@ -77,6 +77,8 @@ test("REQ-RELEASE-001 admin settings attestation rejects forgery, staleness, wro
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(beforeCapture), options).status, "invalid");
   const futureConfirmation = attest({ repository: options.repository, confirmedAt: "2026-08-15T13:00:00Z", settings });
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(futureConfirmation), options).status, "invalid");
+  const lateConfirmation = attest({ repository: options.repository, confirmedAt: "2026-08-15T01:00:00.001Z", settings });
+  assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(lateConfirmation), options).status, "invalid");
   const autoConfirmed = attest({ repository: options.repository, confirmedAt: "2026-08-15T00:00:00Z", settings });
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(autoConfirmed), options).status, "invalid");
   const capture = createAdminSettingsCapture({ repository: options.repository, capturedAt: "2026-08-15T00:00:00Z", actor: "release-owner", responseBytes: Buffer.from(JSON.stringify(settings)) });
