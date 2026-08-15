@@ -204,6 +204,28 @@
         ],
         "tests": ["tests/governance/release-evidence.test.mjs"]
       }
+    },
+    {
+      "id": "REQ-SUPPLY-001",
+      "title": "Refresh dependency and GitHub Action runtimes before release",
+      "issue": 36,
+      "specification_sections": ["32", "35", "36"],
+      "status": "in-progress",
+      "evidence": {
+        "implementation": [
+          ".github/workflows/codeql.yml",
+          ".github/workflows/dependency-review.yml",
+          ".github/workflows/governance.yml",
+          ".github/workflows/secret-history.yml",
+          ".github/workflows/supply-chain.yml",
+          "package.json",
+          "package-lock.json",
+          "THIRD_PARTY_NOTICES.md",
+          "docs/supply-chain/sbom.spdx.json",
+          "security/npm-package-files.json"
+        ],
+        "tests": ["tests/governance/extensions.test.mjs", "tests/governance/release-readiness.test.mjs"]
+      }
     }
   ]
 }
