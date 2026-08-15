@@ -1,41 +1,111 @@
-# K-DLC
+# K-DLC — turn your documents into agent-consumable knowledge
 
-K-DLC (Knowledge Development Lifecycle) is a harness-neutral lifecycle and
-governance framework for building, querying, and maintaining agent-authored
-knowledge bases.
+**K-DLC (Knowledge Development Lifecycle)** turns the documents your team
+already has — wikis, PDFs, spreadsheets, decks, diagrams — into durable,
+provenance-bearing knowledge that AI agents can actually trust: curated, linked
+Markdown concepts in the [Open Knowledge Format (OKF)](core/schemas/okf-0.2/),
+produced through a governed lifecycle with explicit human approval gates.
 
-The public repository is in pre-release MVP development against specification
-version 0.2.0. It is not a supported release. Conformance is declared
-module-by-module; no module or document-format capability is considered
-implemented until its linked issue, tests, and independent review evidence are
-complete.
-
-## Development status
-
-- [MVP milestone](https://github.com/aithinkers/knowledge-dlc/milestone/1)
-- [Requirement and feature backlog](https://github.com/aithinkers/knowledge-dlc/issues)
-- [Specification baseline](docs/specification-baseline.md)
-- [Traceability index](docs/traceability.json)
-- [Agent development contract](AGENTS.md)
-- [Development harness](development/README.md)
-- [Contributing guide](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Support policy](SUPPORT.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Release-readiness gates](docs/release-readiness.md)
-- [Machine-readable pre-release conformance](distribution/release/conformance-statement.json)
-- [Recorded pre-release evaluation](distribution/release/evaluation-report.json)
-
-## Required delivery flow
+One harness-neutral core, rendered natively for **Claude Code, Codex CLI,
+Kiro CLI, Kiro IDE, and any MCP client** — the same governed engine, the same
+versioned envelope, everywhere.
 
 ```text
-requirement -> GitHub issue -> reviewed plan -> implementation -> tests
-            -> independent review -> pull request -> release evidence
+Sources -> Evidence -> Claims -> Concepts -> Published knowledge
+                 \       |          |
+                  \------ provenance + review receipts
 ```
 
-Every change must begin with an issue and preserve that relationship through
-the branch, commits, pull request, tests, and traceability index. CI enforces
-the machine-checkable parts of this contract.
+> [!NOTE]
+> This repository is in pre-release MVP development against specification
+> version 0.2.0. It is not a supported release. Conformance is declared
+> module-by-module; no capability is considered implemented until its linked
+> issue, tests, and independent review evidence are complete.
+
+> [!IMPORTANT]
+> Generative AI can make mistakes. K-DLC never publishes stable knowledge on
+> model confidence alone — review the evidence, claims, and diffs its gates
+> put in front of you.
+
+## Why K-DLC
+
+Retrieval over raw documents works until the corpus gets real. Then agents cite
+stale pages, contradictions surface mid-answer, and nobody can say where a
+"fact" came from. K-DLC puts structure around knowledge the way CI puts
+structure around code: every claim traces to a source hash and locator,
+every concept records who generated and who verified it, conflicts are
+retained instead of silently resolved, and publication is a reviewed, atomic
+transaction. Search indexes, embeddings, and graphs stay rebuildable
+projections — plain files remain the durable contract.
+
+## Key features
+
+- **Evidence-first ingestion** — bounded, sandboxed normalization of Markdown,
+  text, CSV, PDF, Office, diagrams, and media into anchored, quality-labeled
+  evidence units ([spec §12](docs/knowledge-development-lifecycle-specification.md))
+- **Claim-to-source provenance** — every assertion carries its source ID,
+  version hash, and locator; inferred claims are never dressed up as explicit
+  statements
+- **Governed lifecycle** — fifteen core stages across Define → Acquire →
+  Understand → Integrate → Govern, with review packets, receipts bound to exact
+  review hashes, and transactional publication
+- **Nine-role agent roster** — conductor, curator, source-analyst, integrator,
+  librarian, trust-reviewer, retrieval-agent, maintainer, governance-reviewer —
+  with runtime-enforced read/write capabilities, not prompt-text promises
+- **Federation** — mount multiple knowledge bases with explicit modes, locked
+  versions, and routing; retrieval rank never grants write authority
+- **Access-intersection answers** — a query result is allowed only when the
+  requester may see the concept *and* all evidence it discloses
+- **Deterministic governance** — sensors, audit trails, traceability, and a
+  release evaluation that runs with zero live model calls
+
+## Pick your harness
+
+| Harness | Install | Invoke |
+| --- | --- | --- |
+| **Claude Code** | `claude plugin install <repo>/distribution/claude-code` | `/kdlc:<operation>`, `kdlc:<role>` agents |
+| **Codex CLI** (≥ 0.145) | copy `distribution/codex/` conventions | `$kdlc` skill, `.codex/agents/<role>` |
+| **Kiro CLI** (≥ 2.6) | copy `distribution/kiro/.kiro/` into your project | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Kiro IDE** | copy `distribution/kiro-ide/.kiro/` into your project | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Any MCP client** | `distribution/mcp/desktop.json` (stdio) / `custom-app.json` (HTTP) | `kb_search`, `kb_fetch`, `proposal_create`, … |
+
+Adapters differ only in packaging: stage requirements, security policy, state
+transitions, and artifact contracts are identical everywhere (spec §25), and
+every distribution tree is generated from the authored core — CI fails on
+drift.
+
+## Quick start
+
+```bash
+npm ci && npm link     # exposes the `kdlc` CLI
+mkdir my-knowledge && cd my-knowledge
+kdlc init              # scaffold a governed project workspace
+kdlc ingest notes.md   # normalize a source into anchored evidence
+kdlc query "what do we know about tokens?"
+```
+
+The full walkthrough — install, ingest, review, publish, plugin and MCP
+setup — lives in **[docs/getting-started.md](docs/getting-started.md)** and is
+executed end-to-end by a test on every change.
+
+## Repository layout
+
+Schemas and profiles live under `core/`; stage, agent, sensor, tool,
+normalizer, and server sources live under `packages/`; generated harness
+output lives under `distribution/<harness>/`. The complete mapping from the
+specification's reference layout is recorded in
+[ADR-002](docs/decisions/0002-repository-layout-mapping.md).
+
+## Development status and governance
+
+- [Specification baseline](docs/specification-baseline.md) ([full spec](docs/knowledge-development-lifecycle-specification.md))
+- [MVP milestone](https://github.com/aithinkers/knowledge-dlc/milestone/1) and [issue backlog](https://github.com/aithinkers/knowledge-dlc/issues)
+- [Traceability index](docs/traceability.json)
+- [Agent development contract](AGENTS.md) — issue → plan → implementation → tests → independent review → release evidence
+- [Release-readiness gates](docs/release-readiness.md)
+- [Machine-readable pre-release conformance](distribution/release/conformance-statement.json) (status: not-ready)
+- [Recorded pre-release evaluation](distribution/release/evaluation-report.json) — zero live model calls
+- [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Support](SUPPORT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## Local governance checks
 
