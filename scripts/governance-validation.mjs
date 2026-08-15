@@ -4,6 +4,46 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
 
+export const protectedHarnessFiles = Object.freeze([
+  ".github/workflows/governance.yml",
+  ".github/workflows/candidate-tests.yml",
+  ".github/workflows/release-matrix.yml",
+  "scripts/governance-validation.mjs",
+  "scripts/verify-governance.mjs",
+  "scripts/release-matrix-definition.mjs",
+  "scripts/run-release-matrix-cell.mjs",
+  "scripts/verify-release-matrix.mjs",
+  "scripts/release-evaluation-boundary.mjs",
+  "scripts/run-release-evaluation.mjs",
+  "scripts/release-evidence-definition.mjs",
+  "scripts/release-evidence-validation.mjs",
+  "scripts/verify-release-evidence.mjs",
+  "scripts/verify-statistical-evidence.mjs",
+  "core/schemas/release/release-matrix-result.schema.json",
+  "core/schemas/release/conformance-statement.schema.json",
+  "core/schemas/release/evaluation-corpus.schema.json",
+  "core/schemas/release/evaluation-profile.schema.json",
+  "core/schemas/release/evaluation-report.schema.json",
+  "core/schemas/release/statistical-corpus.schema.json",
+  "core/schemas/release/statistical-manifest.schema.json",
+  "core/schemas/release/statistical-profile.schema.json",
+  "core/schemas/release/statistical-capture.schema.json",
+  "core/schemas/release/statistical-report.schema.json",
+  "distribution/release/evaluation-corpus.json",
+  "distribution/release/evaluation-profile.json",
+  "distribution/release/statistical/corpus.json",
+  "distribution/release/statistical/prompt-manifest.json",
+  "distribution/release/statistical/tool-manifest.json",
+  "distribution/release/statistical/model-manifest.json",
+  "distribution/release/statistical/profile.json",
+  "scripts/statistical-evidence-validation.mjs"
+]);
+export const protectedHarnessScripts = Object.freeze(["test", "check:governance", "test:governance", "test:release-evaluation", "check:release-evidence", "check:statistical-evidence"]);
+const reservedContexts = Object.freeze([
+  Object.freeze({ name: "Candidate tests", workflow: "candidate-tests.yml" }),
+  Object.freeze({ name: "Release matrix", workflow: "release-matrix.yml" })
+]);
+
 export async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
@@ -60,13 +100,17 @@ export async function validateEvidencePaths(traceability, repositoryRoot = proce
 export async function validateHarnessIntegrity(candidateRoot, trustedRoot) {
   if (!trustedRoot) return [];
   const failures = [];
-  const protectedFiles = [".github/workflows/candidate-tests.yml"];
-  for (const path of protectedFiles) {
+  for (const path of protectedHarnessFiles) {
     try {
-      const [candidate, trusted] = await Promise.all([
-        readFile(resolve(candidateRoot, path), "utf8"),
-        readFile(resolve(trustedRoot, path), "utf8")
-      ]);
+      let trusted;
+      try { trusted = await readFile(resolve(trustedRoot, path), "utf8"); }
+      catch (error) {
+        // A newly introduced gate is reviewed in its introducing PR. Once it
+        // exists in the trusted base, every later candidate must match it.
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+      const candidate = await readFile(resolve(candidateRoot, path), "utf8");
       if (candidate !== trusted) failures.push(`protected harness file differs from trusted base: ${path}`);
     } catch (error) {
       failures.push(`protected harness file cannot be compared: ${path}: ${error.message}`);
@@ -78,7 +122,7 @@ export async function validateHarnessIntegrity(candidateRoot, trustedRoot) {
       readJson(resolve(candidateRoot, "package.json")),
       readJson(resolve(trustedRoot, "package.json"))
     ]);
-    for (const script of ["test", "check:governance", "test:governance"]) {
+    for (const script of protectedHarnessScripts) {
       if (candidatePackage.scripts?.[script] !== trustedPackage.scripts?.[script]) {
         failures.push(`protected npm script differs from trusted base: ${script}`);
       }
@@ -90,10 +134,10 @@ export async function validateHarnessIntegrity(candidateRoot, trustedRoot) {
   try {
     const workflowDirectory = resolve(candidateRoot, ".github/workflows");
     for (const entry of await readdir(workflowDirectory, { withFileTypes: true })) {
-      if (!entry.isFile() || entry.name === "candidate-tests.yml") continue;
+      if (!entry.isFile()) continue;
       const content = await readFile(resolve(workflowDirectory, entry.name), "utf8");
-      if (/^\s*name:\s*(['"]?)Candidate tests\1\s*$/m.test(content)) {
-        failures.push(`reserved check name "Candidate tests" appears in another workflow: ${entry.name}`);
+      for (const reserved of reservedContexts) if (entry.name !== reserved.workflow && new RegExp(`^\\s*name:\\s*(['"]?)${reserved.name}\\1\\s*$`, "m").test(content)) {
+        failures.push(`reserved check name "${reserved.name}" appears in another workflow: ${entry.name}`);
       }
     }
   } catch (error) {

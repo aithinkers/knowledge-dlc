@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
-import { validateAgainstSchema, validateEvidencePaths, validateHarnessIntegrity } from "../../scripts/governance-validation.mjs";
+import { protectedHarnessFiles, protectedHarnessScripts, validateAgainstSchema, validateEvidencePaths, validateHarnessIntegrity } from "../../scripts/governance-validation.mjs";
 import { validateIssueBody, validatePullRequest } from "../../scripts/verify-pr-traceability.mjs";
 
 const traceabilityFixture = {
@@ -198,6 +198,71 @@ test("REQ-GOV-002 rejects no-op or duplicate candidate-test controls", async () 
     assert.ok(failures.includes("protected harness file differs from trusted base: .github/workflows/candidate-tests.yml"));
     assert.ok(failures.includes("protected npm script differs from trusted base: test"));
     assert.ok(failures.includes('reserved check name "Candidate tests" appears in another workflow: spoof.yml'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("REQ-GOV-002 permits an independently reviewed gate only while it is absent from the trusted base", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-harness-introduction-"));
+  const trusted = join(root, "trusted");
+  const candidate = join(root, "candidate");
+  try {
+    for (const directory of [trusted, candidate]) await mkdir(join(directory, ".github/workflows"), { recursive: true });
+    await writeFile(join(trusted, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\n");
+    await writeFile(join(candidate, ".github/workflows/candidate-tests.yml"), "name: Candidate tests\n");
+    for (const path of protectedHarnessFiles.filter((path) => path !== ".github/workflows/candidate-tests.yml")) {
+      await mkdir(dirname(join(candidate, path)), { recursive: true });
+      await writeFile(join(candidate, path), path === ".github/workflows/release-matrix.yml" ? "name: Release matrix\n" : `introduced ${path}\n`);
+    }
+    const scripts = Object.fromEntries(protectedHarnessScripts.map((script) => [script, `node ${script}`]));
+    await writeFile(join(trusted, "package.json"), JSON.stringify({ scripts }));
+    await writeFile(join(candidate, "package.json"), JSON.stringify({ scripts }));
+    assert.deepEqual(await validateHarnessIntegrity(candidate, trusted), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("REQ-GOV-002 protects the trusted release gate and rejects exact-context spoofing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-release-harness-"));
+  const trusted = join(root, "trusted");
+  const candidate = join(root, "candidate");
+  try {
+    for (const directory of [trusted, candidate]) {
+      for (const path of protectedHarnessFiles) {
+        await mkdir(dirname(join(directory, path)), { recursive: true });
+        const contents = path === ".github/workflows/candidate-tests.yml" ? "name: Candidate tests\n" : path === ".github/workflows/release-matrix.yml" ? "name: Release matrix\njobs:\n  aggregate:\n    name: Release matrix\n" : `trusted ${path}\n`;
+        await writeFile(join(directory, path), contents);
+      }
+    }
+    const scripts = Object.fromEntries(protectedHarnessScripts.map((script) => [script, `node ${script}`]));
+    await writeFile(join(trusted, "package.json"), JSON.stringify({ scripts }));
+    await writeFile(join(candidate, "package.json"), JSON.stringify({ scripts }));
+    assert.deepEqual(await validateHarnessIntegrity(candidate, trusted), []);
+
+    for (const path of [
+      ".github/workflows/release-matrix.yml",
+      "scripts/run-release-matrix-cell.mjs",
+      "scripts/verify-release-matrix.mjs",
+      "core/schemas/release/statistical-profile.schema.json",
+      "distribution/release/statistical/profile.json"
+    ]) await writeFile(join(candidate, path), `candidate substituted ${path}\n`);
+    const candidatePackage = JSON.parse(await readFile(join(candidate, "package.json"), "utf8"));
+    candidatePackage.scripts["check:statistical-evidence"] = "true";
+    await writeFile(join(candidate, "package.json"), JSON.stringify(candidatePackage));
+    await writeFile(join(candidate, ".github/workflows/spoof-release.yml"), "name: harmless\njobs:\n  pass:\n    name: Release matrix\n");
+
+    const failures = await validateHarnessIntegrity(candidate, trusted);
+    for (const path of [
+      ".github/workflows/release-matrix.yml",
+      "scripts/run-release-matrix-cell.mjs",
+      "scripts/verify-release-matrix.mjs",
+      "core/schemas/release/statistical-profile.schema.json",
+      "distribution/release/statistical/profile.json"
+    ]) assert.ok(failures.includes(`protected harness file differs from trusted base: ${path}`));
+    assert.ok(failures.includes("protected npm script differs from trusted base: check:statistical-evidence"));
+    assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-release.yml'));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
