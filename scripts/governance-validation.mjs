@@ -14,30 +14,18 @@ export const protectedHarnessFiles = Object.freeze([
   "scripts/release-matrix-definition.mjs",
   "scripts/run-release-matrix-cell.mjs",
   "scripts/verify-release-matrix.mjs",
-  "scripts/release-evaluation-boundary.mjs",
-  "scripts/run-release-evaluation.mjs",
-  "scripts/release-evidence-definition.mjs",
-  "scripts/release-evidence-validation.mjs",
-  "scripts/verify-release-evidence.mjs",
+  "scripts/statistical-evidence-validation.mjs",
   "scripts/verify-statistical-evidence.mjs",
+  "core/schemas/common.schema.json",
   "core/schemas/release/release-matrix-result.schema.json",
-  "core/schemas/release/conformance-statement.schema.json",
-  "core/schemas/release/evaluation-corpus.schema.json",
-  "core/schemas/release/evaluation-profile.schema.json",
-  "core/schemas/release/evaluation-report.schema.json",
   "core/schemas/release/statistical-corpus.schema.json",
   "core/schemas/release/statistical-manifest.schema.json",
   "core/schemas/release/statistical-profile.schema.json",
   "core/schemas/release/statistical-capture.schema.json",
   "core/schemas/release/statistical-report.schema.json",
-  "distribution/release/evaluation-corpus.json",
-  "distribution/release/evaluation-profile.json",
   "distribution/release/statistical/corpus.json",
   "distribution/release/statistical/prompt-manifest.json",
-  "distribution/release/statistical/tool-manifest.json",
-  "distribution/release/statistical/model-manifest.json",
-  "distribution/release/statistical/profile.json",
-  "scripts/statistical-evidence-validation.mjs"
+  "distribution/release/statistical/tool-manifest.json"
 ]);
 export const protectedHarnessScripts = Object.freeze(["test", "check:governance", "test:governance", "test:release-evaluation", "check:release-evidence", "check:statistical-evidence"]);
 const reservedContexts = Object.freeze([

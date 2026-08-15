@@ -68,12 +68,17 @@ jobs:
           path: matrix-results
       - name: Verify results with trusted code and locked dependencies
         shell: bash
+        env:
+          KDLC_PR_NUMBER: ${{ github.event.pull_request.number }}
+          KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if test -f trusted/scripts/verify-release-matrix.mjs; then
-            (cd trusted && node scripts/verify-release-matrix.mjs ../matrix-results)
+            (cd trusted && KDLC_CANDIDATE_ROOT=.. node scripts/verify-release-matrix.mjs ../matrix-results)
           else
             # One-time introduction path: the independently reviewed base does
             # not yet contain this verifier. After merge, this branch is dead.
+            test "$KDLC_PR_NUMBER" = 38
+            test "$KDLC_BASE_SHA" = fbdf6119c884484974c0b5075fcc60fc97454d5f
             npm ci --ignore-scripts
             node scripts/verify-release-matrix.mjs matrix-results
           fi

@@ -247,14 +247,18 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
       ".github/workflows/release-matrix.yml",
       "scripts/run-release-matrix-cell.mjs",
       "scripts/verify-release-matrix.mjs",
-      "core/schemas/release/statistical-profile.schema.json",
-      "distribution/release/statistical/profile.json"
+      "scripts/release-matrix-definition.mjs",
+      "core/schemas/release/release-matrix-result.schema.json"
     ]) await writeFile(join(candidate, path), `candidate substituted ${path}\n`);
     const candidatePackage = JSON.parse(await readFile(join(candidate, "package.json"), "utf8"));
     candidatePackage.scripts["check:statistical-evidence"] = "true";
     candidatePackage.dependencies.yaml = "npm:hostile-parser@1.0.0";
     await writeFile(join(candidate, "package.json"), JSON.stringify(candidatePackage));
     await writeFile(join(candidate, "package-lock.json"), "candidate dependency substitution\n");
+    await mkdir(join(trusted, "distribution/release/statistical"), { recursive: true });
+    await mkdir(join(candidate, "distribution/release/statistical"), { recursive: true });
+    await writeFile(join(trusted, "distribution/release/statistical/profile.json"), "trusted preregistration\n");
+    await writeFile(join(candidate, "distribution/release/statistical/profile.json"), "future provider capture update\n");
     const spoofWorkflows = {
       "spoof-release.yml": "name: harmless\njobs:\n  pass:\n    name: Release matrix\n",
       "spoof-expression.yml": 'name: harmless\njobs:\n  pass:\n    name: ${{ "Release matrix" }}\n',
@@ -269,11 +273,12 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
       ".github/workflows/release-matrix.yml",
       "scripts/run-release-matrix-cell.mjs",
       "scripts/verify-release-matrix.mjs",
-      "core/schemas/release/statistical-profile.schema.json",
-      "distribution/release/statistical/profile.json"
+      "scripts/release-matrix-definition.mjs",
+      "core/schemas/release/release-matrix-result.schema.json"
     ]) assert.ok(failures.includes(`protected harness file differs from trusted base: ${path}`));
     assert.ok(failures.includes("protected npm script differs from trusted base: check:statistical-evidence"));
     assert.ok(!failures.some((failure) => failure.includes("protected harness file differs from trusted base: package")));
+    assert.ok(!failures.some((failure) => failure.includes("distribution/release/statistical/profile.json")));
     assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-release.yml#pass'));
     assert.ok(failures.includes("dynamic job name is forbidden outside a protected workflow: spoof-expression.yml#pass"));
     assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-escaped.yml#pass'));

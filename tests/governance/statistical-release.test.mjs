@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -25,6 +26,22 @@ test("REL-001 preregisters exact 30-trial full-corpus statistical evidence witho
   const substituted = structuredClone(state.documents.profile); substituted.scorer.sha256 = `sha256:${"0".repeat(64)}`;
   await assert.rejects(validateScorerBinding(root, substituted), /exact-bind/);
   assert.deepEqual({ status: status.status, captured: status.captured_trials }, { status: "blocked", captured: 0 });
+});
+
+test("REL-001 trusted preregistration permits the frozen-model transition but rejects a substituted hash chain", async (context) => {
+  const candidate = await mkdtemp(resolve(tmpdir(), "kdlc-frozen-model-")); context.after(() => rm(candidate, { recursive: true, force: true }));
+  await cp(resolve(root, "core"), resolve(candidate, "core"), { recursive: true });
+  await cp(resolve(root, "distribution/release/statistical"), resolve(candidate, "distribution/release/statistical"), { recursive: true });
+  await mkdir(resolve(candidate, "scripts")); await cp(resolve(root, "scripts/statistical-evidence-validation.mjs"), resolve(candidate, "scripts/statistical-evidence-validation.mjs"));
+  const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json");
+  const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
+  const model = JSON.parse(await readFile(modelPath, "utf8"));
+  Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
+  const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes);
+  const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+  assert.equal((await loadPreregistration(candidate)).documents.model.status, "frozen");
+  profile.manifest_hashes.model = `sha256:${"0".repeat(64)}`; await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+  await assert.rejects(loadPreregistration(candidate), /exact-bind preregistered corpus\/manifests/);
 });
 
 test("REL-001 offline scorer derives declared Wilson bounds from all 30 complete trials", async () => {

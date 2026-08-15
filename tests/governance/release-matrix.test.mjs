@@ -26,8 +26,10 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.equal(trustedCheckout.with.path, "trusted");
   assert.ok(aggregatorSteps.some((step) => step.run === "npm ci --ignore-scripts --prefix trusted"));
   const trustedVerification = aggregatorSteps.find((step) => step.name === "Verify results with trusted code and locked dependencies").run;
-  assert.match(trustedVerification, /cd trusted && node scripts\/verify-release-matrix\.mjs \.\.\/matrix-results/);
+  assert.match(trustedVerification, /cd trusted && KDLC_CANDIDATE_ROOT=\.\. node scripts\/verify-release-matrix\.mjs \.\.\/matrix-results/);
   assert.match(trustedVerification, /if test -f trusted\/scripts\/verify-release-matrix\.mjs/);
+  assert.match(trustedVerification, /test "\$KDLC_PR_NUMBER" = 38/);
+  assert.match(trustedVerification, /test "\$KDLC_BASE_SHA" = fbdf6119c884484974c0b5075fcc60fc97454d5f/);
 });
 
 test("REL-001 release matrix aggregator rejects missing or substituted cells", async (context) => {
