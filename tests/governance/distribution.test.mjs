@@ -469,6 +469,8 @@ test("FEAT-006 generated Claude and Codex adapter fixtures execute the governed 
     { path: resolve(repository, "distribution/codex/run.mjs"), structured: true },
   ];
   const userArguments = ["absent; $(touch SHOULD_NOT_EXIST)"];
+  assert.match(await readFile(resolve(repository, "distribution/claude-code/commands/kdlc-query.md"), "utf8"), /\$ARGUMENTS/);
+  assert.match(await readFile(resolve(repository, "distribution/codex/SKILL.md"), "utf8"), /\$ARGUMENTS/);
   const envelopes = [];
   for (const fixture of fixtures) {
     const child = spawn(
@@ -511,6 +513,13 @@ test("FEAT-006 generated Claude and Codex adapter fixtures execute the governed 
   assert.deepEqual(httpEnvelope.result, envelopes[0].result);
   await new Promise((resolveClose) => http.close(resolveClose));
   await server.close();
+  const malformed = spawn(process.execPath, [fixtures[1].path, "query", "--output", "json", "--host-args-json", "{"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  let malformedError = ""; malformed.stderr.on("data", (chunk) => { malformedError += chunk; });
+  const [malformedCode] = await once(malformed, "exit");
+  assert.equal(malformedCode, EXIT.input);
+  const malformedEnvelope = JSON.parse(malformedError);
+  assert.equal(malformedEnvelope.error.code, "KDLC_INPUT_INVALID");
+  assert.doesNotMatch(malformedError, /at file:|stack/i);
 });
 
 test("FEAT-006 served HTTP maps principals and scopes server-side before disclosure", async (t) => {
@@ -817,6 +826,11 @@ test("FEAT-006 local CLI bootstrap is init-only and remote principals cannot sel
   assert.equal((await identityServer.engine(evilIdentity).envelope("status")).error.code, "KDLC_POLICY_DENIED");
   await identityServer.close();
   const defaultRemoteRoot = await temporary(t);
+  const defaultLocalRoot = await temporary(t);
+  const defaultLocal = new McpProjectServer({ root: defaultLocalRoot, projectId: "local.default" });
+  const localInit = await defaultLocal.request({ jsonrpc: "2.0", id: 98, method: "tools/call", params: { name: "project_init", arguments: { project_id: "local.default" } } });
+  assert.equal(localInit.result.structuredContent.ok, true);
+  await defaultLocal.close();
   const defaultServer = new McpProjectServer({ root: defaultRemoteRoot, projectId: "remote.default", principal: { actor: "human:remote", principal_mode: "served", issuer: "https://issuer.invalid", subject: "remote", scopes: ["mutate"] } });
   const remoteInit = await defaultServer.request({ jsonrpc: "2.0", id: 99, method: "tools/call", params: { name: "project_init", arguments: { project_id: "remote.default" } } });
   assert.equal(remoteInit.result.structuredContent.error.code, "KDLC_POLICY_DENIED");

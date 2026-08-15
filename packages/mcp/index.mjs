@@ -142,6 +142,7 @@ export class McpProjectServer {
   } = {}) {
     this.root = root;
     this.projectId = projectId;
+    this.localBootstrap = principal === undefined && engineFactory === createLocalProjectEngine;
     this.principal = structuredClone(principal ?? {
       actor: engineFactory === createLocalProjectEngine ? localOwnerActor() : "process:local",
       scopes: ["read", "mutate", "review", "publish"],
@@ -159,8 +160,10 @@ export class McpProjectServer {
       os_username: principal.os_username ?? null,
       scopes: [...new Set(principal.scopes)].sort(),
     });
-    if (!this.engines.has(key))
-      this.engines.set(key, this.engineFactory({ root: this.root, principal }));
+    if (!this.engines.has(key)) {
+      const options = this.localBootstrap && principal === this.principal ? { root: this.root } : { root: this.root, principal };
+      this.engines.set(key, this.engineFactory(options));
+    }
     return this.engines.get(key);
   }
   async close() {

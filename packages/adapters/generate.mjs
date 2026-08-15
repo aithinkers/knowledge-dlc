@@ -9,14 +9,32 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const commandLines = definition.cli_commands
   .map((command) => `- /kdlc:${command} → \`kdlc ${command} --output json\``)
   .join("\n");
+const adapterRunner = `#!/usr/bin/env node
+const marker = process.argv.indexOf("--host-args-json");
+let hostError = null;
+if (marker !== -1) {
+  let args;
+  try { args = JSON.parse(process.argv[marker + 1]); } catch { hostError = "Host arguments must be a JSON array"; }
+  if (!hostError && (!Array.isArray(args) || args.some((value) => typeof value !== "string"))) hostError = "Host arguments must be a JSON string array";
+  if (!hostError) process.argv.splice(marker, 2, ...args);
+}
+if (hostError) {
+  const { KdlcEngine, renderEnvelope, EXIT } = await import("../../packages/cli/index.mjs");
+  const operation = process.argv[2] ?? "adapter";
+  const envelope = await new KdlcEngine().envelope(operation, {});
+  envelope.ok = false; envelope.result = null; envelope.error = { code: "KDLC_INPUT_INVALID", message: hostError, class: EXIT.input, details: {} };
+  const output = process.argv.includes("--output") && process.argv[process.argv.indexOf("--output") + 1] === "json" ? "json" : "text";
+  process.stderr.write(renderEnvelope(envelope, output)); process.exitCode = EXIT.input;
+} else await import("../../packages/cli/bin.mjs");
+`;
 const generated = new Map([
   [
     "distribution/claude-code/run.mjs",
-    `#!/usr/bin/env node\nconst marker = process.argv.indexOf("--host-args-json");\nif (marker !== -1) {\n  let args;\n  try { args = JSON.parse(process.argv[marker + 1]); } catch { throw Object.assign(new Error("Host arguments must be a JSON array"), { code: "KDLC_INPUT_INVALID" }); }\n  if (!Array.isArray(args) || args.some((value) => typeof value !== "string")) throw Object.assign(new Error("Host arguments must be a JSON string array"), { code: "KDLC_INPUT_INVALID" });\n  process.argv.splice(marker, 2, ...args);\n}\nawait import("../../packages/cli/bin.mjs");\n`,
+    adapterRunner,
   ],
   [
     "distribution/codex/run.mjs",
-    `#!/usr/bin/env node\nconst marker = process.argv.indexOf("--host-args-json");\nif (marker !== -1) {\n  let args;\n  try { args = JSON.parse(process.argv[marker + 1]); } catch { throw Object.assign(new Error("Host arguments must be a JSON array"), { code: "KDLC_INPUT_INVALID" }); }\n  if (!Array.isArray(args) || args.some((value) => typeof value !== "string")) throw Object.assign(new Error("Host arguments must be a JSON string array"), { code: "KDLC_INPUT_INVALID" });\n  process.argv.splice(marker, 2, ...args);\n}\nawait import("../../packages/cli/bin.mjs");\n`,
+    adapterRunner,
   ],
   [
     "distribution/claude-code/.claude-plugin/plugin.json",
@@ -28,7 +46,7 @@ const generated = new Map([
   ],
   [
     "distribution/codex/SKILL.md",
-    `---\nname: kdlc\ndescription: Operate a K-DLC project through its governed CLI engine.\n---\n\n# K-DLC\n\nInvoke [\"node\", \"distribution/codex/run.mjs\", operation, \"--output\", \"json\", \"--host-args-json\", {{host.arguments_json}}] directly without a shell, binding the placeholder to JSON.stringify(userArgumentVector) as one argv element. Do not bypass review, routing, or publication policy. Supported operations: ${definition.cli_commands.join(", ")}.\n`,
+    `---\nname: kdlc\ndescription: Operate a K-DLC project through its governed CLI engine.\nargument-hint: JSON string array\n---\n\n# K-DLC\n\nThe native host binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/codex/run.mjs\", operation, \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Do not bypass review, routing, or publication policy. Supported operations: ${definition.cli_commands.join(", ")}.\n`,
   ],
   [
     "distribution/mcp/desktop.json",
@@ -46,7 +64,7 @@ const generated = new Map([
 for (const command of definition.cli_commands)
   generated.set(
     `distribution/claude-code/commands/kdlc-${command}.md`,
-    `---\ndescription: Run the governed K-DLC ${command} operation\nargument-hint: JSON string array\n---\n\nInvoke the argument vector [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", {{host.arguments_json}}] directly without a shell. The host MUST bind \`{{host.arguments_json}}\` to JSON.stringify(userArgumentVector) as one argv element. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
+    `---\ndescription: Run the governed K-DLC ${command} operation\nargument-hint: JSON string array\n---\n\nThe native Claude Code binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
   );
 let drift = false;
 for (const [relative, content] of generated) {
