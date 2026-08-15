@@ -40,10 +40,11 @@ function storeDecision(store, { receiptPath, receipt, decisionPath, decision, ex
   const updated = new Map(artifacts); updated.set(receiptPath, structuredClone(receipt)); updated.set(decisionPath, structuredClone(decision)); memoryStoreStates.set(store, updated);
   return { status: "stored" };
 }
-function storeFreshness(store, { path, value, expectedValueHash }) {
-  const artifacts = memoryState(store); const current = artifacts.get(path)?.value_hash ?? null;
-  if (current !== expectedValueHash) return { status: "conflict", current };
-  artifacts.set(path, structuredClone(value)); return { status: "stored" };
+function storeFreshness(store, { authorizationPath, authorization, decisionPath, decision, expectedAuthorizationHash }) {
+  const artifacts = memoryState(store); const current = artifacts.get(decisionPath)?.authorization_hash ?? null;
+  if (current !== expectedAuthorizationHash) return { status: "conflict", current };
+  const updated = new Map(artifacts); updated.set(authorizationPath, structuredClone(authorization)); updated.set(decisionPath, structuredClone(decision)); memoryStoreStates.set(store, updated);
+  return { status: "stored" };
 }
 
 export class GovernedAgentWorkflows {
@@ -169,7 +170,7 @@ export class GovernedAgentWorkflows {
     return Object.freeze({ receipt, decision: structuredClone(activeDecision), path });
   }
 
-  async authorizeFreshness({ workflowId, proposalId, concept, expectedValueHash = null }) {
+  async authorizeFreshness({ workflowId, proposalId, concept, expectedAuthorizationHash = null }) {
     const { role, reviewer } = resolveAuthenticatedReviewSession(this.#session);
     if (role !== "governance-reviewer") throw new GovernanceError("KDLC_FRESHNESS_AUTHORITY_DENIED", "Only an authenticated governance reviewer may authorize separate freshness");
     const packet = await this.#get(role, `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`);
@@ -179,9 +180,13 @@ export class GovernedAgentWorkflows {
     const validation = this.#validator.validate("freshnessAuthorization", authorization);
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness authorization failed schema validation", { errors: validation.errors });
     const path = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-authorization.json`;
-    const stored = storeFreshness(this.#store, { path, value: authorization, expectedValueHash });
-    if (stored.status === "conflict") throw new GovernanceError("KDLC_FRESHNESS_CONFLICT", "Freshness authorization changed before update", { expected: expectedValueHash, current: stored.current });
-    return Object.freeze({ authorization: structuredClone(authorization), path });
+    const decisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-decision.json`;
+    const freshnessDecision = { api_version: "kdlc.dev/freshness-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), authorization_hash: artifactHash(authorization), value_hash: authorization.value_hash, policy: structuredClone(policy), authorized_by: reviewer.actor, activated_at: this.#clock.now() };
+    const decisionValidation = this.#validator.validate("freshnessDecision", freshnessDecision);
+    if (!decisionValidation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness decision failed schema validation", { errors: decisionValidation.errors });
+    const stored = storeFreshness(this.#store, { authorizationPath: path, authorization, decisionPath, decision: freshnessDecision, expectedAuthorizationHash });
+    if (stored.status === "conflict") throw new GovernanceError("KDLC_FRESHNESS_CONFLICT", "Freshness authorization changed before update", { expected: expectedAuthorizationHash, current: stored.current });
+    return Object.freeze({ authorization: structuredClone(authorization), decision: structuredClone(freshnessDecision), path });
   }
 
   async preparePublication({ workflowId, proposalId, receiptId, current }) {
@@ -194,7 +199,9 @@ export class GovernedAgentWorkflows {
     const decisionState = await this.#store.has(`workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`) ? await this.#get("conductor", `workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`) : null;
     const freshnessPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-authorization.json`;
     const freshnessAuthorization = await this.#store.has(freshnessPath) ? await this.#get("conductor", freshnessPath) : null;
-    const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, current, validator: this.#validator, now: this.#clock.now() });
+    const freshnessDecisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-decision.json`;
+    const freshnessDecision = await this.#store.has(freshnessDecisionPath) ? await this.#get("conductor", freshnessDecisionPath) : null;
+    const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, current, validator: this.#validator, now: this.#clock.now() });
     if (!assessment.allowed) throw new GovernanceError("KDLC_PUBLICATION_DENIED", "Publication policy gates failed", { failures: assessment.failures });
     const intent = {
       api_version: "kdlc.dev/publication-intent/v1alpha1",

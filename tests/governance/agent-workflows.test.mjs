@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -90,10 +90,18 @@ test("FEAT-004 role and stage descriptors enforce runtime path capabilities", as
   const outsideRoot = await mkdtemp(resolve(tmpdir(), "kdlc-outside-"));
   t.after(async () => { await rm(repositoryRoot, { recursive: true, force: true }); await rm(outsideRoot, { recursive: true, force: true }); });
   await mkdir(resolve(repositoryRoot, "workflow/runs/wf_ingest/state"), { recursive: true });
-  await writeFile(resolve(outsideRoot, "secret.json"), '{"secret":true}\n');
+  await writeFile(resolve(repositoryRoot, "workflow/runs/wf_ingest/state/safe.json"), '{"safe":true}\n');
+  await writeFile(resolve(outsideRoot, "safe.json"), '{"outside":true}\n');
   await symlink(outsideRoot, resolve(repositoryRoot, "workflow/runs/wf_ingest/state/link"));
-  const fileRuntime = new MediatedAgentRuntime({ capabilities, store: new RepositoryFileStore(repositoryRoot) });
-  await assert.rejects(() => fileRuntime.read("conductor", "workflow/runs/wf_ingest/state/link/secret.json"), (error) => error.code === "KDLC_PATH_SYMLINK");
+  await assert.rejects(() => RepositoryFileStore.create(repositoryRoot, ["workflow/runs/wf_ingest/state/link/safe.json"]), (error) => error.code === "KDLC_PATH_SYMLINK");
+  const pinnedStore = await RepositoryFileStore.create(repositoryRoot, [{ path: "workflow/runs/wf_ingest/state/safe.json", write: true }]); t.after(() => pinnedStore.close());
+  const fileRuntime = new MediatedAgentRuntime({ capabilities, store: pinnedStore });
+  await rename(resolve(repositoryRoot, "workflow/runs/wf_ingest/state"), resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original"));
+  await symlink(outsideRoot, resolve(repositoryRoot, "workflow/runs/wf_ingest/state"));
+  assert.deepEqual(await fileRuntime.read("conductor", "workflow/runs/wf_ingest/state/safe.json"), { safe: true });
+  await fileRuntime.write("conductor", "workflow/runs/wf_ingest/state/safe.json", { updated: true });
+  assert.deepEqual(JSON.parse(await readFile(resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original/safe.json"), "utf8")), { updated: true });
+  assert.deepEqual(JSON.parse(await readFile(resolve(outsideRoot, "safe.json"), "utf8")), { outside: true });
 
   for (const name of (await readdir(resolve(root, "packages/workflows/stages"))).sort()) {
     const stage = JSON.parse(await readFile(resolve(root, "packages/workflows/stages", name), "utf8"));
@@ -289,6 +297,11 @@ test("FEAT-004 review packets require exact claims, applicable governance, dynam
   const governanceHarness = await GovernedAgentWorkflows.create({ validator, store, clock, session: principals.establishReviewSession("governor", "governance-reviewer"), reviewRequirements: requirements });
   const { authorization } = await governanceHarness.authorizeFreshness({ workflowId: "wf_ingest", proposalId: "pr_alpha", concept: current.concept });
   assert.equal(authorization.authorized_by, "human:governor");
+  await assert.rejects(() => governanceHarness.authorizeFreshness({ workflowId: "wf_ingest", proposalId: "pr_alpha", concept: current.concept }), (error) => error.code === "KDLC_FRESHNESS_CONFLICT");
+  const freshnessPath = "workflow/runs/wf_ingest/reviews/pr_alpha/freshness-authorization.json";
+  store.substitute(freshnessPath, { ...authorization, authorized_by: "human:attacker" });
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("freshness-authorization-invalid"));
+  store.clearSubstitution(freshnessPath);
   await harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current });
   current.concept.frontmatter.risk = "low";
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.details.failures.includes("review-content-drift"));

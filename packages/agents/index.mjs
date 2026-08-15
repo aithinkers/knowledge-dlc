@@ -1,4 +1,5 @@
-import { lstat, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +22,7 @@ export const AGENT_WORKFLOW_SCHEMA_PATHS = Object.freeze({
   governedReviewPacket: "core/schemas/artifacts/governed-review-packet.schema.json",
   reviewDecision: "core/schemas/artifacts/review-decision.schema.json",
   freshnessAuthorization: "core/schemas/artifacts/freshness-authorization.schema.json",
+  freshnessDecision: "core/schemas/artifacts/freshness-decision.schema.json",
   reviewContext: "core/schemas/artifacts/review-context.schema.json"
 });
 
@@ -145,38 +147,59 @@ export class MediatedAgentRuntime {
 }
 
 export class RepositoryFileStore {
-  #root;
+  #handles;
 
-  constructor(root) {
-    if (typeof root !== "string" || root.length === 0) throw new TypeError("Repository file store requires a root");
-    this.#root = root;
+  constructor(token, handles) {
+    if (token !== repositoryStoreToken) throw new TypeError("Use RepositoryFileStore.create with an explicit path allowlist");
+    this.#handles = handles;
   }
 
-  async #target(path) {
-    const segments = safePath(path);
-    const root = await realpath(this.#root);
-    let current = root;
-    for (let index = 0; index < segments.length; index += 1) {
-      current = resolve(current, segments[index]);
-      try {
-        const stat = await lstat(current);
-        if (stat.isSymbolicLink()) throw new AgentPolicyError("KDLC_PATH_SYMLINK", `Capability path crosses a symbolic link: ${path}`);
-        current = await realpath(current);
-      } catch (error) {
-        if (error instanceof AgentPolicyError) throw error;
-        if (error?.code !== "ENOENT") throw error;
-        current = resolve(current, ...segments.slice(index + 1));
-        break;
+  static async create(root, paths) {
+    if (typeof root !== "string" || root.length === 0 || !Array.isArray(paths) || !paths.length) throw new TypeError("Repository file store requires a root and explicit non-empty path allowlist");
+    const canonicalRoot = await realpath(root); const handles = new Map();
+    try {
+      for (const declaration of paths) {
+        const path = typeof declaration === "string" ? declaration : declaration?.path; const writable = declaration?.write === true;
+        const segments = safePath(path); let current = canonicalRoot;
+        for (const segment of segments) {
+          current = resolve(current, segment);
+          const metadata = await lstat(current);
+          if (metadata.isSymbolicLink()) throw new AgentPolicyError("KDLC_PATH_SYMLINK", `Capability path crosses a symbolic link: ${path}`);
+          const canonical = await realpath(current);
+          if (!canonical.startsWith(`${canonicalRoot}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
+          current = canonical;
+        }
+        const handle = await open(current, (writable ? constants.O_RDWR : constants.O_RDONLY) | constants.O_NOFOLLOW);
+        const opened = await handle.stat(); const resolved = await lstat(current);
+        if (!opened.isFile() || opened.dev !== resolved.dev || opened.ino !== resolved.ino) { await handle.close(); throw new AgentPolicyError("KDLC_PATH_RACE", `Capability target changed while it was opened: ${path}`); }
+        handles.set(path, { handle, writable });
       }
-      if (current !== root && !current.startsWith(`${root}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
+      return new RepositoryFileStore(repositoryStoreToken, handles);
+    } catch (error) {
+      await Promise.all([...handles.values()].map(({ handle }) => handle.close().catch(() => {})));
+      throw error;
     }
-    if (current !== root && !current.startsWith(`${root}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
-    return current;
   }
 
-  async get(path) { return JSON.parse(await readFile(await this.#target(path), "utf8")); }
-  async put(path, value) { await writeFile(await this.#target(path), `${canonicalJson(value)}\n`, { encoding: "utf8", flag: "w" }); }
+  #handle(path) {
+    const entry = this.#handles.get(path);
+    if (!entry) throw new AgentPolicyError("KDLC_PATH_UNDECLARED", `Repository capability path was not declared before execution: ${path}`);
+    return entry;
+  }
+
+  async get(path) {
+    const { handle } = this.#handle(path); const metadata = await handle.stat(); const bytes = Buffer.alloc(metadata.size);
+    await handle.read(bytes, 0, bytes.length, 0); return JSON.parse(bytes.toString("utf8"));
+  }
+  async put(path, value) {
+    const { handle, writable } = this.#handle(path); if (!writable) throw new AgentPolicyError("KDLC_PATH_READ_ONLY", `Repository capability path is read-only: ${path}`);
+    const bytes = Buffer.from(`${canonicalJson(value)}\n`);
+    await handle.truncate(0); await handle.write(bytes, 0, bytes.length, 0); await handle.sync();
+  }
+  async close() { await Promise.all([...this.#handles.values()].map(({ handle }) => handle.close())); this.#handles.clear(); }
 }
+
+const repositoryStoreToken = Object.freeze({});
 
 export class RecordedModelRuntime {
   #validator;

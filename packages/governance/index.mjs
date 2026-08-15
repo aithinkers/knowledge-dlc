@@ -115,7 +115,7 @@ function stableConceptFailures(concept, now) {
   return failures;
 }
 
-export function assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, current, validator, now = new Date().toISOString() }) {
+export function assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, current, validator, now = new Date().toISOString() }) {
   requireValid(validator, "conceptProposal", proposal);
   requireValid(validator, "governedReviewPacket", packet);
   if (receipt) requireValid(validator, "reviewReceipt", receipt);
@@ -146,7 +146,9 @@ export function assessPublication({ proposal, packet, receipt, decisionState, fr
   if (packet.governance_requirements.freshness.mode === "separate") {
     const policy = packet.resolved.policies.find(({ id }) => id === packet.governance_requirements.freshness.policy_id);
     const validation = freshnessAuthorization ? validator.validate("freshnessAuthorization", freshnessAuthorization) : { valid: false };
-    if (!validation.valid || freshnessAuthorization.subject !== proposal.target.subject || freshnessAuthorization.value_hash !== artifactHash(current.concept?.frontmatter?.stale_after) || freshnessAuthorization.packet_hash !== artifactHash(packet) || !same(freshnessAuthorization.policy, policy)) failures.push("freshness-authorization-invalid");
+    const decisionValidation = freshnessDecision ? validator.validate("freshnessDecision", freshnessDecision) : { valid: false };
+    if (!validation.valid || !decisionValidation.valid || freshnessAuthorization.subject !== proposal.target.subject || freshnessAuthorization.value_hash !== artifactHash(current.concept?.frontmatter?.stale_after) || freshnessAuthorization.packet_hash !== artifactHash(packet) || !same(freshnessAuthorization.policy, policy)
+      || freshnessDecision.proposal_id !== proposal.id || freshnessDecision.packet_hash !== artifactHash(packet) || freshnessDecision.authorization_hash !== artifactHash(freshnessAuthorization) || freshnessDecision.value_hash !== freshnessAuthorization.value_hash || !same(freshnessDecision.policy, policy) || freshnessDecision.authorized_by !== freshnessAuthorization.authorized_by) failures.push("freshness-authorization-invalid");
   }
   if (reviewHash(current.concept, packet.review.fields) !== packet.review.hash) failures.push("review-content-drift");
   if (reviewHash(packet.concept.after, packet.review.fields) !== packet.review.hash) failures.push("packet-review-hash-invalid");
