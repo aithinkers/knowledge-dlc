@@ -5,7 +5,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, readTrustedFile } from "./supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, npmCommandInvocation, readTrustedFile } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
 const root = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDATE_ROOT) : resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -64,10 +64,9 @@ if (packageDocument.license !== "MIT") failures.push("root package license must 
 if (JSON.stringify(packageDocument.files) !== JSON.stringify(policy.package_files)) failures.push("package files allowlist drifted from supply-chain policy");
 if (lock.name !== packageDocument.name || lock.version !== packageDocument.version || lock.packages?.[""]?.version !== packageDocument.version) failures.push("package-lock root identity drift");
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 let emittedFiles = [];
 try {
-  const { stdout } = await execute(npm, ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
+  const invocation = npmCommandInvocation(); const { stdout } = await execute(invocation.command, [...invocation.prefix, "pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
   const result = JSON.parse(stdout);
   if (!Array.isArray(result) || result.length !== 1 || !Array.isArray(result[0].files)) throw new Error("unexpected npm pack result");
   emittedFiles = result[0].files.map(({ path }) => normalizeNpmPackPath(path)).sort();

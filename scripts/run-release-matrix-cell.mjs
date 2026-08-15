@@ -7,14 +7,13 @@ import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { releaseMatrixCells, releaseMatrixDifferences } from "./release-matrix-definition.mjs";
-import { normalizeNpmPackPath } from "./supply-chain-validation.mjs";
+import { normalizeNpmPackPath, npmCommandInvocation } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile); const [cellFlag, cell, outputFlag, output] = process.argv.slice(2);
 if (cellFlag !== "--cell" || !cell || outputFlag !== "--output" || !output) throw new Error("usage: node scripts/run-release-matrix-cell.mjs --cell <cell> --output <result.json>");
 const declared = releaseMatrixCells.find((item) => item.cell === cell); if (!declared) throw new Error("undeclared release matrix cell");
-const nodeVersion = process.versions.node; const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const npmOptions = process.platform === "win32" ? { shell: true } : {};
-const { stdout: npmVersionOutput } = await execute(npmCommand, ["--version"], npmOptions); const npmVersion = npmVersionOutput.trim();
+const nodeVersion = process.versions.node; const npmInvocation = npmCommandInvocation(); const npmCommand = npmInvocation.command;
+const npmArgs = (args) => [...npmInvocation.prefix, ...args]; const { stdout: npmVersionOutput } = await execute(npmCommand, npmArgs(["--version"])); const npmVersion = npmVersionOutput.trim();
 if (process.platform !== declared.os || nodeVersion !== declared.node || npmVersion !== "11.5.1") throw new Error(`runtime mismatch for ${cell}: ${process.platform}/${nodeVersion}/npm-${npmVersion}`);
 const root = process.cwd(); const temporary = await mkdtemp(resolve(tmpdir(), "kdlc-matrix-")); const commands = [];
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -25,22 +24,22 @@ async function makeRemovable(path) {
 }
 const run = async (id, command, args, options = {}) => {
   await new Promise((accept, reject) => {
-    const child = spawn(command, args, { cwd: root, stdio: "inherit", ...(process.platform === "win32" && command === npmCommand ? { shell: true } : {}), ...options });
+    const child = spawn(command, args, { cwd: root, stdio: "inherit", ...options });
     child.once("error", reject); child.once("exit", (code, signal) => code === 0 ? accept() : reject(new Error(`${id} failed with ${signal ?? `exit ${code}`}`)));
   });
   commands.push({ id, status: "passed" });
 };
 try {
-  await run("full", npmCommand, ["test"]);
-  await run("offline", npmCommand, ["run", "test:release-evaluation"]);
-  await run("release", npmCommand, ["run", "check:release-evidence"], { env: { ...process.env, KDLC_RELEASE_MATRIX_PRECHECK: "1" } });
-  await run("statistical", npmCommand, ["run", "check:statistical-evidence"]);
+  await run("full", npmCommand, npmArgs(["test"]));
+  await run("offline", npmCommand, npmArgs(["run", "test:release-evaluation"]));
+  await run("release", npmCommand, npmArgs(["run", "check:release-evidence"]), { env: { ...process.env, KDLC_RELEASE_MATRIX_PRECHECK: "1" } });
+  await run("statistical", npmCommand, npmArgs(["run", "check:statistical-evidence"]));
   await run("clean-rebuild", process.execPath, ["--test", "--test-name-pattern", "^REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes$", "tests/governance/release-evidence.test.mjs"]);
-  await run("supply-chain", npmCommand, ["run", "check:supply-chain"]);
+  await run("supply-chain", npmCommand, npmArgs(["run", "check:supply-chain"]));
   const packDirectories = [resolve(temporary, "pack-one"), resolve(temporary, "pack-two")]; await Promise.all(packDirectories.map((path) => mkdir(path)));
   const builds = [];
   for (const destination of packDirectories) {
-    const { stdout } = await execute(npmCommand, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: root, maxBuffer: 16 * 1024 * 1024, ...npmOptions });
+    const { stdout } = await execute(npmCommand, npmArgs(["pack", "--json", "--ignore-scripts", "--pack-destination", destination]), { cwd: root, maxBuffer: 16 * 1024 * 1024 });
     const parsed = JSON.parse(stdout); if (!Array.isArray(parsed) || parsed.length !== 1 || !parsed[0].filename || !Array.isArray(parsed[0].files)) throw new Error("npm pack did not return one artifact and manifest");
     const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path: normalizeNpmPackPath(path), size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en"));
     const artifact = await readFile(resolve(destination, parsed[0].filename)); builds.push({ filename: parsed[0].filename, sha256: digest(artifact), manifest_sha256: digest(JSON.stringify(manifest)), file_count: manifest.length });
@@ -48,7 +47,7 @@ try {
   if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("two clean package builds are not byte-identical");
   commands.push({ id: "pack", status: "passed" });
   const consumer = resolve(temporary, "consumer"); await import("node:fs/promises").then(({ mkdir }) => mkdir(consumer)); await writeFile(resolve(consumer, "package.json"), '{"name":"kdlc-release-smoke","private":true,"type":"module"}\n');
-  await execute(npmCommand, ["install", "--ignore-scripts", "--no-audit", "--no-fund", resolve(packDirectories[0], builds[0].filename)], { cwd: consumer, maxBuffer: 32 * 1024 * 1024, ...npmOptions });
+  await execute(npmCommand, npmArgs(["install", "--ignore-scripts", "--no-audit", "--no-fund", resolve(packDirectories[0], builds[0].filename)]), { cwd: consumer, maxBuffer: 32 * 1024 * 1024 });
   const bin = resolve(consumer, "node_modules", "knowledge-dlc", "packages", "cli", "bin.mjs");
   await execute(process.execPath, [bin, "init", "--output", "json"], { cwd: consumer, maxBuffer: 16 * 1024 * 1024 });
   await execute(process.execPath, [bin, "doctor", "--output", "json"], { cwd: consumer, maxBuffer: 16 * 1024 * 1024 }); commands.push({ id: "cli", status: "passed" });

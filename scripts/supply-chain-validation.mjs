@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 
 function inside(root, path) {
   const rel = relative(root, path);
@@ -47,6 +47,13 @@ export async function readTrustedFile(root, relativePath, { afterOpen } = {}) {
 export function normalizeNpmPackPath(path) {
   if (typeof path !== "string" || !path) throw new Error("npm pack path is invalid");
   return path.replaceAll("\\", "/");
+}
+
+export function npmCommandInvocation({ platform = process.platform, environment = process.env, node = process.execPath } = {}) {
+  if (platform !== "win32") return { command: "npm", prefix: [] };
+  const cli = environment.npm_execpath;
+  if (typeof cli !== "string" || !win32.isAbsolute(cli) || !/[\\/]npm-cli\.js$/iu.test(cli)) throw new Error("trusted Windows npm CLI path is unavailable");
+  return { command: node, prefix: [cli] };
 }
 
 export function exactPackageManifestFailures(actual, expected) {
