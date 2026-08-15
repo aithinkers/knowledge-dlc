@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/agents/role-descriptor.schema.json",
+  "title": "K-DLC role capability descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "role", "actor", "review_only", "permissions"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/agent-role/v1alpha1"},
+    "role": {"enum": ["conductor", "source-analyst", "integrator", "librarian", "trust-reviewer", "governance-reviewer"]},
+    "actor": {"type": "string", "pattern": "^kdlc-[a-z-]+/[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "review_only": {"type": "boolean"},
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read", "write", "tools"],
+      "properties": {
+        "read": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "write": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "tools": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9.-]+$"}}
+      }
+    }
+  }
+}

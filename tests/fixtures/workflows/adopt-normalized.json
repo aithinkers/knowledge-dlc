@@ -1,0 +1,9 @@
+{
+  "api_version": "kdlc.dev/recorded-normalized-fixture/v1alpha1",
+  "source_id": "src_beta",
+  "source_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "media_type": "text/markdown",
+  "units": [
+    {"locator": {"heading": "Ownership"}, "text": "The service is maintained by the platform team."}
+  ]
+}

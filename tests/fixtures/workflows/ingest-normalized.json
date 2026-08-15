@@ -1,0 +1,9 @@
+{
+  "api_version": "kdlc.dev/recorded-normalized-fixture/v1alpha1",
+  "source_id": "src_alpha",
+  "source_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "media_type": "text/markdown",
+  "units": [
+    {"locator": {"heading": "Token lifetime"}, "text": "Production API tokens expire after 60 minutes."}
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/freshness-decision.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "proposal_id", "packet_hash", "authorization_hash", "value_hash", "policy", "authorized_by", "activated_at", "trust_proof"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/freshness-decision/v1alpha1"},
+    "proposal_id": {"type": "string", "pattern": "^pr_[a-z0-9]+$"},
+    "packet_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "authorization_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "value_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "policy": {"$ref": "../common.schema.json#/$defs/versionedHash"},
+    "authorized_by": {"$ref": "../common.schema.json#/$defs/actor"},
+    "activated_at": {"$ref": "../common.schema.json#/$defs/dateTime"},
+    "trust_proof": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm", "key_id", "domain", "principal", "mac"],
+      "properties": {
+        "algorithm": {"const": "hmac-sha256"}, "key_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+        "domain": {"const": "kdlc.runtime.freshness-decision/v1"}, "mac": {"$ref": "../common.schema.json#/$defs/digest"},
+        "principal": {"type": "object", "additionalProperties": false, "required": ["actor", "principal_mode"], "properties": {"actor": {"$ref": "../common.schema.json#/$defs/actor"}, "principal_mode": {"enum": ["local", "served", "automation"]}, "issuer": {"$ref": "../common.schema.json#/$defs/resource"}}}
+      }
+    }
+  }
+}

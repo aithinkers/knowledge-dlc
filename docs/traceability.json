@@ -78,8 +78,22 @@
       "title": "Governed agent workflows",
       "issue": 6,
       "specification_sections": ["13", "14", "15", "16", "17", "21", "22", "23", "34", "35"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "verified",
+      "evidence": {
+        "implementation": [
+          "core/schemas/agents/recorded-model-output.schema.json",
+          "core/schemas/agents/recorded-normalized-fixture.schema.json",
+          "core/schemas/agents/role-descriptor.schema.json",
+          "core/schemas/artifacts/concept-proposal.schema.json",
+          "core/schemas/artifacts/publication-intent.schema.json",
+          "packages/agents/index.mjs",
+          "packages/workflows/index.mjs",
+          "packages/governance/index.mjs",
+          "packages/workflows/stages/review-proposal.json",
+          "packages/workflows/stages/prepare-publication.json"
+        ],
+        "tests": ["tests/governance/agent-workflows.test.mjs"]
+      }
     },
     {
       "id": "FEAT-005",
