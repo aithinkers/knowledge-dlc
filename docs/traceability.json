@@ -88,11 +88,12 @@
           "core/schemas/artifacts/publication-intent.schema.json",
           "packages/agents/index.mjs",
           "packages/workflows/index.mjs",
+          "packages/core/src/temporal.mjs",
           "packages/governance/index.mjs",
           "packages/workflows/stages/review-proposal.json",
           "packages/workflows/stages/prepare-publication.json"
         ],
-        "tests": ["tests/governance/agent-workflows.test.mjs"]
+        "tests": ["tests/governance/agent-workflows.test.mjs", "tests/governance/freshness-contract.test.mjs"]
       }
     },
     {
@@ -102,8 +103,8 @@
       "specification_sections": ["18", "19", "20", "21", "27.3", "34", "35.8", "35.9"],
       "status": "implemented",
       "evidence": {
-        "implementation": ["core/schemas/federation/mount-resolution.schema.json", "core/schemas/retrieval/response.schema.json", "packages/federation/index.mjs", "packages/retrieval/index.mjs"],
-        "tests": ["tests/governance/federation-retrieval.test.mjs"]
+        "implementation": ["core/schemas/federation/mount-resolution.schema.json", "core/schemas/retrieval/response.schema.json", "packages/federation/index.mjs", "packages/retrieval/index.mjs", "packages/core/src/temporal.mjs"],
+        "tests": ["tests/governance/federation-retrieval.test.mjs", "tests/governance/freshness-contract.test.mjs"]
       }
     },
     {

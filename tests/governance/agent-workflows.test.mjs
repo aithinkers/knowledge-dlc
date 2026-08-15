@@ -196,6 +196,8 @@ test("FEAT-004 approved human review binds the exact packet and permits stable p
   assert.equal(publication.intent.packet_hash, receipt.packet_hash);
   assert.equal(publication.intent.review_hash, receipt.review.hash);
   assert.equal(validator.validate("publicationIntent", publication.intent).valid, true);
+  const impossible = structuredClone(current); impossible.concept.frontmatter.stale_after = "2030-02-30";
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: "rr_approved", current: impossible }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("missing-future-freshness"));
   await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_PACKET_IMMUTABLE");
   await assert.rejects(() => harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_approved", expectedReceiptId: "rr_approved" }), (error) => error.code === "KDLC_RECEIPT_IMMUTABLE");
   assert.throws(() => createReviewReceipt({ packet: review.packet, decision: "approved", reviewer: { actor: "human:forged", principal_mode: "local" }, receiptId: "rr_forged", reviewedAt: clock.now(), validator }), (error) => error.code === "KDLC_SESSION_INVALID");
@@ -324,7 +326,7 @@ test("FEAT-004 review packets require exact claims, applicable governance, dynam
   store.substitute(receiptPath, substitutedReceipt);
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("active-decision-drift"));
   store.clearSubstitution(receiptPath);
-  current.concept.frontmatter.stale_after = "2031-01-01T00:00:00Z";
+  current.concept.frontmatter.stale_after = "2031-01-01";
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.details.failures.includes("freshness-authorization-invalid"));
   const forgedAuthorization = { api_version: "kdlc.dev/freshness-authorization/v1alpha1", subject: output.proposals[0].target.subject, field: "stale_after", value_hash: artifactHash(current.concept.frontmatter.stale_after), packet_hash: artifactHash(review.packet), policy: context.resolved.policies[1], authorized_by: "human:attacker", authorized_at: clock.now() };
   assert.equal(validator.validate("freshnessAuthorization", forgedAuthorization).valid, true);

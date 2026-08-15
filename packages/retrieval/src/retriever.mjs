@@ -1,7 +1,7 @@
 import { lstat, readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 
-import { artifactHash, byteHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
+import { artifactHash, byteHash, canonicalJson, isRfc3339Instant, isStaleOn, parseMarkdownConcept } from "../../core/index.mjs";
 import { parseYamlArtifact } from "../../contracts/index.mjs";
 import { traverseHierarchicalIndex } from "./index-traversal.mjs";
 import { retrievalFail } from "./errors.mjs";
@@ -10,36 +10,16 @@ const MODES = new Set(["wiki-only", "sources-only", "trusted-only", "fresh-only"
 const TRUST = Object.freeze({ unverified: 0, "machine-confirmed": 1, "human-reviewed": 2 });
 const CONFLICT_TYPES = new Set(["contradicting", "conflict", "unresolved"]);
 const authorizationStates = new WeakMap();
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/;
 
-function validCalendarDate(year, month, day) {
-  const y = Number(year); const m = Number(month); const d = Number(day);
-  if (m < 1 || m > 12) return false;
-  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return d >= 1 && d <= days[m - 1];
-}
-function validIsoDate(value) {
-  const match = typeof value === "string" ? ISO_DATE.exec(value) : null;
-  return Boolean(match && validCalendarDate(match[1], match[2], match[3]));
-}
-function validRfc3339(value) {
-  const match = typeof value === "string" ? RFC3339.exec(value) : null;
-  if (!match || !validCalendarDate(match[1], match[2], match[3])) return false;
-  const [, , , , hour, minute, second, offsetHour = "00", offsetMinute = "00"] = match;
-  return Number(hour) <= 23 && Number(minute) <= 59 && Number(second) <= 59 && Number(offsetHour) <= 23 && Number(offsetMinute) <= 59
-    && Number.isFinite(Date.parse(value));
-}
 
 function terms(value) { return [...new Set(String(value).normalize("NFKC").toLocaleLowerCase("en").match(/[\p{L}\p{N}_-]+/gu) ?? [])]; }
 function trustTier(frontmatter, now) {
   const values = frontmatter.verified ? (Array.isArray(frontmatter.verified) ? frontmatter.verified : [frontmatter.verified]) : [];
   const verified = values.filter((event) => event && typeof event === "object" && typeof event.by === "string" && typeof event.at === "string"
-    && /^(?:human:[A-Za-z0-9._@/-]+|process:[A-Za-z0-9._@/-]+|[a-z][a-z0-9_-]*\/[^/\s]+)$/.test(event.by) && validRfc3339(event.at) && Date.parse(event.at) <= now.getTime());
+    && /^(?:human:[A-Za-z0-9._@/-]+|process:[A-Za-z0-9._@/-]+|[a-z][a-z0-9_-]*\/[^/\s]+)$/.test(event.by) && isRfc3339Instant(event.at) && Date.parse(event.at) <= now.getTime());
   return verified.some(({ by }) => by.startsWith("human:")) ? "human-reviewed" : verified.length ? "machine-confirmed" : "unverified";
 }
-function stale(frontmatter, today) { return frontmatter.stale_after !== undefined && (!validIsoDate(frontmatter.stale_after) || today >= frontmatter.stale_after); }
+function stale(frontmatter, today) { return frontmatter.stale_after !== undefined && isStaleOn(frontmatter.stale_after, today); }
 function list(value) { return Array.isArray(value) ? value : []; }
 function rawScore(query, concept) {
   const title = terms(concept.frontmatter.title ?? concept.id); const description = terms(concept.frontmatter.description ?? ""); const body = terms(concept.body);

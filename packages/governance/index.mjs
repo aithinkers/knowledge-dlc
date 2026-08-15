@@ -1,4 +1,4 @@
-import { artifactHash, BASE_REVIEW_FIELDS, canonicalJson, reviewHash } from "../core/index.mjs";
+import { artifactHash, BASE_REVIEW_FIELDS, canonicalJson, isGregorianDate, reviewHash, utcDate } from "../core/index.mjs";
 import { resolveAuthenticatedReviewSession } from "../agents/index.mjs";
 
 export class GovernanceError extends Error {
@@ -111,7 +111,8 @@ function stableConceptFailures(concept, now) {
   for (const field of ["type", "title", "description", "status"]) if (typeof frontmatter[field] !== "string" || frontmatter[field].length === 0) failures.push(`missing-${field}`);
   if (typeof frontmatter.generated?.by !== "string" || typeof frontmatter.generated?.at !== "string" || !Number.isFinite(Date.parse(frontmatter.generated.at))) failures.push("missing-generation");
   if (!Array.isArray(frontmatter.sources) || frontmatter.sources.length === 0) failures.push("missing-source");
-  if (frontmatter.freshness !== "timeless" && (typeof frontmatter.stale_after !== "string" || !Number.isFinite(Date.parse(frontmatter.stale_after)) || Date.parse(frontmatter.stale_after) <= Date.parse(now))) failures.push("missing-future-freshness");
+  const today = utcDate(now);
+  if (frontmatter.freshness !== "timeless" && (!isGregorianDate(frontmatter.stale_after) || !today || frontmatter.stale_after <= today)) failures.push("missing-future-freshness");
   return failures;
 }
 
