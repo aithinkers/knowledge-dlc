@@ -5,6 +5,7 @@ import { issueInstallReport, resolveTrustedExtensionHost, verifyInstallReport } 
 import { extensionFail } from "./errors.mjs";
 
 const TRUST_ORDER = Object.freeze({ unverified: 0, "machine-confirmed": 1, "human-reviewed": 2 });
+const SEVERITY_ORDER = Object.freeze({ info: 0, warning: 1, error: 2 });
 const BOUNDARIES = Object.freeze(["filesystem", "network", "credentials", "subprocess", "macros", "memory", "cpu", "output"]);
 
 function validRange(value, label) {
@@ -87,7 +88,35 @@ export function enforceCompatibility({ packageReport, installedPackages, lock, v
   const graph = installedPackages.map(({ plugin, version, manifest_hash, package_hash }) => ({ plugin, version, manifest_hash, package_hash })).sort((a, b) => a.plugin.localeCompare(b.plugin));
   return Object.freeze({ plugin: manifest.metadata.name, version: manifest.metadata.version, manifest_hash: packageReport.manifest_hash,
     package_hash: packageReport.package_hash, lock_hash: artifactHash(lock), graph_hash: artifactHash(graph),
-    host_context_hash: artifactHash({ framework: host.framework, okf: host.okf }) });
+    host_context_hash: artifactHash({ framework: host.framework, okf: host.okf, policy: host.policy, mode: host.mode }) });
+}
+
+function enforceContributionPolicy(installedPackages, policy) {
+  const semantics = [];
+  for (const installed of installedPackages) {
+    for (const template of installed.manifest.contributions.templates) {
+      const merge_modes = [...new Set(template.files.map(({ merge }) => merge))].sort();
+      semantics.push({ plugin: installed.plugin, type: "template", id: template.metadata.id, merge_modes });
+      if (merge_modes.some((mode) => !policy.template.allowed_merge.includes(mode))) extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Template ${installed.plugin}:${template.metadata.id} uses a disallowed merge mode`);
+    }
+    for (const profile of installed.manifest.contributions.profiles) {
+      semantics.push({ plugin: installed.plugin, type: "profile", id: profile.metadata.id, minimum_trust: profile.security.minimum_trust, approval_gates: [...profile.security.approval_gates].sort() });
+      if (TRUST_ORDER[profile.security.minimum_trust] < TRUST_ORDER[policy.minimum_trust] || policy.mandatory_gates.some((gate) => !profile.security.approval_gates.includes(gate))) extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Profile ${installed.plugin}:${profile.metadata.id} weakens trusted policy`);
+    }
+    for (const scope of installed.manifest.contributions.scopes) {
+      semantics.push({ plugin: installed.plugin, type: "scope", id: scope.metadata.id, approval_gates: [...scope.approval_gates].sort() });
+      if (policy.mandatory_gates.some((gate) => !scope.approval_gates.includes(gate))) extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Scope ${installed.plugin}:${scope.metadata.id} removes a mandatory gate`);
+    }
+    for (const sensor of installed.manifest.contributions.sensors) {
+      semantics.push({ plugin: installed.plugin, type: "sensor", id: sensor.id, blocking: sensor.blocking, deterministic: sensor.deterministic, severity: sensor.severity });
+      if ((policy.sensor.require_blocking && !sensor.blocking) || sensor.deterministic !== true || SEVERITY_ORDER[sensor.severity] < SEVERITY_ORDER[policy.sensor.minimum_severity]) extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Sensor ${installed.plugin}:${sensor.id} weakens trusted policy`);
+    }
+    for (const normalizer of installed.manifest.contributions.normalizers) {
+      const security = structuredClone(normalizer.default_security); semantics.push({ plugin: installed.plugin, type: "normalizer", id: normalizer.id, security });
+      if (Object.entries(policy.normalizer).some(([name, value]) => security[name] !== value)) extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Normalizer ${installed.plugin}:${normalizer.id} weakens trusted policy`);
+    }
+  }
+  return semantics.sort((a, b) => `${a.plugin}:${a.type}:${a.id}`.localeCompare(`${b.plugin}:${b.type}:${b.id}`));
 }
 
 function coversAccess(granted, requested) { return granted.root === requested.root && (granted.access === "write" || granted.access === requested.access); }
@@ -106,25 +135,22 @@ function sandboxGaps(executable, sandbox) {
   return [...new Set(gaps)].sort();
 }
 
-export function createInstallReport({ packageReport, installedPackages, lock, scanner, validator, authority, mode = "local", policyFloor = { minimum_trust: "unverified", approval_gates: [] } }) {
-  if (!["local", "controlled"].includes(mode)) extensionFail("KDLC_EXTENSION_MODE_INVALID", "Extension installation mode is invalid");
+export function createInstallReport({ packageReport, installedPackages, lock, scanner, validator, authority }) {
   const compatibility = enforceCompatibility({ packageReport, installedPackages, lock, validator, scanner, authority });
-  const manifest = packageReport.manifest; const host = resolveTrustedExtensionHost(authority);
-  const requiredGates = new Set(policyFloor.approval_gates ?? []); const minimum = TRUST_ORDER[policyFloor.minimum_trust];
-  if (minimum === undefined) extensionFail("KDLC_EXTENSION_POLICY_INVALID", "Extension policy floor is invalid");
-  for (const installed of installedPackages) for (const profile of installed.manifest.contributions.profiles) {
-    if (TRUST_ORDER[profile.security.minimum_trust] < minimum || [...requiredGates].some((gate) => !profile.security.approval_gates.includes(gate))) {
-      extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Profile ${installed.plugin}:${profile.metadata.id} weakens the installation policy floor`);
-    }
-  }
-  const executables = installedPackages.flatMap((installed) => installed.manifest.executables.map((entry) => ({ plugin: installed.plugin, id: `${installed.plugin}:${entry.id}`,
-    executable_id: entry.id, type: entry.type, entrypoint: entry.entrypoint, isolation: entry.isolation,
-    permissions: structuredClone(entry.permissions), sandbox_gaps: sandboxGaps(entry, host.sandbox) }))).sort((a, b) => a.id.localeCompare(b.id));
+  const manifest = packageReport.manifest; const host = resolveTrustedExtensionHost(authority); const policySemantics = enforceContributionPolicy(installedPackages, host.policy);
+  const executables = installedPackages.flatMap((installed) => {
+    const analyses = new Map(installed.import_analysis.map((analysis) => [analysis.id, analysis]));
+    return installed.manifest.executables.map((entry) => ({ plugin: installed.plugin, id: `${installed.plugin}:${entry.id}`,
+      executable_id: entry.id, type: entry.type, entrypoint: entry.entrypoint, isolation: entry.isolation,
+      permissions: structuredClone(entry.permissions), ambient_capabilities: structuredClone(analyses.get(entry.id)?.required_capabilities ?? []),
+      detected_permissions: structuredClone(analyses.get(entry.id)?.detected_permissions ?? []), sandbox_gaps: sandboxGaps(entry, host.sandbox) }));
+  }).sort((a, b) => a.id.localeCompare(b.id));
   const payload = { api_version: "kdlc.dev/plugin-install-report/v1alpha1", plugin: compatibility.plugin, version: compatibility.version,
     manifest_hash: compatibility.manifest_hash, package_hash: compatibility.package_hash, package_scan_hash: artifactHash(packageReport), lock_hash: compatibility.lock_hash,
-    installed_graph_hash: compatibility.graph_hash, host_context_hash: compatibility.host_context_hash, sandbox_attestation_id: host.sandbox.attestation_id, mode,
+    installed_graph_hash: compatibility.graph_hash, host_context_hash: compatibility.host_context_hash, sandbox_attestation_id: host.sandbox.attestation_id, mode: host.mode,
+    policy_hash: artifactHash(host.policy), policy_semantics: policySemantics,
     requires_explicit_trust: executables.length > 0, executable_permissions: executables,
-    waiver_required_executables: mode === "controlled" ? executables.filter(({ sandbox_gaps }) => sandbox_gaps.length).map(({ id }) => id) : [],
+    waiver_required_executables: host.mode === "controlled" ? executables.filter(({ sandbox_gaps }) => sandbox_gaps.length).map(({ id }) => id) : [],
     permission_hash: artifactHash(executables), execution_status: "not-executed" };
   return issueInstallReport(authority, payload);
 }

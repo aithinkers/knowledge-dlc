@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { open, readdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { dirname, posix, relative, resolve, sep } from "node:path";
 
@@ -17,6 +18,7 @@ const builtinPermission = Object.freeze({
 });
 const safeBuiltins = new Set(["assert", "buffer", "crypto", "events", "path", "querystring", "stream", "string_decoder", "url", "util", "zlib"]);
 const pathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[A-Za-z0-9._/-]+$/;
+const AMBIENT_CAPABILITIES = Object.freeze(["credentials", "filesystem", "macros", "network", "subprocess"]);
 
 function unsigned(report) { const { scanner_proof: ignored, ...payload } = report; return payload; }
 function same(left, right) { return canonicalJson(left) === canonicalJson(right); }
@@ -71,7 +73,19 @@ function inspectModule(source, path) {
   return { imports: [...imports].sort(), credentials: [...credentials].sort() };
 }
 
-async function readPackageFiles(packageRoot, { maxFiles, maxBytes }) {
+function sameIdentity(left, right) { return left.dev === right.dev && left.ino === right.ino && left.isDirectory() === right.isDirectory(); }
+async function ancestry(root, file) {
+  const result = []; let current = dirname(file);
+  while (true) {
+    const stat = await lstat(current); if (!stat.isDirectory() || stat.isSymbolicLink()) extensionFail("KDLC_EXTENSION_PACKAGE_SYMLINK_DENIED", "Package ancestry changed during scan");
+    const resolved = await realpath(current);
+    if (resolved !== root && !resolved.startsWith(`${root}${sep}`)) extensionFail("KDLC_EXTENSION_PACKAGE_SYMLINK_DENIED", "Package ancestry escaped its root");
+    result.push({ path: current, stat }); if (current === root) return result;
+    const parent = dirname(current); if (parent === current) extensionFail("KDLC_EXTENSION_PACKAGE_SYMLINK_DENIED", "Package ancestry does not reach its root"); current = parent;
+  }
+}
+
+async function readPackageFiles(packageRoot, { maxFiles, maxBytes, afterOpen }) {
   const root = await realpath(packageRoot); const files = new Map(); let total = 0;
   const descend = async (directory) => {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -81,10 +95,17 @@ async function readPackageFiles(packageRoot, { maxFiles, maxBytes }) {
       if (entry.isDirectory()) { await descend(absolute); continue; }
       if (!entry.isFile()) extensionFail("KDLC_EXTENSION_PACKAGE_ENTRY_DENIED", `Package contains a non-file entry: ${rel}`);
       if (files.size >= maxFiles) extensionFail("KDLC_EXTENSION_PACKAGE_LIMIT", "Package exceeds the trusted file-count limit");
-      const handle = await open(absolute, "r");
+      if (typeof constants.O_NOFOLLOW !== "number") extensionFail("KDLC_EXTENSION_SCANNER_UNSUPPORTED", "Package scanning requires no-follow file opens");
+      const parents = await ancestry(root, absolute); let handle;
+      try { handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW); }
+      catch { extensionFail("KDLC_EXTENSION_PACKAGE_RACE", `Package entry could not be opened without following links: ${rel}`); }
       try {
         const stat = await handle.stat();
         if (!stat.isFile()) extensionFail("KDLC_EXTENSION_PACKAGE_ENTRY_DENIED", `Package entry changed type during scan: ${rel}`);
+        if (afterOpen) await afterOpen({ relativePath: rel, absolutePath: absolute });
+        const pathStat = await lstat(absolute);
+        if (pathStat.isSymbolicLink() || !sameIdentity(stat, pathStat)) extensionFail("KDLC_EXTENSION_PACKAGE_RACE", `Package entry changed after its descriptor was opened: ${rel}`);
+        for (const parent of parents) if (!sameIdentity(parent.stat, await lstat(parent.path))) extensionFail("KDLC_EXTENSION_PACKAGE_RACE", `Package ancestry changed during scan: ${rel}`);
         const resolved = await realpath(absolute);
         if (resolved !== root && !resolved.startsWith(`${root}${sep}`)) extensionFail("KDLC_EXTENSION_PACKAGE_SYMLINK_DENIED", `Package entry escaped its root: ${rel}`);
         const bytes = await handle.readFile(); total += bytes.byteLength;
@@ -127,7 +148,8 @@ function analyzeExecutables(manifest, files) {
     }
     for (const permission of required) if (!requested(entry, permission)) extensionFail("KDLC_EXTENSION_PERMISSION_UNDERREPORTED", `Executable ${entry.id} imports ${permission} capability without declaring it`);
     for (const credential of credentials) if (!entry.permissions.credentials.includes(credential)) extensionFail("KDLC_EXTENSION_PERMISSION_UNDERREPORTED", `Executable ${entry.id} reads undeclared credential ${credential}`);
-    return { id: entry.id, modules: [...visited].sort(), imports: [...imports].sort(), required_permissions: [...required].sort(), credentials: [...credentials].sort() };
+    return { id: entry.id, modules: [...visited].sort(), imports: [...imports].sort(), detected_permissions: [...required].sort(),
+      required_capabilities: [...AMBIENT_CAPABILITIES], ambient_dynamic_code: true, credentials: [...credentials].sort() };
   }).sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -137,10 +159,11 @@ export class ExtensionPackageScanner {
   #validator;
   #limits;
 
-  constructor({ validator, key = randomBytes(32), keyId = "extension-scanner-v1", maxFiles = 4096, maxBytes = 64 * 1024 * 1024 } = {}) {
+  constructor({ validator, key = randomBytes(32), keyId = "extension-scanner-v1", maxFiles = 4096, maxBytes = 64 * 1024 * 1024, afterOpen } = {}) {
     if (!validator || !(key instanceof Uint8Array) || key.byteLength < 32 || typeof keyId !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(keyId)
       || !Number.isSafeInteger(maxFiles) || maxFiles < 1 || !Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new TypeError("Extension package scanner requires a validator, signing key, and positive bounds");
-    this.#validator = validator; this.#key = Buffer.from(key); this.#keyId = keyId; this.#limits = { maxFiles, maxBytes };
+    if (afterOpen !== undefined && typeof afterOpen !== "function") throw new TypeError("Extension scanner afterOpen hook must be callable");
+    this.#validator = validator; this.#key = Buffer.from(key); this.#keyId = keyId; this.#limits = { maxFiles, maxBytes, afterOpen };
   }
 
   #mac(payload) { return createHmac("sha256", this.#key).update(`${PROOF_DOMAIN}\0${canonicalJson(payload)}`).digest(); }

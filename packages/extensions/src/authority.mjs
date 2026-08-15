@@ -6,6 +6,7 @@ import { extensionFail } from "./errors.mjs";
 const sessions = new WeakMap();
 const trusts = new WeakMap();
 const waivers = new WeakMap();
+const migrationWaivers = new WeakMap();
 const authorityStates = new WeakMap();
 const INSTALL_PROOF_DOMAIN = "kdlc.extension.install-report/v1";
 
@@ -19,18 +20,29 @@ function validSandbox(sandbox) {
     && typeof sandbox.subprocess === "boolean" && typeof sandbox.macros === "boolean" && sandbox.resources
     && ["memory_bytes", "cpu_ms", "output_bytes"].every((name) => Number.isSafeInteger(sandbox.resources[name]) && sandbox.resources[name] >= 0));
 }
+function validPolicy(policy) {
+  return Boolean(policy && ["unverified", "machine-confirmed", "human-reviewed"].includes(policy.minimum_trust)
+    && Array.isArray(policy.mandatory_gates) && policy.mandatory_gates.every((gate) => typeof gate === "string" && gate.length)
+    && policy.sensor && typeof policy.sensor.require_blocking === "boolean" && ["info", "warning", "error"].includes(policy.sensor.minimum_severity)
+    && policy.normalizer && ["network", "execute_code", "macros"].every((name) => policy.normalizer[name] === false)
+    && policy.template && Array.isArray(policy.template.allowed_merge) && policy.template.allowed_merge.every((value) => ["create", "replace", "deep-merge"].includes(value)));
+}
+function validExpiry(expiresAt) {
+  return typeof expiresAt === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiresAt)
+    && Number.isFinite(Date.parse(expiresAt)) && new Date(Date.parse(expiresAt)).toISOString() === expiresAt;
+}
 
 export class ExtensionAuthority {
   #principals;
 
-  constructor(principals, { framework, okf, sandbox, key = randomBytes(32), keyId = "extension-runtime-v1" } = {}) {
+  constructor(principals, { framework, okf, sandbox, policy, mode, key = randomBytes(32), keyId = "extension-runtime-v1" } = {}) {
     if (!Array.isArray(principals)) throw new TypeError("ExtensionAuthority requires trusted principal records");
     if (!framework || typeof framework.version !== "string" || typeof framework.hash !== "string" || !okf || typeof okf.version !== "string" || typeof okf.revision !== "string" || typeof okf.hash !== "string"
-      || !validSandbox(sandbox)
+      || !validSandbox(sandbox) || !validPolicy(policy) || !["local", "controlled"].includes(mode)
       || !(key instanceof Uint8Array) || key.byteLength < 32 || typeof keyId !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) {
       throw new TypeError("ExtensionAuthority requires trusted framework, OKF, sandbox, and signing configuration");
     }
-    authorityStates.set(this, { framework: structuredClone(framework), okf: structuredClone(okf), sandbox: structuredClone(sandbox), key: Buffer.from(key), keyId });
+    authorityStates.set(this, { framework: structuredClone(framework), okf: structuredClone(okf), sandbox: structuredClone(sandbox), policy: structuredClone(policy), mode, key: Buffer.from(key), keyId });
     this.#principals = new Map();
     for (const principal of principals) {
       const allowed = new Set(["id", "actor", "roles"]);
@@ -62,8 +74,7 @@ export class ExtensionAuthority {
     const sessionRecord = sessions.get(session); const principal = sessionRecord?.authority === this ? sessionRecord.principal : null;
     if (!principal?.roles.includes("governance-reviewer")) extensionFail("KDLC_EXTENSION_WAIVER_DENIED", "Controlled execution waiver requires an authenticated governance reviewer");
     if (!Array.isArray(executableIds) || !executableIds.length || new Set(executableIds).size !== executableIds.length || typeof reason !== "string" || !reason.trim()
-      || typeof expiresAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiresAt)
-      || !Number.isFinite(Date.parse(expiresAt)) || new Date(Date.parse(expiresAt)).toISOString() !== expiresAt) extensionFail("KDLC_EXTENSION_WAIVER_INVALID", "Controlled execution waiver is malformed");
+      || !validExpiry(expiresAt)) extensionFail("KDLC_EXTENSION_WAIVER_INVALID", "Controlled execution waiver is malformed");
     const waiver = Object.freeze({ api_version: "kdlc.dev/plugin-waiver/v1alpha1", scope: "controlled-execution-gap", actor: principal.actor,
       plugin: report.plugin, manifest_hash: report.manifest_hash, executable_ids: [...executableIds].sort(), reason, expires_at: expiresAt });
     waivers.set(waiver, { authority: this, reportHash: artifactHash(report), principal: structuredClone(principal) });
@@ -81,6 +92,22 @@ export class ExtensionAuthority {
       && waiver.plugin === report.plugin && waiver.manifest_hash === report.manifest_hash && same(waiver.executable_ids, [...executableIds].sort())
       && Date.parse(waiver.expires_at) > Date.parse(now));
   }
+
+  waiveMigrationSecurity(session, preview, { reason, expiresAt }) {
+    const sessionRecord = sessions.get(session); const principal = sessionRecord?.authority === this ? sessionRecord.principal : null;
+    if (!principal?.roles.includes("governance-reviewer")) extensionFail("KDLC_MIGRATION_WAIVER_DENIED", "Security-weakening migration waiver requires an authenticated governance reviewer");
+    if (!preview?.security_weakening || typeof reason !== "string" || !reason.trim() || !validExpiry(expiresAt)) extensionFail("KDLC_MIGRATION_WAIVER_INVALID", "Security-weakening migration waiver is malformed");
+    const waiver = Object.freeze({ api_version: "kdlc.dev/migration-waiver/v1alpha1", scope: "security-weakening-migration", actor: principal.actor,
+      migration_id: preview.migration_id, preview_hash: preview.preview_hash, reason, expires_at: expiresAt });
+    migrationWaivers.set(waiver, { authority: this, previewHash: artifactHash(preview), principal: structuredClone(principal) });
+    return waiver;
+  }
+
+  verifyMigrationWaiver(waiver, preview, now) {
+    const record = migrationWaivers.get(waiver);
+    return Boolean(record?.authority === this && record.previewHash === artifactHash(preview) && waiver.scope === "security-weakening-migration"
+      && waiver.migration_id === preview.migration_id && waiver.preview_hash === preview.preview_hash && Date.parse(waiver.expires_at) > Date.parse(now));
+  }
 }
 
 function installMac(state, payload) { return createHmac("sha256", state.key).update(`${INSTALL_PROOF_DOMAIN}\0${canonicalJson(payload)}`).digest(); }
@@ -88,7 +115,7 @@ function installMac(state, payload) { return createHmac("sha256", state.key).upd
 export function resolveTrustedExtensionHost(authority) {
   const state = authorityStates.get(authority);
   if (!state) extensionFail("KDLC_EXTENSION_HOST_UNTRUSTED", "Extension operation requires the configured runtime authority");
-  return { framework: structuredClone(state.framework), okf: structuredClone(state.okf), sandbox: structuredClone(state.sandbox) };
+  return { framework: structuredClone(state.framework), okf: structuredClone(state.okf), sandbox: structuredClone(state.sandbox), policy: structuredClone(state.policy), mode: state.mode };
 }
 
 export function issueInstallReport(authority, payload) {

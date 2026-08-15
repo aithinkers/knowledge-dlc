@@ -12,7 +12,10 @@ Installation is a gated sequence:
 2. Scan the actual package root without executing it. The bounded scanner
    rejects symlinks, parses every executable's transitive imports, detects
    undeclared sensitive capabilities and credentials, hashes every file, and
-   signs its report with runtime-held key material.
+   signs its report with runtime-held key material. Because static JavaScript
+   analysis cannot prove the absence of ambient behavior, every executable is
+   also classified as capable of dynamic filesystem, network, credential,
+   subprocess, and macro access; controlled hosts must enforce those denials.
 3. Verify the trusted framework identity and exact OKF version, revision, and
    hash against the dependency lock. Every plugin in the installed graph and
    every direct or transitive edge binds version, manifest hash, and package
@@ -35,6 +38,10 @@ governed sensor runtime remain the execution boundary.
 
 Migrations are declarative. `previewMigration` operates on an explicit in-memory
 snapshot and returns changed-path hashes plus human-readable semantic effects.
+Those effects and downgrade flags are derived from the actual structured diff;
+the descriptor's self-reported category is not trusted. Applying a
+security-weakening preview requires a separate live waiver from an authenticated
+governance reviewer.
 `applyMigrationPreview` accepts only the original issued preview object and its
 exact confirmation hash; it returns proposed output bytes and performs no
 filesystem writes. Callers retain responsibility for their normal transactional
