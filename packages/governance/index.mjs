@@ -1,4 +1,5 @@
 import { artifactHash, BASE_REVIEW_FIELDS, canonicalJson, reviewHash } from "../core/index.mjs";
+import { resolveAuthenticatedReviewSession } from "../agents/index.mjs";
 
 export class GovernanceError extends Error {
   constructor(code, message, details = {}) {
@@ -76,8 +77,9 @@ export function createReviewPacket({ proposal, claims, evidence, sensors, impact
   return Object.freeze({ packet: structuredClone(packet), packet_hash: artifactHash(packet) });
 }
 
-export function createReviewReceipt({ packet, decision, reviewer, receiptId, reviewedAt, validator }) {
+export function createReviewReceipt({ packet, decision, session, receiptId, reviewedAt, validator }) {
   requireValid(validator, "governedReviewPacket", packet);
+  const { reviewer } = resolveAuthenticatedReviewSession(session);
   const receipt = {
     api_version: "kdlc.dev/review-receipt/v1alpha1",
     id: receiptId,
@@ -128,7 +130,7 @@ export function assessPublication({ proposal, packet, receipt, decisionState, fr
     if (!decisionState) failures.push("active-decision-missing");
     else {
       const state = validator.validate("reviewDecision", decisionState);
-      if (!state.valid || decisionState.proposal_id !== proposal.id || decisionState.packet_hash !== artifactHash(packet) || decisionState.receipt_id !== receipt.id || decisionState.decision !== receipt.decision) failures.push("active-decision-drift");
+      if (!state.valid || decisionState.proposal_id !== proposal.id || decisionState.packet_hash !== artifactHash(packet) || decisionState.receipt_id !== receipt.id || decisionState.receipt_hash !== artifactHash(receipt) || decisionState.decision !== receipt.decision) failures.push("active-decision-drift");
       if (decisionState.decision !== "approved") failures.push(`active-decision-${decisionState.decision}`);
     }
     if (receipt.decision !== "approved") failures.push(`receipt-${receipt.decision}`);

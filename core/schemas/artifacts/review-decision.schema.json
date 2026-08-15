@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/review-decision.schema.json",
   "type": "object", "additionalProperties": false,
-  "required": ["api_version", "proposal_id", "packet_hash", "receipt_id", "decision", "decided_at"],
+  "required": ["api_version", "proposal_id", "packet_hash", "receipt_id", "receipt_hash", "decision", "decided_at"],
   "properties": {
     "api_version": {"const": "kdlc.dev/review-decision/v1alpha1"},
     "proposal_id": {"type": "string", "pattern": "^pr_[a-z0-9]+$"},
     "packet_hash": {"$ref": "../common.schema.json#/$defs/digest"},
     "receipt_id": {"type": "string", "pattern": "^rr_[a-z0-9]+$"},
+    "receipt_hash": {"$ref": "../common.schema.json#/$defs/digest"},
     "decision": {"enum": ["approved", "rejected", "changes-requested"]},
     "decided_at": {"$ref": "../common.schema.json#/$defs/dateTime"}
   }

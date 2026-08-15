@@ -4,47 +4,46 @@ import { artifactHash, canonicalJson } from "../core/index.mjs";
 import { assessPublication, createReviewPacket, createReviewReceipt, GovernanceError, reconcileDirectEdit } from "../governance/index.mjs";
 
 export class MemoryArtifactStore {
-  constructor() { this.artifacts = new Map(); }
-  async put(path, value) { this.artifacts.set(path, structuredClone(value)); }
-  async putMany(entries) {
-    const updated = new Map(this.artifacts);
-    for (const { path, value } of entries) updated.set(path, structuredClone(value));
-    this.artifacts = updated;
-  }
-  async putIfAbsent(path, value) {
-    if (this.artifacts.has(path)) return false;
-    this.artifacts.set(path, structuredClone(value));
-    return true;
-  }
-  async commitDecision({ receiptPath, receipt, decisionPath, decision, expectedReceiptId }) {
-    const current = this.artifacts.get(decisionPath)?.receipt_id ?? null;
-    if (current !== expectedReceiptId) return { status: "conflict", current };
-    if (this.artifacts.has(receiptPath)) return { status: "receipt-exists" };
-    const updated = new Map(this.artifacts);
-    updated.set(receiptPath, structuredClone(receipt));
-    updated.set(decisionPath, structuredClone(decision));
-    this.artifacts = updated;
-    return { status: "stored" };
-  }
-  async putReviewPacket({ path, value, receiptPrefix, proposalId }) {
-    if (this.artifacts.has(path)) return false;
-    for (const [candidate, receipt] of this.artifacts) {
-      if (candidate.startsWith(receiptPrefix) && receipt.proposal_id === proposalId) return false;
-    }
-    this.artifacts.set(path, structuredClone(value));
-    return true;
-  }
-  async commitFreshnessAuthorization({ path, value, expectedValueHash }) {
-    const current = this.artifacts.get(path)?.value_hash ?? null;
-    if (current !== expectedValueHash) return { status: "conflict", current };
-    this.artifacts.set(path, structuredClone(value));
-    return { status: "stored" };
-  }
+  constructor() { memoryStoreStates.set(this, new Map()); }
   async get(path) {
-    if (!this.artifacts.has(path)) throw new GovernanceError("KDLC_ARTIFACT_MISSING", `Missing workflow artifact: ${path}`);
-    return structuredClone(this.artifacts.get(path));
+    const artifacts = memoryState(this);
+    if (!artifacts.has(path)) throw new GovernanceError("KDLC_ARTIFACT_MISSING", `Missing workflow artifact: ${path}`);
+    return structuredClone(artifacts.get(path));
   }
-  async has(path) { return this.artifacts.has(path); }
+  async has(path) { return memoryState(this).has(path); }
+  get size() { return memoryState(this).size; }
+}
+
+const memoryStoreStates = new WeakMap();
+function memoryState(store) {
+  const state = memoryStoreStates.get(store);
+  if (!state) throw new GovernanceError("KDLC_STORE_ATOMIC_REQUIRED", "Governed workflows require a capability-scoped artifact store");
+  return state;
+}
+function storePut(store, path, value) { memoryState(store).set(path, structuredClone(value)); }
+function storePutMany(store, entries) {
+  const updated = new Map(memoryState(store));
+  for (const { path, value } of entries) updated.set(path, structuredClone(value));
+  memoryStoreStates.set(store, updated);
+}
+function storeReviewPacket(store, { path, value, receiptPrefix, proposalId }) {
+  const artifacts = memoryState(store);
+  if (artifacts.has(path)) return false;
+  for (const [candidate, receipt] of artifacts) if (candidate.startsWith(receiptPrefix) && receipt.proposal_id === proposalId) return false;
+  artifacts.set(path, structuredClone(value));
+  return true;
+}
+function storeDecision(store, { receiptPath, receipt, decisionPath, decision, expectedReceiptId }) {
+  const artifacts = memoryState(store); const current = artifacts.get(decisionPath)?.receipt_id ?? null;
+  if (current !== expectedReceiptId) return { status: "conflict", current };
+  if (artifacts.has(receiptPath)) return { status: "receipt-exists" };
+  const updated = new Map(artifacts); updated.set(receiptPath, structuredClone(receipt)); updated.set(decisionPath, structuredClone(decision)); memoryStoreStates.set(store, updated);
+  return { status: "stored" };
+}
+function storeFreshness(store, { path, value, expectedValueHash }) {
+  const artifacts = memoryState(store); const current = artifacts.get(path)?.value_hash ?? null;
+  if (current !== expectedValueHash) return { status: "conflict", current };
+  artifacts.set(path, structuredClone(value)); return { status: "stored" };
 }
 
 export class GovernedAgentWorkflows {
@@ -84,18 +83,33 @@ export class GovernedAgentWorkflows {
 
   async #put(role, path, value) {
     this.#capabilities.authorize(role, "write", path);
-    await this.#store.put(path, value);
+    storePut(this.#store, path, value);
   }
 
   async #putMany(entries) {
     for (const { role, path } of entries) this.#capabilities.authorize(role, "write", path);
-    if (typeof this.#store.putMany !== "function") throw new GovernanceError("KDLC_STORE_ATOMIC_REQUIRED", "Recorded model workflows require an atomic putMany store operation");
-    await this.#store.putMany(entries.map(({ path, value }) => ({ path, value })));
+    storePutMany(this.#store, entries.map(({ path, value }) => ({ path, value })));
   }
 
   async #get(role, path) {
     this.#capabilities.authorize(role, "read", path);
     return this.#store.get(path);
+  }
+
+  #validateReviewContext(context, normalizedEvidence) {
+    const validation = this.#validator.validate("reviewContext", context);
+    if (!validation.valid) throw new GovernanceError("KDLC_REVIEW_CONTEXT_INVALID", "Trusted review context failed schema validation", { errors: validation.errors });
+    if (context.sensors.some((sensor) => sensor.producer !== "kdlc-sensor-runtime/0.2.0" || !/^sha256:[a-f0-9]{64}$/.test(sensor.execution_hash ?? ""))) throw new GovernanceError("KDLC_SENSOR_UNTRUSTED", "Review context contains a sensor result without trusted execution provenance");
+    if (context.evidence.some((item) => item.source_id !== normalizedEvidence.source_id || item.source_hash !== normalizedEvidence.source_hash || !normalizedEvidence.units.some((unit) => canonicalJson(unit.locator) === canonicalJson(item.locator) && unit.text === item.excerpt))) throw new GovernanceError("KDLC_EVIDENCE_UNTRUSTED", "Review evidence is not an exact persisted normalized unit");
+  }
+
+  async #loadBoundReviewInputs(workflowId, proposal) {
+    const claims = await Promise.all(proposal.claim_ids.map((id) => this.#get("conductor", `workflow/runs/${workflowId}/claims/${id}.json`)));
+    const context = await this.#get("conductor", `workflow/runs/${workflowId}/state/review-context.json`);
+    const normalizedEvidence = await this.#get("conductor", `workflow/runs/${workflowId}/state/normalized-evidence.json`);
+    if (proposal.input_hashes?.claims !== artifactHash(claims) || proposal.input_hashes?.review_context !== artifactHash(context) || proposal.input_hashes?.normalized_evidence !== artifactHash(normalizedEvidence)) throw new GovernanceError("KDLC_REVIEW_INPUT_DRIFT", "Persisted review inputs do not match proposal bindings");
+    this.#validateReviewContext(context, normalizedEvidence);
+    return { claims, context, normalizedEvidence };
   }
 
   async runRecorded({ task, workflowId, recording, normalizedEvidence }) {
@@ -105,10 +119,7 @@ export class GovernedAgentWorkflows {
     const inputHashes = { normalized_evidence: artifactHash(normalizedEvidence) };
     const output = this.#models.replay(recording, { task, inputHashes });
     const reviewContext = resolveTrustedReviewContext(this.#reviewContextSession, workflowId);
-    const contextValidation = this.#validator.validate("reviewContext", reviewContext);
-    if (!contextValidation.valid) throw new GovernanceError("KDLC_REVIEW_CONTEXT_INVALID", "Trusted review context failed schema validation", { errors: contextValidation.errors });
-    if (reviewContext.sensors.some((sensor) => sensor.producer !== "kdlc-sensor-runtime/0.2.0" || !/^sha256:[a-f0-9]{64}$/.test(sensor.execution_hash ?? ""))) throw new GovernanceError("KDLC_SENSOR_UNTRUSTED", "Review context contains a sensor result without trusted execution provenance");
-    if (reviewContext.evidence.some((item) => item.source_id !== normalizedEvidence.source_id || item.source_hash !== normalizedEvidence.source_hash || !normalizedEvidence.units.some((unit) => canonicalJson(unit.locator) === canonicalJson(item.locator) && unit.text === item.excerpt))) throw new GovernanceError("KDLC_EVIDENCE_UNTRUSTED", "Review evidence is not an exact persisted normalized unit");
+    this.#validateReviewContext(reviewContext, normalizedEvidence);
     const anchors = new Set(normalizedEvidence.units.map(({ locator }) => canonicalJson(locator)));
     for (const claim of output.claims) {
       if (claim.source_id !== normalizedEvidence.source_id || claim.source_hash !== normalizedEvidence.source_hash || !claim.locator || !anchors.has(canonicalJson(claim.locator))) {
@@ -135,30 +146,24 @@ export class GovernedAgentWorkflows {
   async assembleReview({ workflowId, proposalId }) {
     const proposalPath = `workflow/runs/${workflowId}/proposals/${proposalId}.json`;
     const proposal = await this.#get("conductor", proposalPath);
-    const claims = await Promise.all(proposal.claim_ids.map((id) => this.#get("conductor", `workflow/runs/${workflowId}/claims/${id}.json`)));
-    const context = await this.#get("conductor", `workflow/runs/${workflowId}/state/review-context.json`);
-    const normalizedEvidence = await this.#get("conductor", `workflow/runs/${workflowId}/state/normalized-evidence.json`);
-    if (proposal.input_hashes?.claims !== artifactHash(claims) || proposal.input_hashes?.review_context !== artifactHash(context) || proposal.input_hashes?.normalized_evidence !== artifactHash(normalizedEvidence)) throw new GovernanceError("KDLC_REVIEW_INPUT_DRIFT", "Persisted review inputs do not match proposal bindings");
+    const { claims, context } = await this.#loadBoundReviewInputs(workflowId, proposal);
     const result = createReviewPacket({ proposal, claims, ...context, requirements: this.#reviewRequirements, validator: this.#validator });
     const packetPath = `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`;
-    if (typeof this.#store.putReviewPacket !== "function") throw new GovernanceError("KDLC_STORE_ATOMIC_REQUIRED", "Review packet immutability requires atomic store support");
-    const stored = await this.#store.putReviewPacket({ path: packetPath, value: result.packet, receiptPrefix: `workflow/runs/${workflowId}/receipts/`, proposalId });
+    const stored = storeReviewPacket(this.#store, { path: packetPath, value: result.packet, receiptPrefix: `workflow/runs/${workflowId}/receipts/`, proposalId });
     if (!stored) throw new GovernanceError("KDLC_REVIEW_PACKET_IMMUTABLE", `Proposal ${proposalId} already has a decision`);
     return Object.freeze({ ...result, path: packetPath });
   }
 
   async decide({ workflowId, proposalId, decision, receiptId, expectedReceiptId = null }) {
-    const { role, reviewer } = resolveAuthenticatedReviewSession(this.#session);
+    const { role } = resolveAuthenticatedReviewSession(this.#session);
     const packet = await this.#get(role, `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`);
-    const receipt = createReviewReceipt({ packet, decision, reviewer, receiptId, reviewedAt: this.#clock.now(), validator: this.#validator });
+    const receipt = createReviewReceipt({ packet, decision, session: this.#session, receiptId, reviewedAt: this.#clock.now(), validator: this.#validator });
     const path = `workflow/runs/${workflowId}/receipts/${receiptId}.json`;
     const decisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`;
-    this.#capabilities.authorize(role, "write", path);
-    const activeDecision = { api_version: "kdlc.dev/review-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), receipt_id: receiptId, decision, decided_at: this.#clock.now() };
+    const activeDecision = { api_version: "kdlc.dev/review-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), receipt_id: receiptId, receipt_hash: artifactHash(receipt), decision, decided_at: this.#clock.now() };
     const validation = this.#validator.validate("reviewDecision", activeDecision);
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Review decision failed schema validation", { errors: validation.errors });
-    if (typeof this.#store.commitDecision !== "function") throw new GovernanceError("KDLC_STORE_ATOMIC_REQUIRED", "Review decisions require an atomic compare-and-set store operation");
-    const stored = await this.#store.commitDecision({ receiptPath: path, receipt, decisionPath, decision: activeDecision, expectedReceiptId });
+    const stored = storeDecision(this.#store, { receiptPath: path, receipt, decisionPath, decision: activeDecision, expectedReceiptId });
     if (stored.status === "receipt-exists") throw new GovernanceError("KDLC_RECEIPT_IMMUTABLE", `Receipt already exists: ${receiptId}`);
     if (stored.status === "conflict") throw new GovernanceError("KDLC_DECISION_CONFLICT", "Active decision changed before this decision was recorded", { expected: expectedReceiptId, current: stored.current });
     return Object.freeze({ receipt, decision: structuredClone(activeDecision), path });
@@ -174,8 +179,7 @@ export class GovernedAgentWorkflows {
     const validation = this.#validator.validate("freshnessAuthorization", authorization);
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness authorization failed schema validation", { errors: validation.errors });
     const path = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-authorization.json`;
-    if (typeof this.#store.commitFreshnessAuthorization !== "function") throw new GovernanceError("KDLC_STORE_ATOMIC_REQUIRED", "Freshness authorization requires atomic compare-and-set storage");
-    const stored = await this.#store.commitFreshnessAuthorization({ path, value: authorization, expectedValueHash });
+    const stored = storeFreshness(this.#store, { path, value: authorization, expectedValueHash });
     if (stored.status === "conflict") throw new GovernanceError("KDLC_FRESHNESS_CONFLICT", "Freshness authorization changed before update", { expected: expectedValueHash, current: stored.current });
     return Object.freeze({ authorization: structuredClone(authorization), path });
   }
@@ -183,6 +187,9 @@ export class GovernedAgentWorkflows {
   async preparePublication({ workflowId, proposalId, receiptId, current }) {
     const proposal = await this.#get("conductor", `workflow/runs/${workflowId}/proposals/${proposalId}.json`);
     const packet = await this.#get("conductor", `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`);
+    const { claims, context } = await this.#loadBoundReviewInputs(workflowId, proposal);
+    const regenerated = createReviewPacket({ proposal, claims, ...context, requirements: this.#reviewRequirements, validator: this.#validator });
+    if (regenerated.packet_hash !== artifactHash(packet)) throw new GovernanceError("KDLC_REVIEW_INPUT_DRIFT", "Persisted packet no longer exactly matches its approved inputs");
     const receipt = receiptId ? await this.#get("conductor", `workflow/runs/${workflowId}/receipts/${receiptId}.json`) : null;
     const decisionState = await this.#store.has(`workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`) ? await this.#get("conductor", `workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`) : null;
     const freshnessPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-authorization.json`;
@@ -206,8 +213,11 @@ export class GovernedAgentWorkflows {
     return Object.freeze({ intent: structuredClone(intent), path });
   }
 
-  async reconcileEdit({ workflowId, proposalId, reviewedProposalId, target, reviewedConcept, currentConcept, receipt }) {
+  async reconcileEdit({ workflowId, proposalId, reviewedProposalId, target, reviewedConcept, currentConcept, receiptId }) {
     const packet = await this.#get("integrator", `workflow/runs/${workflowId}/reviews/${reviewedProposalId}/packet.json`);
+    const receipt = await this.#get("integrator", `workflow/runs/${workflowId}/receipts/${receiptId}.json`);
+    const decision = await this.#get("integrator", `workflow/runs/${workflowId}/reviews/${reviewedProposalId}/decision.json`);
+    if (decision.decision !== "approved" || decision.receipt_id !== receipt.id || decision.receipt_hash !== artifactHash(receipt) || decision.packet_hash !== artifactHash(packet)) throw new GovernanceError("KDLC_RECONCILE_BINDING_INVALID", "Reconciliation requires the active authenticated approval");
     const proposal = reconcileDirectEdit({ proposalId, workflowId, target, reviewedConcept, currentConcept, packet, receipt, validator: this.#validator });
     const path = `workflow/runs/${workflowId}/proposals/${proposalId}.json`;
     await this.#put("integrator", path, proposal);

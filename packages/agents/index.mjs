@@ -107,8 +107,7 @@ export class CapabilityRuntime {
     if (operation !== "read" && operation !== "write") throw new AgentPolicyError("KDLC_CAPABILITY_INVALID", `Unknown capability operation: ${operation}`);
     const descriptor = this.descriptor(role);
     safePath(path);
-    const reviewerWrite = matches("workflow/runs/**/receipts/**", path);
-    if (reviewerRoles.has(role) && operation === "write" && !reviewerWrite) {
+    if (reviewerRoles.has(role) && operation === "write") {
       throw new AgentPolicyError("KDLC_REVIEWER_READ_ONLY", `${role} cannot mutate reviewed artifacts`, { operation, path });
     }
     if (!descriptor.permissions[operation].some((pattern) => matches(pattern, path))) {
