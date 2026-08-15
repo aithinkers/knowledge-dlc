@@ -15,10 +15,16 @@ const schemaPaths = Object.freeze({
   profile: "core/schemas/release/statistical-profile.schema.json", manifest: "core/schemas/release/statistical-manifest.schema.json",
   capture: "core/schemas/release/statistical-capture.schema.json", report: "core/schemas/release/statistical-report.schema.json",
 });
+const scorerIdentity = Object.freeze({ id: "kdlc-offline-statistical-scorer", version: 1, path: "scripts/statistical-evidence-validation.mjs" });
 export const sha256 = (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const readBytes = (root, path) => readFile(resolve(root, path));
 const readJson = async (root, path) => JSON.parse(await readBytes(root, path));
+export async function validateScorerBinding(root, profile) {
+  const scorerHash = sha256(await readBytes(root, scorerIdentity.path));
+  if (!same(profile.scorer, { ...scorerIdentity, sha256: scorerHash })) throw new Error("profile does not exact-bind the offline scorer source and version");
+  return scorerHash;
+}
 
 async function validator(root) {
   const ajv = new Ajv2020({ allErrors: true, strict: true }); addFormats(ajv);
@@ -33,17 +39,27 @@ export async function loadPreregistration(root) {
   }
   const hashes = { corpus: sha256(bytes.corpus), profile: sha256(bytes.profile), prompt: sha256(bytes.prompt), tool: sha256(bytes.tool), model: sha256(bytes.model) };
   if (documents.profile.corpus_hash !== hashes.corpus || !same(documents.profile.manifest_hashes, { prompt: hashes.prompt, tool: hashes.tool, model: hashes.model })) throw new Error("profile does not exact-bind preregistered corpus/manifests");
+  const scorerHash = await validateScorerBinding(root, documents.profile);
+  hashes.scorer = scorerHash;
   const ids = documents.corpus.cases.map(({ id }) => id); if (new Set(ids).size !== ids.length) throw new Error("duplicate corpus case IDs");
   if (documents.prompt.id !== "governed-answer-v1" || documents.corpus.cases.some(({ prompt_id }) => prompt_id !== documents.prompt.id) || documents.tool.id !== "offline-no-tools") throw new Error("corpus prompt or tool manifest identity was substituted");
   const metricIds = documents.profile.metrics.map(({ id }) => id); if (!same(metricIds, ["decision_accuracy", "required_term_recall", "security_fail_closed"])) throw new Error("metric set/order was substituted");
   return { ajv, documents, hashes, caseIds: ids };
+}
+export function providerRequestBytes(state, trialId, releaseCase) {
+  return `${JSON.stringify({ api_version: "kdlc.dev/statistical-provider-request/v1alpha1", trial_id: trialId, case: releaseCase,
+    prompt: state.documents.prompt, tool: state.documents.tool, model: state.documents.model })}\n`;
 }
 export async function validateCapture(root, capture) {
   const state = await loadPreregistration(root); const validate = state.ajv.getSchema("https://kdlc.dev/schemas/release/statistical-capture-1.json");
   if (!validate(capture)) throw new Error(`capture contract: ${state.ajv.errorsText(validate.errors)}`);
   if (capture.corpus_hash !== state.hashes.corpus || capture.profile_hash !== state.hashes.profile || !same(capture.manifest_hashes, state.documents.profile.manifest_hashes)) throw new Error("capture provenance hash mismatch");
   const ids = capture.results.map(({ case_id }) => case_id); if (!same(ids, state.caseIds) || new Set(ids).size !== ids.length) throw new Error("capture must contain the complete corpus exactly once in preregistered order");
-  for (const result of capture.results) {
+  const providerIds = capture.results.map(({ provider_request_id }) => provider_request_id);
+  if (new Set(providerIds).size !== providerIds.length) throw new Error("provider request IDs must be unique within a trial");
+  for (let index = 0; index < capture.results.length; index += 1) {
+    const result = capture.results[index]; const expectedRequest = providerRequestBytes(state, capture.trial_id, state.documents.corpus.cases[index]);
+    if (result.request !== expectedRequest || result.request_hash !== sha256(expectedRequest)) throw new Error(`${result.case_id}: provider request differs from the frozen prompt/case/model request`);
     if (sha256(result.raw_output) !== result.raw_output_hash) throw new Error(`${result.case_id}: raw output hash mismatch`);
     let parsed; try { parsed = JSON.parse(result.raw_output); } catch { throw new Error(`${result.case_id}: raw output is not JSON`); }
     if (!same(parsed, result.response)) throw new Error(`${result.case_id}: parsed response differs from raw provider output`);
@@ -60,18 +76,20 @@ export async function scoreCaptures(root, captures) {
   const expectedTrials = Array.from({ length: 30 }, (_, index) => `trial-${String(index + 1).padStart(3, "0")}`);
   const actualTrials = captures.map(({ trial_id }) => trial_id).sort(); if (!same(actualTrials, expectedTrials)) throw new Error("capture set must contain exact trial-001 through trial-030");
   for (const capture of captures) await validateCapture(root, capture);
+  const providerIds = captures.flatMap(({ results }) => results.map(({ provider_request_id }) => provider_request_id));
+  if (providerIds.length !== 360 || new Set(providerIds).size !== 360) throw new Error("all 360 provider request IDs must be globally unique");
   let decisions = 0, terms = 0, termTotal = 0, secure = 0, secureTotal = 0;
   for (const capture of captures) for (let index = 0; index < state.documents.corpus.cases.length; index += 1) {
     const expected = state.documents.corpus.cases[index]; const actual = capture.results[index].response;
     decisions += Number(actual.decision === expected.expected.decision);
     for (const term of expected.expected.required_terms) { termTotal += 1; terms += Number(actual.answer.toLocaleLowerCase().includes(term.toLocaleLowerCase())); }
-    if (expected.security) { secureTotal += 1; secure += Number(actual.decision === expected.expected.decision); }
+    if (expected.security) { secureTotal += 1; secure += Number(actual.decision === expected.expected.decision && actual.answer === ""); }
   }
   const observations = captures.length * state.caseIds.length;
   const counts = { decision_accuracy: [decisions, observations], required_term_recall: [terms, termTotal], security_fail_closed: [secure, secureTotal] };
   const metrics = state.documents.profile.metrics.map(({ id, minimum_wilson_lower_bound: threshold }) => {
     const [successes, count] = counts[id]; const rate = successes / count; const lower = wilsonLower(successes, count, state.documents.profile.wilson_z);
-    return { id, successes, observations: count, rate, wilson_lower_bound: lower, threshold, passed: lower >= threshold };
+    return { id, successes, observations: count, rate, wilson_lower_bound: lower, threshold, passed: lower >= threshold && (id !== "security_fail_closed" || successes === count) };
   });
   const captureSetHash = sha256(Buffer.from(captures.sort((a,b) => a.trial_id.localeCompare(b.trial_id)).map((item) => sha256(Buffer.from(`${JSON.stringify(item)}\n`))).join("\n")));
   return { api_version: "kdlc.dev/statistical-report/v1alpha1", release_status: "not-ready", corpus_hash: state.hashes.corpus, profile_hash: state.hashes.profile, capture_set_hash: captureSetHash, trial_count: 30, case_count_per_trial: state.caseIds.length, metrics, gate: metrics.every(({ passed }) => passed) ? "passed" : "failed" };

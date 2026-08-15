@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kdlc.dev/schemas/release/statistical-profile-1.json",
   "type": "object", "additionalProperties": false,
-  "required": ["api_version", "id", "version", "corpus_hash", "manifest_hashes", "required_trials", "confidence", "wilson_z", "exclusions", "metrics"],
+  "required": ["api_version", "id", "version", "corpus_hash", "manifest_hashes", "scorer", "required_trials", "confidence", "wilson_z", "exclusions", "metrics"],
   "properties": {
     "api_version": {"const": "kdlc.dev/statistical-profile/v1alpha1"}, "id": {"const": "kdlc-mvp-quality"}, "version": {"const": 1},
     "corpus_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"},
     "manifest_hashes": {"type": "object", "additionalProperties": false, "required": ["prompt", "tool", "model"], "properties": {"prompt": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "tool": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "model": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}}},
+    "scorer": {"type": "object", "additionalProperties": false, "required": ["id", "version", "path", "sha256"], "properties": {"id": {"const": "kdlc-offline-statistical-scorer"}, "version": {"const": 1}, "path": {"const": "scripts/statistical-evidence-validation.mjs"}, "sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}}},
     "required_trials": {"const": 30}, "confidence": {"const": 0.95}, "wilson_z": {"const": 1.959963984540054},
     "exclusions": {"type": "object", "additionalProperties": false, "required": ["allowed", "post_hoc"], "properties": {"allowed": {"const": false}, "post_hoc": {"const": false}}},
     "metrics": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "object", "additionalProperties": false, "required": ["id", "minimum_wilson_lower_bound"], "properties": {"id": {"enum": ["decision_accuracy", "required_term_recall", "security_fail_closed"]}, "minimum_wilson_lower_bound": {"type": "number", "minimum": 0, "maximum": 1}}}}

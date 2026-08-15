@@ -8,6 +8,12 @@
     "tool": "sha256:f81cc530e89717cff0146c58505d20f6eac3330464a894e295ed2008153d6ac2",
     "model": "sha256:35a0808c307868904bda404878644d1a8f63aab1b7ab7608bcf1f6185eb94e52"
   },
+  "scorer": {
+    "id": "kdlc-offline-statistical-scorer",
+    "version": 1,
+    "path": "scripts/statistical-evidence-validation.mjs",
+    "sha256": "sha256:ee6e90b2a48e34de763d502c86e30f98f669aa009b0159eb42ebd5ff2b1b23d1"
+  },
   "required_trials": 30,
   "confidence": 0.95,
   "wilson_z": 1.959963984540054,

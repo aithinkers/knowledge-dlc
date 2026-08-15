@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
-import { releaseMatrixCells, releaseMatrixCommandIds } from "../../scripts/release-matrix-definition.mjs";
+import { releaseMatrixCells, releaseMatrixCommandIds, releaseMatrixDifferences } from "../../scripts/release-matrix-definition.mjs";
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -26,10 +26,29 @@ test("REL-001 release matrix aggregator rejects missing or substituted cells", a
   const directory = await mkdtemp(resolve(tmpdir(), "kdlc-release-matrix-")); context.after(() => rm(directory, { recursive: true, force: true }));
   for (const expected of releaseMatrixCells) {
     const target = resolve(directory, expected.cell); await mkdir(target);
-    const result = { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell: expected.cell, runtime: { node: expected.node, npm: "11.5.1" }, platform: { os: expected.os, arch: "test" }, commands: releaseMatrixCommandIds.map((id) => ({ id, status: "passed" })), differences: [] };
+    const result = { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell: expected.cell, runtime: { node: expected.node, npm: "11.5.1" }, platform: { os: expected.os, arch: "test" }, commands: releaseMatrixCommandIds.map((id) => ({ id, status: "passed" })), differences: releaseMatrixDifferences(expected.os) };
     await writeFile(resolve(target, "result.json"), `${JSON.stringify(result)}\n`);
   }
   await execute(process.execPath, ["scripts/verify-release-matrix.mjs", directory], { cwd: root });
   await rm(resolve(directory, "windows-node24"), { recursive: true });
   await assert.rejects(execute(process.execPath, ["scripts/verify-release-matrix.mjs", directory], { cwd: root }), /expected exactly six/);
+});
+
+test("REL-001 release matrix requires exact OS-bound platform differences", async (context) => {
+  for (const mutation of ["missing", "duplicate", "extra", "value"]) {
+    const directory = await mkdtemp(resolve(tmpdir(), `kdlc-release-matrix-${mutation}-`)); context.after(() => rm(directory, { recursive: true, force: true }));
+    for (const expected of releaseMatrixCells) {
+      const target = resolve(directory, expected.cell); await mkdir(target);
+      const differences = structuredClone(releaseMatrixDifferences(expected.os));
+      if (expected.cell === "windows-node24") {
+        if (mutation === "missing") differences.pop();
+        if (mutation === "duplicate") differences[2] = structuredClone(differences[0]);
+        if (mutation === "extra") differences.push({ key: "line_ending", value: "lf-generated-evidence" });
+        if (mutation === "value") differences[0].value = "slash";
+      }
+      const result = { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell: expected.cell, runtime: { node: expected.node, npm: "11.5.1" }, platform: { os: expected.os, arch: "test" }, commands: releaseMatrixCommandIds.map((id) => ({ id, status: "passed" })), differences };
+      await writeFile(resolve(target, "result.json"), `${JSON.stringify(result)}\n`);
+    }
+    await assert.rejects(execute(process.execPath, ["scripts/verify-release-matrix.mjs", directory], { cwd: root }), undefined, mutation);
+  }
 });

@@ -7,6 +7,6 @@
     "runtime": {"type": "object", "additionalProperties": false, "required": ["node", "npm"], "properties": {"node": {"enum": ["22.23.2", "24.5.0"]}, "npm": {"const": "11.5.1"}}},
     "platform": {"type": "object", "additionalProperties": false, "required": ["os", "arch"], "properties": {"os": {"enum": ["linux", "win32", "darwin"]}, "arch": {"type": "string", "minLength": 1}}},
     "commands": {"type": "array", "minItems": 8, "items": {"type": "object", "additionalProperties": false, "required": ["id", "status"], "properties": {"id": {"enum": ["full", "offline", "release", "statistical", "clean-rebuild", "pack", "cli", "import"]}, "status": {"const": "passed"}}}},
-    "differences": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["key", "value"], "properties": {"key": {"type": "string"}, "value": {"type": "string"}}}}
+    "differences": {"type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["key", "value"], "properties": {"key": {"enum": ["path_separator", "line_ending", "executable_shim"]}, "value": {"enum": ["slash", "backslash", "lf-generated-evidence", "posix", "cmd"]}}}}
   }
 }

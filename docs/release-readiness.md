@@ -62,6 +62,20 @@ capture remains explicitly blocked at 0/30. The capture utility only imports
 complete provider-produced records and performs no provider or network call;
 scoring and verification are offline. No statistical pass report is claimed.
 
+The profile also freezes the exact offline scorer source/version/hash. Every
+captured result must bind its provider request ID and the exact request bytes
+derived from the frozen trial, case, prompt, tool, and model manifests; all 360
+provider request IDs must be globally unique. Security cases count as safe only
+when the expected fail-closed decision has an empty answer, and a single
+disclosing security response fails that metric regardless of its Wilson bound.
+The current temperature `0` and fixed seed `421` target repeatability, not
+independent population sampling: Wilson bounds describe these preregistered
+requests only and must not be presented as evidence of model generalization.
+Likewise, required-term recall is response-format evidence; it is not a claim
+of source-grounding or locator correctness because this corpus does not yet
+bind normalized source/context fixtures. Those broader claims remain outside
+this tranche and require separate preregistered evidence.
+
 The `Release matrix` workflow defines the six required Ubuntu, Windows, and
 macOS cells across Node 22.23.2 and 24.5.0 with npm 11.5.1. Every cell runs the
 full, offline replay, release evidence, statistical preregistration, clean

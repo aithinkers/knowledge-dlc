@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { releaseMatrixCells } from "./release-matrix-definition.mjs";
+import { releaseMatrixCells, releaseMatrixDifferences } from "./release-matrix-definition.mjs";
 
 const execute = promisify(execFile); const [cellFlag, cell, outputFlag, output] = process.argv.slice(2);
 if (cellFlag !== "--cell" || !cell || outputFlag !== "--output" || !output) throw new Error("usage: node scripts/run-release-matrix-cell.mjs --cell <cell> --output <result.json>");
@@ -41,8 +41,6 @@ try {
   await execute(process.execPath, [bin, "init", "--output", "json"], { cwd: consumer, maxBuffer: 16 * 1024 * 1024 });
   await execute(process.execPath, [bin, "doctor", "--output", "json"], { cwd: consumer, maxBuffer: 16 * 1024 * 1024 }); commands.push({ id: "cli", status: "passed" });
   await execute(process.execPath, ["--input-type=module", "--eval", "await import('knowledge-dlc/cli'); await import('knowledge-dlc/adapters');"], { cwd: consumer, env: { ...process.env, NODE_PATH: resolve(consumer, "node_modules").split(delimiter).join(delimiter) } }); commands.push({ id: "import", status: "passed" });
-  const result = { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell, runtime: { node: nodeVersion, npm: npmVersion }, platform: { os: process.platform, arch: process.arch }, commands, differences: [
-    { key: "path_separator", value: process.platform === "win32" ? "backslash" : "slash" }, { key: "line_ending", value: "lf-generated-evidence" }, { key: "executable_shim", value: process.platform === "win32" ? "cmd" : "posix" }
-  ] };
+  const result = { api_version: "kdlc.dev/release-matrix-result/v1alpha1", cell, runtime: { node: nodeVersion, npm: npmVersion }, platform: { os: process.platform, arch: process.arch }, commands, differences: releaseMatrixDifferences(process.platform) };
   await writeFile(resolve(output), `${JSON.stringify(result, null, 2)}\n`);
 } finally { await makeRemovable(temporary); await rm(temporary, { recursive: true, force: true }); }
