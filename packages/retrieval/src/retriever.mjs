@@ -10,15 +10,36 @@ const MODES = new Set(["wiki-only", "sources-only", "trusted-only", "fresh-only"
 const TRUST = Object.freeze({ unverified: 0, "machine-confirmed": 1, "human-reviewed": 2 });
 const CONFLICT_TYPES = new Set(["contradicting", "conflict", "unresolved"]);
 const authorizationStates = new WeakMap();
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+function validCalendarDate(year, month, day) {
+  const y = Number(year); const m = Number(month); const d = Number(day);
+  if (m < 1 || m > 12) return false;
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return d >= 1 && d <= days[m - 1];
+}
+function validIsoDate(value) {
+  const match = typeof value === "string" ? ISO_DATE.exec(value) : null;
+  return Boolean(match && validCalendarDate(match[1], match[2], match[3]));
+}
+function validRfc3339(value) {
+  const match = typeof value === "string" ? RFC3339.exec(value) : null;
+  if (!match || !validCalendarDate(match[1], match[2], match[3])) return false;
+  const [, , , , hour, minute, second, offsetHour = "00", offsetMinute = "00"] = match;
+  return Number(hour) <= 23 && Number(minute) <= 59 && Number(second) <= 59 && Number(offsetHour) <= 23 && Number(offsetMinute) <= 59
+    && Number.isFinite(Date.parse(value));
+}
 
 function terms(value) { return [...new Set(String(value).normalize("NFKC").toLocaleLowerCase("en").match(/[\p{L}\p{N}_-]+/gu) ?? [])]; }
-function trustTier(frontmatter) {
+function trustTier(frontmatter, now) {
   const values = frontmatter.verified ? (Array.isArray(frontmatter.verified) ? frontmatter.verified : [frontmatter.verified]) : [];
   const verified = values.filter((event) => event && typeof event === "object" && typeof event.by === "string" && typeof event.at === "string"
-    && /^(?:human:[A-Za-z0-9._@/-]+|process:[A-Za-z0-9._@/-]+|[a-z][a-z0-9_-]*\/[^/\s]+)$/.test(event.by) && Number.isFinite(Date.parse(event.at)));
+    && /^(?:human:[A-Za-z0-9._@/-]+|process:[A-Za-z0-9._@/-]+|[a-z][a-z0-9_-]*\/[^/\s]+)$/.test(event.by) && validRfc3339(event.at) && Date.parse(event.at) <= now.getTime());
   return verified.some(({ by }) => by.startsWith("human:")) ? "human-reviewed" : verified.length ? "machine-confirmed" : "unverified";
 }
-function stale(frontmatter, today) { return frontmatter.stale_after !== undefined && (typeof frontmatter.stale_after !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(frontmatter.stale_after) || today >= frontmatter.stale_after); }
+function stale(frontmatter, today) { return frontmatter.stale_after !== undefined && (!validIsoDate(frontmatter.stale_after) || today >= frontmatter.stale_after); }
 function list(value) { return Array.isArray(value) ? value : []; }
 function rawScore(query, concept) {
   const title = terms(concept.frontmatter.title ?? concept.id); const description = terms(concept.frontmatter.description ?? ""); const body = terms(concept.body);
@@ -136,7 +157,7 @@ export class FederatedRetriever {
       if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt <= this.authorizationMonotonic()
         || authorizationState.principalHash !== principalHash || !authorizedMode) retrievalFail("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED", "Retrieval requires a matching current precomputed authorization snapshot");
       const queryTerms = terms(query); if (!queryTerms.length) return noDisclosure();
-      const today = this.now().toISOString().slice(0, 10); const eligible = []; const { internallyDenied } = authorizedMode;
+      const current = this.now(); const today = current.toISOString().slice(0, 10); const eligible = []; const { internallyDenied } = authorizedMode;
       for (const { mount, concepts } of authorizedMode.mounts) {
         await verifyMountIdentity(mount);
         for (const prepared of concepts) {
@@ -145,7 +166,7 @@ export class FederatedRetriever {
             if (canonicalJson(fileIdentity(await lstat(`${mount.root}/${path}`))) !== canonicalJson(prepared.fileIdentity)) throw new Error("concept identity mismatch");
           } catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
           const sourceLike = path.startsWith("references/sources/") || /source|evidence/i.test(concept.frontmatter.type ?? "");
-          const status = concept.frontmatter.status ?? "stable"; const tier = trustTier(concept.frontmatter); const isStale = stale(concept.frontmatter, today);
+          const status = concept.frontmatter.status ?? "stable"; const tier = trustTier(concept.frontmatter, current); const isStale = stale(concept.frontmatter, today);
           const modeEligible = mode === "exploratory" || mode === "audit" || mode === "refresh"
             ? true : mode === "sources-only" ? sourceLike : !sourceLike && ["stable", "deprecated"].includes(status);
           const trustEligible = TRUST[tier] >= TRUST[mode === "trusted-only" && minimumTrust === "unverified" ? "human-reviewed" : minimumTrust];
