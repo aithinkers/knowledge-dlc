@@ -213,7 +213,6 @@
       "status": "in-progress",
       "evidence": {
         "implementation": [
-          ".github/workflows/candidate-tests.yml",
           ".github/workflows/codeql.yml",
           ".github/workflows/dependency-review.yml",
           ".github/workflows/governance.yml",
