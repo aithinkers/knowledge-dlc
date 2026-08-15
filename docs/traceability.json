@@ -450,6 +450,29 @@
       }
     },
     {
+      "id": "FEAT-013",
+      "title": "Kiro IDE and Kiro CLI harness adapter",
+      "issue": 66,
+      "specification_sections": [
+        "9.4",
+        "22",
+        "25",
+        "27.1"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/agents/definitions/index.mjs",
+          "packages/adapters/generate.mjs",
+          "docs/getting-started.md",
+          "security/npm-package-files.json"
+        ],
+        "tests": [
+          "tests/governance/kiro-adapter.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,

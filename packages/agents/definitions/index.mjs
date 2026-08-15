@@ -120,6 +120,29 @@ export function renderCodexAgentToml(definition) {
   return `name = "${role}"\ndescription = "${description}"\ndeveloper_instructions = """\n${agentBody(definition)}\n"""\n`;
 }
 
+export function renderKiroAgentPrompt(definition) {
+  return `${agentBody(definition)}\n`;
+}
+
+export function renderKiroAgentManifest(definition, { harness }) {
+  const { role, description } = definition;
+  const readOnly = role.endsWith("-reviewer") || role === "retrieval-agent";
+  const manifest = {
+    $schema: "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/refs/heads/main/schemas/agent-v1.json",
+    name: role,
+    description: `K-DLC ${role} agent — ${description} Capabilities are enforced by the deterministic runtime role descriptor, not this manifest.`,
+    prompt: `file://${role}.md`,
+    tools: readOnly ? ["fs_read", "thinking"] : ["fs_read", "fs_write", "execute_bash", "thinking"],
+    allowedTools: ["fs_read", "thinking"],
+    ...(readOnly ? {} : {
+      toolsSettings: {
+        execute_bash: { allowedCommands: [`node (\\./)?distribution/${harness}/run\\.mjs [a-z-]+( .*)?`] },
+      },
+    }),
+  };
+  return manifest;
+}
+
 export function renderAgentMarkdown(definition) {
   const { role, description } = definition;
   return `---\nname: ${role}\ndescription: ${description}\n---\n\n${agentBody(definition)}\n`;

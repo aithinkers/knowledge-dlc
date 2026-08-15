@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { canonicalJson } from "../core/index.mjs";
 import { distributionDefinition as definition } from "./definitions.mjs";
-import { AGENT_DEFINITIONS, renderAgentMarkdown, renderCodexAgentMarkdown, renderCodexAgentToml } from "../agents/definitions/index.mjs";
+import { AGENT_DEFINITIONS, renderAgentMarkdown, renderCodexAgentMarkdown, renderCodexAgentToml, renderKiroAgentManifest, renderKiroAgentPrompt } from "../agents/definitions/index.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const commandLines = definition.cli_commands
@@ -71,6 +71,22 @@ for (const agent of AGENT_DEFINITIONS) {
   generated.set(`distribution/claude-code/agents/${agent.role}.md`, renderAgentMarkdown(agent));
   generated.set(`distribution/codex/.codex/agents/${agent.role}.md`, renderCodexAgentMarkdown(agent));
   generated.set(`distribution/codex/.codex/agents/${agent.role}.toml`, renderCodexAgentToml(agent));
+}
+for (const harness of ["kiro", "kiro-ide"]) {
+  generated.set(`distribution/${harness}/run.mjs`, adapterRunner);
+  generated.set(
+    `distribution/${harness}/AGENTS.md`,
+    `<!-- generated: packages/adapters/generate.mjs -->\n# K-DLC on ${harness === "kiro" ? "Kiro CLI" : "Kiro IDE"}\n\nAll operations invoke the same governed CLI engine and return its versioned\nJSON envelope. Do not bypass review, routing, or publication policy, and never\nedit canonical knowledge-base files directly. Invoke operations as\n[\"node\", \"distribution/${harness}/run.mjs\", <operation>, \"--output\", \"json\", ...args]\ndirectly without a shell. Supported operations: ${definition.cli_commands.join(", ")}.\n`,
+  );
+  for (const command of definition.cli_commands)
+    generated.set(
+      `distribution/${harness}/.kiro/skills/kdlc-${command}/SKILL.md`,
+      `---\nname: kdlc-${command}\ndescription: Run the governed K-DLC ${command} operation\nuser-invocable: true\n---\n\nInterpret the user arguments as a JSON string array and invoke [\"node\", \"distribution/${harness}/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", <arguments-json>] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
+    );
+  for (const agent of AGENT_DEFINITIONS) {
+    generated.set(`distribution/${harness}/.kiro/agents/${agent.role}.md`, renderKiroAgentPrompt(agent));
+    generated.set(`distribution/${harness}/.kiro/agents/${agent.role}.json`, `${canonicalJson(renderKiroAgentManifest(agent, { harness }))}\n`);
+  }
 }
 let drift = false;
 for (const [relative, content] of generated) {
