@@ -115,7 +115,7 @@ function stableConceptFailures(concept, now) {
   return failures;
 }
 
-export function assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, current, validator, now = new Date().toISOString() }) {
+export function assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, runtimeTrust = {}, current, validator, now = new Date().toISOString() }) {
   requireValid(validator, "conceptProposal", proposal);
   requireValid(validator, "governedReviewPacket", packet);
   if (receipt) requireValid(validator, "reviewReceipt", receipt);
@@ -131,6 +131,7 @@ export function assessPublication({ proposal, packet, receipt, decisionState, fr
     else {
       const state = validator.validate("reviewDecision", decisionState);
       if (!state.valid || decisionState.proposal_id !== proposal.id || decisionState.packet_hash !== artifactHash(packet) || decisionState.receipt_id !== receipt.id || decisionState.receipt_hash !== artifactHash(receipt) || decisionState.decision !== receipt.decision) failures.push("active-decision-drift");
+      if (runtimeTrust.review !== true) failures.push("review-trust-proof-invalid");
       if (decisionState.decision !== "approved") failures.push(`active-decision-${decisionState.decision}`);
     }
     if (receipt.decision !== "approved") failures.push(`receipt-${receipt.decision}`);
@@ -149,6 +150,7 @@ export function assessPublication({ proposal, packet, receipt, decisionState, fr
     const decisionValidation = freshnessDecision ? validator.validate("freshnessDecision", freshnessDecision) : { valid: false };
     if (!validation.valid || !decisionValidation.valid || freshnessAuthorization.subject !== proposal.target.subject || freshnessAuthorization.value_hash !== artifactHash(current.concept?.frontmatter?.stale_after) || freshnessAuthorization.packet_hash !== artifactHash(packet) || !same(freshnessAuthorization.policy, policy)
       || freshnessDecision.proposal_id !== proposal.id || freshnessDecision.packet_hash !== artifactHash(packet) || freshnessDecision.authorization_hash !== artifactHash(freshnessAuthorization) || freshnessDecision.value_hash !== freshnessAuthorization.value_hash || !same(freshnessDecision.policy, policy) || freshnessDecision.authorized_by !== freshnessAuthorization.authorized_by) failures.push("freshness-authorization-invalid");
+    if (runtimeTrust.freshness !== true) failures.push("freshness-trust-proof-invalid");
   }
   if (reviewHash(current.concept, packet.review.fields) !== packet.review.hash) failures.push("review-content-drift");
   if (reviewHash(packet.concept.after, packet.review.fields) !== packet.review.hash) failures.push("packet-review-hash-invalid");

@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
@@ -154,25 +155,41 @@ export class RepositoryFileStore {
     this.#handles = handles;
   }
 
-  static async create(root, paths) {
+  static async create(root, paths, { hooks = {} } = {}) {
     if (typeof root !== "string" || root.length === 0 || !Array.isArray(paths) || !paths.length) throw new TypeError("Repository file store requires a root and explicit non-empty path allowlist");
+    if (!hooks || typeof hooks !== "object" || Object.keys(hooks).some((name) => !["afterValidation", "afterOpen"].includes(name)) || Object.values(hooks).some((hook) => typeof hook !== "function")) throw new TypeError("Repository file store hooks must be explicit functions");
     const canonicalRoot = await realpath(root); const handles = new Map();
     try {
       for (const declaration of paths) {
         const path = typeof declaration === "string" ? declaration : declaration?.path; const writable = declaration?.write === true;
-        const segments = safePath(path); let current = canonicalRoot;
-        for (const segment of segments) {
-          current = resolve(current, segment);
-          const metadata = await lstat(current);
+        if (handles.has(path)) throw new AgentPolicyError("KDLC_PATH_DUPLICATE", `Repository capability path is duplicated: ${path}`);
+        const segments = safePath(path); let current = canonicalRoot; const ancestry = [];
+        for (const [index, segment] of segments.entries()) {
+          const candidate = resolve(current, segment);
+          const metadata = await lstat(candidate);
           if (metadata.isSymbolicLink()) throw new AgentPolicyError("KDLC_PATH_SYMLINK", `Capability path crosses a symbolic link: ${path}`);
-          const canonical = await realpath(current);
+          const canonical = await realpath(candidate);
           if (!canonical.startsWith(`${canonicalRoot}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
+          if (index < segments.length - 1 && !metadata.isDirectory()) throw new AgentPolicyError("KDLC_PATH_INVALID", `Capability path has a non-directory parent: ${path}`);
+          ancestry.push({ path: canonical, dev: metadata.dev, ino: metadata.ino, directory: metadata.isDirectory() });
           current = canonical;
         }
-        const handle = await open(current, (writable ? constants.O_RDWR : constants.O_RDONLY) | constants.O_NOFOLLOW);
-        const opened = await handle.stat(); const resolved = await lstat(current);
-        if (!opened.isFile() || opened.dev !== resolved.dev || opened.ino !== resolved.ino) { await handle.close(); throw new AgentPolicyError("KDLC_PATH_RACE", `Capability target changed while it was opened: ${path}`); }
-        handles.set(path, { handle, writable });
+        await hooks.afterValidation?.({ path, target: current });
+        let handle;
+        try {
+          handle = await open(current, (writable ? constants.O_RDWR : constants.O_RDONLY) | constants.O_NOFOLLOW);
+          await hooks.afterOpen?.({ path, handle });
+          const opened = await handle.stat(); const expected = ancestry.at(-1);
+          if (!opened.isFile() || opened.dev !== expected.dev || opened.ino !== expected.ino) throw new AgentPolicyError("KDLC_PATH_RACE", `Capability target changed while it was opened: ${path}`);
+          for (const component of ancestry) {
+            const actual = await lstat(component.path);
+            if (actual.isSymbolicLink() || actual.dev !== component.dev || actual.ino !== component.ino || actual.isDirectory() !== component.directory) throw new AgentPolicyError("KDLC_PATH_RACE", `Capability ancestry changed while it was opened: ${path}`);
+          }
+          handles.set(path, { handle, writable }); handle = undefined;
+        } catch (error) {
+          await handle?.close().catch(() => {});
+          throw error;
+        }
       }
       return new RepositoryFileStore(repositoryStoreToken, handles);
     } catch (error) {
@@ -200,6 +217,74 @@ export class RepositoryFileStore {
 }
 
 const repositoryStoreToken = Object.freeze({});
+
+const REVIEW_PROOF_DOMAIN = "kdlc.runtime.review-decision/v1";
+const FRESHNESS_PROOF_DOMAIN = "kdlc.runtime.freshness-decision/v1";
+
+function sameJson(left, right) { return canonicalJson(left) === canonicalJson(right); }
+function unsigned(value) { if (!value || typeof value !== "object" || Array.isArray(value)) return null; const { trust_proof: ignored, ...payload } = value; return payload; }
+
+export class RuntimeTrustAuthority {
+  #key;
+  #keyId;
+  #activeReviews = new Map();
+  #activeFreshness = new Map();
+
+  constructor({ key = randomBytes(32), keyId = "runtime-local-v1" } = {}) {
+    if (!(key instanceof Uint8Array) || key.byteLength < 32 || typeof keyId !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) throw new TypeError("Runtime trust authority requires at least 256 bits of key material and a portable key ID");
+    this.#key = Buffer.from(key); this.#keyId = keyId;
+  }
+
+  #mac(domain, payload, principal) {
+    return createHmac("sha256", this.#key).update(`${domain}\0${canonicalJson({ payload, principal })}`).digest();
+  }
+
+  #proof(domain, payload, principal) {
+    return Object.freeze({ algorithm: "hmac-sha256", key_id: this.#keyId, domain, principal: structuredClone(principal), mac: `sha256:${this.#mac(domain, payload, principal).toString("hex")}` });
+  }
+
+  #verify(domain, payload, principal, proof) {
+    try {
+      if (!proof || proof.algorithm !== "hmac-sha256" || proof.key_id !== this.#keyId || proof.domain !== domain || !sameJson(proof.principal, principal) || !/^sha256:[a-f0-9]{64}$/.test(proof.mac ?? "")) return false;
+      const actual = Buffer.from(proof.mac.slice(7), "hex"); const expected = this.#mac(domain, payload, principal);
+      return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected);
+    } catch { return false; }
+  }
+
+  issueReviewProof({ workflowId, receipt, decision, session }) {
+    const { reviewer } = resolveAuthenticatedReviewSession(session);
+    if (!sameJson(reviewer, receipt?.reviewer)) throw new AgentPolicyError("KDLC_TRUST_PROOF_INVALID", "Review proof principal must exactly match the authenticated receipt principal");
+    return this.#proof(REVIEW_PROOF_DOMAIN, { workflow_id: workflowId, receipt, decision: unsigned(decision) }, reviewer);
+  }
+
+  activateReview({ workflowId, receipt, decision }) {
+    if (!this.verifyReview({ workflowId, receipt, decision, requireActive: false })) throw new AgentPolicyError("KDLC_TRUST_PROOF_INVALID", "Cannot activate an invalid review trust proof");
+    this.#activeReviews.set(`${workflowId}:${decision.proposal_id}`, decision.trust_proof.mac);
+  }
+
+  verifyReview({ workflowId, receipt, decision, requireActive = true }) {
+    const valid = this.#verify(REVIEW_PROOF_DOMAIN, { workflow_id: workflowId, receipt, decision: unsigned(decision) }, receipt?.reviewer, decision?.trust_proof);
+    return valid && (!requireActive || this.#activeReviews.get(`${workflowId}:${decision.proposal_id}`) === decision.trust_proof.mac);
+  }
+
+  issueFreshnessProof({ workflowId, authorization, decision, session }) {
+    const { role, reviewer } = resolveAuthenticatedReviewSession(session);
+    if (role !== "governance-reviewer") throw new AgentPolicyError("KDLC_TRUST_PROOF_INVALID", "Freshness proof requires an authenticated governance reviewer");
+    if (reviewer.actor !== authorization?.authorized_by) throw new AgentPolicyError("KDLC_TRUST_PROOF_INVALID", "Freshness proof principal must exactly match the authenticated authorization principal");
+    return this.#proof(FRESHNESS_PROOF_DOMAIN, { workflow_id: workflowId, authorization, decision: unsigned(decision) }, reviewer);
+  }
+
+  activateFreshness({ workflowId, authorization, decision }) {
+    if (!this.verifyFreshness({ workflowId, authorization, decision, requireActive: false })) throw new AgentPolicyError("KDLC_TRUST_PROOF_INVALID", "Cannot activate an invalid freshness trust proof");
+    this.#activeFreshness.set(`${workflowId}:${decision.proposal_id}`, decision.trust_proof.mac);
+  }
+
+  verifyFreshness({ workflowId, authorization, decision, requireActive = true }) {
+    const principal = decision?.trust_proof?.principal;
+    const valid = principal?.actor === authorization?.authorized_by && this.#verify(FRESHNESS_PROOF_DOMAIN, { workflow_id: workflowId, authorization, decision: unsigned(decision) }, principal, decision?.trust_proof);
+    return Boolean(valid && (!requireActive || this.#activeFreshness.get(`${workflowId}:${decision.proposal_id}`) === decision.trust_proof.mac));
+  }
+}
 
 export class RecordedModelRuntime {
   #validator;

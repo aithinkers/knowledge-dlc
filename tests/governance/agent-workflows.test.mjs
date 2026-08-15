@@ -54,7 +54,7 @@ class SubstitutingStore extends MemoryArtifactStore {
 
 async function approvedHarness() {
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
-  const store = new MemoryArtifactStore();
+  const store = new SubstitutingStore();
   const session = principals.establishReviewSession("reviewer-123", "trust-reviewer");
   const context = reviewContext();
   const harness = await GovernedAgentWorkflows.create({ validator, store, clock, session, reviewContextSession: trustedReviewContext("wf_ingest", context) });
@@ -62,7 +62,7 @@ async function approvedHarness() {
   const output = await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording, normalizedEvidence: await normalizedFixture("ingest") });
   const review = await harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" });
   const decision = await harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_approved" });
-  return { validator, store, harness, recording, output, context, review, receipt: decision.receipt };
+  return { validator, store, harness, recording, output, context, review, receipt: decision.receipt, decision: decision.decision };
 }
 
 test("FEAT-004 role and stage descriptors enforce runtime path capabilities", async (t) => {
@@ -107,6 +107,27 @@ test("FEAT-004 role and stage descriptors enforce runtime path capabilities", as
     const stage = JSON.parse(await readFile(resolve(root, "packages/workflows/stages", name), "utf8"));
     assert.deepEqual(validator.validate("lifecycleStage", stage), { valid: true, errors: [] }, name);
   }
+});
+
+test("FEAT-004 repository file capabilities reject parent races and close failed opens", async (t) => {
+  const repositoryRoot = await mkdtemp(resolve(tmpdir(), "kdlc-capability-race-"));
+  const outsideRoot = await mkdtemp(resolve(tmpdir(), "kdlc-capability-outside-"));
+  t.after(async () => { await rm(repositoryRoot, { recursive: true, force: true }); await rm(outsideRoot, { recursive: true, force: true }); });
+  const parent = resolve(repositoryRoot, "workflow/runs/wf_ingest/state");
+  await mkdir(parent, { recursive: true });
+  await writeFile(resolve(parent, "safe.json"), '{"safe":true}\n');
+  await writeFile(resolve(outsideRoot, "safe.json"), '{"outside":true}\n');
+  await assert.rejects(() => RepositoryFileStore.create(repositoryRoot, ["workflow/runs/wf_ingest/state/safe.json"], { hooks: { afterValidation: async () => {
+    await rename(parent, `${parent}-original`);
+    await symlink(outsideRoot, parent);
+  } } }), (error) => error.code === "KDLC_PATH_RACE");
+
+  const leakRoot = await mkdtemp(resolve(tmpdir(), "kdlc-capability-leak-"));
+  t.after(() => rm(leakRoot, { recursive: true, force: true }));
+  await writeFile(resolve(leakRoot, "safe.json"), '{"safe":true}\n');
+  let failedHandle;
+  await assert.rejects(() => RepositoryFileStore.create(leakRoot, ["safe.json"], { hooks: { afterOpen: ({ handle }) => { failedHandle = handle; throw new Error("injected post-open failure"); } } }), /injected post-open failure/);
+  await assert.rejects(() => failedHandle.stat(), (error) => error.code === "EBADF");
 });
 
 test("FEAT-004 ingest and adoption replay schema-valid recorded model outputs", async () => {
@@ -159,9 +180,10 @@ test("FEAT-004 invalid or drifted model recordings fail before emitting artifact
 });
 
 test("FEAT-004 approved human review binds the exact packet and permits stable publication intent", async () => {
-  const { validator, harness, output, context, review, receipt } = await approvedHarness();
+  const { validator, harness, output, context, review, receipt, decision } = await approvedHarness();
   assert.equal(validator.validate("governedReviewPacket", review.packet).valid, true);
   assert.equal(validator.validate("reviewReceipt", receipt).valid, true);
+  assert.equal(validator.validate("reviewDecision", decision).valid, true);
   assert.equal(receipt.packet_hash, artifactHash(review.packet));
   assert.equal(receipt.review.hash, review.packet.review.hash);
   assert.deepEqual(receipt.source_hashes, [digest("a")]);
@@ -181,7 +203,7 @@ test("FEAT-004 approved human review binds the exact packet and permits stable p
 });
 
 test("FEAT-004 stable publication fails closed and later decisions revoke approval", async () => {
-  const { harness, store, output, context } = await approvedHarness();
+  const { harness, store, output, context, receipt: approvedReceipt, decision: approvedDecision } = await approvedHarness();
   const current = { concept: output.proposals[0].concept.after, target_revision: "rev-1", source_hashes: [digest("a")], resolved_dependencies: context.resolved.dependencies, profile: context.resolved.profile, policies: context.resolved.policies };
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("receipt-missing"));
   const governanceHarness = await GovernedAgentWorkflows.create({ validator: await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS), store, clock, session: principals.establishReviewSession("governor", "governance-reviewer") });
@@ -190,6 +212,20 @@ test("FEAT-004 stable publication fails closed and later decisions revoke approv
   await assert.rejects(() => governanceHarness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: "rr_rejected", current }), (error) => error.details.failures.includes("active-decision-rejected"));
   await assert.rejects(() => governanceHarness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "changes-requested", receiptId: "rr_changes", expectedReceiptId: "rr_approved" }), (error) => error.code === "KDLC_DECISION_CONFLICT");
   await assert.rejects(() => GovernedAgentWorkflows.create({ store, clock, session: { role: "trust-reviewer", reviewer: { actor: "human:forged", principal_mode: "local" } } }).then((forged) => forged.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_forged", expectedReceiptId: "rr_rejected" })), (error) => error.code === "KDLC_SESSION_INVALID");
+  store.substitute("workflow/runs/wf_ingest/receipts/rr_approved.json", approvedReceipt);
+  store.substitute("workflow/runs/wf_ingest/reviews/pr_alpha/decision.json", approvedDecision);
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: "rr_approved", current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("review-trust-proof-invalid"));
+});
+
+test("FEAT-004 coordinated receipt and decision substitution cannot forge runtime trust", async () => {
+  const { harness, store, output, context, receipt, decision } = await approvedHarness();
+  const forgedReceipt = structuredClone(receipt);
+  forgedReceipt.reviewer = { actor: "human:attacker", principal_mode: "local" };
+  const forgedDecision = { ...structuredClone(decision), receipt_hash: artifactHash(forgedReceipt) };
+  store.substitute("workflow/runs/wf_ingest/receipts/rr_approved.json", forgedReceipt);
+  store.substitute("workflow/runs/wf_ingest/reviews/pr_alpha/decision.json", forgedDecision);
+  const current = { concept: output.proposals[0].concept.after, target_revision: "rev-1", source_hashes: [digest("a")], resolved_dependencies: context.resolved.dependencies, profile: context.resolved.profile, policies: context.resolved.policies };
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: "rr_approved", current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("review-trust-proof-invalid"));
 });
 
 test("FEAT-004 review-covered drift invalidates verification and reconciles only through a proposal", async () => {
@@ -295,13 +331,22 @@ test("FEAT-004 review packets require exact claims, applicable governance, dynam
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, freshnessAuthorization: forgedAuthorization, current }), (error) => error.details.failures.includes("freshness-authorization-invalid"));
   await assert.rejects(() => harness.authorizeFreshness({ workflowId: "wf_ingest", proposalId: "pr_alpha", concept: current.concept }), (error) => error.code === "KDLC_FRESHNESS_AUTHORITY_DENIED");
   const governanceHarness = await GovernedAgentWorkflows.create({ validator, store, clock, session: principals.establishReviewSession("governor", "governance-reviewer"), reviewRequirements: requirements });
-  const { authorization } = await governanceHarness.authorizeFreshness({ workflowId: "wf_ingest", proposalId: "pr_alpha", concept: current.concept });
+  const { authorization, decision: freshnessDecision } = await governanceHarness.authorizeFreshness({ workflowId: "wf_ingest", proposalId: "pr_alpha", concept: current.concept });
   assert.equal(authorization.authorized_by, "human:governor");
+  assert.equal(validator.validate("freshnessDecision", freshnessDecision).valid, true);
   await assert.rejects(() => governanceHarness.authorizeFreshness({ workflowId: "wf_ingest", proposalId: "pr_alpha", concept: current.concept }), (error) => error.code === "KDLC_FRESHNESS_CONFLICT");
   const freshnessPath = "workflow/runs/wf_ingest/reviews/pr_alpha/freshness-authorization.json";
   store.substitute(freshnessPath, { ...authorization, authorized_by: "human:attacker" });
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("freshness-authorization-invalid"));
   store.clearSubstitution(freshnessPath);
+  const freshnessDecisionPath = "workflow/runs/wf_ingest/reviews/pr_alpha/freshness-decision.json";
+  const forgedFreshness = { ...structuredClone(authorization), authorized_by: "human:attacker" };
+  const forgedFreshnessDecision = { ...structuredClone(freshnessDecision), authorization_hash: artifactHash(forgedFreshness), authorized_by: "human:attacker" };
+  store.substitute(freshnessPath, forgedFreshness);
+  store.substitute(freshnessDecisionPath, forgedFreshnessDecision);
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("freshness-trust-proof-invalid"));
+  store.clearSubstitution(freshnessPath);
+  store.clearSubstitution(freshnessDecisionPath);
   await harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current });
   current.concept.frontmatter.risk = "low";
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.details.failures.includes("review-content-drift"));

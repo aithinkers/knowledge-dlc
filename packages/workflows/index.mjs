@@ -1,4 +1,4 @@
-import { AGENT_WORKFLOW_SCHEMA_PATHS, CapabilityRuntime, RecordedModelRuntime, resolveAuthenticatedReviewSession, resolveTrustedReviewContext } from "../agents/index.mjs";
+import { AGENT_WORKFLOW_SCHEMA_PATHS, CapabilityRuntime, RecordedModelRuntime, RuntimeTrustAuthority, resolveAuthenticatedReviewSession, resolveTrustedReviewContext } from "../agents/index.mjs";
 import { createContractValidator } from "../contracts/index.mjs";
 import { artifactHash, canonicalJson } from "../core/index.mjs";
 import { assessPublication, createReviewPacket, createReviewReceipt, GovernanceError, reconcileDirectEdit } from "../governance/index.mjs";
@@ -15,6 +15,7 @@ export class MemoryArtifactStore {
 }
 
 const memoryStoreStates = new WeakMap();
+const storeTrustAuthorities = new WeakMap();
 function memoryState(store) {
   const state = memoryStoreStates.get(store);
   if (!state) throw new GovernanceError("KDLC_STORE_ATOMIC_REQUIRED", "Governed workflows require a capability-scoped artifact store");
@@ -46,6 +47,15 @@ function storeFreshness(store, { authorizationPath, authorization, decisionPath,
   const updated = new Map(artifacts); updated.set(authorizationPath, structuredClone(authorization)); updated.set(decisionPath, structuredClone(decision)); memoryStoreStates.set(store, updated);
   return { status: "stored" };
 }
+function resolveTrustAuthority(store, authority) {
+  const established = storeTrustAuthorities.get(store);
+  if (established && authority && established !== authority) throw new GovernanceError("KDLC_TRUST_AUTHORITY_CONFLICT", "Artifact store is already bound to another runtime trust authority");
+  if (established) return established;
+  const selected = authority ?? new RuntimeTrustAuthority();
+  if (!(selected instanceof RuntimeTrustAuthority)) throw new GovernanceError("KDLC_TRUST_AUTHORITY_INVALID", "Governed workflows require a trusted runtime proof authority");
+  storeTrustAuthorities.set(store, selected);
+  return selected;
+}
 
 export class GovernedAgentWorkflows {
   #store;
@@ -56,8 +66,9 @@ export class GovernedAgentWorkflows {
   #reviewContextSession;
   #validator;
   #clock;
+  #trustAuthority;
 
-  constructor({ store, capabilities, models, session, reviewRequirements, reviewContextSession, validator, clock = { now: () => new Date().toISOString() } }) {
+  constructor({ store, capabilities, models, session, reviewRequirements, reviewContextSession, validator, trustAuthority, clock = { now: () => new Date().toISOString() } }) {
     this.#store = store;
     this.#capabilities = capabilities;
     this.#models = models;
@@ -65,10 +76,11 @@ export class GovernedAgentWorkflows {
     this.#reviewRequirements = structuredClone(reviewRequirements);
     this.#reviewContextSession = reviewContextSession;
     this.#validator = validator;
+    this.#trustAuthority = trustAuthority;
     this.#clock = clock;
   }
 
-  static async create({ store = new MemoryArtifactStore(), capabilities, models, session, reviewRequirements = { sensor_ids: ["source-anchor-valid"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }, reviewContextSession, validator, clock } = {}) {
+  static async create({ store = new MemoryArtifactStore(), capabilities, models, session, reviewRequirements = { sensor_ids: ["source-anchor-valid"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }, reviewContextSession, validator, trustAuthority, clock } = {}) {
     const contracts = validator ?? await createContractValidator(undefined, AGENT_WORKFLOW_SCHEMA_PATHS);
     return new GovernedAgentWorkflows({
       store,
@@ -78,6 +90,7 @@ export class GovernedAgentWorkflows {
       reviewRequirements,
       reviewContextSession,
       validator: contracts,
+      trustAuthority: resolveTrustAuthority(store, trustAuthority),
       clock
     });
   }
@@ -161,12 +174,14 @@ export class GovernedAgentWorkflows {
     const receipt = createReviewReceipt({ packet, decision, session: this.#session, receiptId, reviewedAt: this.#clock.now(), validator: this.#validator });
     const path = `workflow/runs/${workflowId}/receipts/${receiptId}.json`;
     const decisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`;
-    const activeDecision = { api_version: "kdlc.dev/review-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), receipt_id: receiptId, receipt_hash: artifactHash(receipt), decision, decided_at: this.#clock.now() };
+    const unsignedDecision = { api_version: "kdlc.dev/review-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), receipt_id: receiptId, receipt_hash: artifactHash(receipt), decision, decided_at: this.#clock.now() };
+    const activeDecision = { ...unsignedDecision, trust_proof: this.#trustAuthority.issueReviewProof({ workflowId, receipt, decision: unsignedDecision, session: this.#session }) };
     const validation = this.#validator.validate("reviewDecision", activeDecision);
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Review decision failed schema validation", { errors: validation.errors });
     const stored = storeDecision(this.#store, { receiptPath: path, receipt, decisionPath, decision: activeDecision, expectedReceiptId });
     if (stored.status === "receipt-exists") throw new GovernanceError("KDLC_RECEIPT_IMMUTABLE", `Receipt already exists: ${receiptId}`);
     if (stored.status === "conflict") throw new GovernanceError("KDLC_DECISION_CONFLICT", "Active decision changed before this decision was recorded", { expected: expectedReceiptId, current: stored.current });
+    this.#trustAuthority.activateReview({ workflowId, receipt, decision: activeDecision });
     return Object.freeze({ receipt, decision: structuredClone(activeDecision), path });
   }
 
@@ -181,11 +196,13 @@ export class GovernedAgentWorkflows {
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness authorization failed schema validation", { errors: validation.errors });
     const path = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-authorization.json`;
     const decisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-decision.json`;
-    const freshnessDecision = { api_version: "kdlc.dev/freshness-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), authorization_hash: artifactHash(authorization), value_hash: authorization.value_hash, policy: structuredClone(policy), authorized_by: reviewer.actor, activated_at: this.#clock.now() };
+    const unsignedDecision = { api_version: "kdlc.dev/freshness-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), authorization_hash: artifactHash(authorization), value_hash: authorization.value_hash, policy: structuredClone(policy), authorized_by: reviewer.actor, activated_at: this.#clock.now() };
+    const freshnessDecision = { ...unsignedDecision, trust_proof: this.#trustAuthority.issueFreshnessProof({ workflowId, authorization, decision: unsignedDecision, session: this.#session }) };
     const decisionValidation = this.#validator.validate("freshnessDecision", freshnessDecision);
     if (!decisionValidation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness decision failed schema validation", { errors: decisionValidation.errors });
     const stored = storeFreshness(this.#store, { authorizationPath: path, authorization, decisionPath, decision: freshnessDecision, expectedAuthorizationHash });
     if (stored.status === "conflict") throw new GovernanceError("KDLC_FRESHNESS_CONFLICT", "Freshness authorization changed before update", { expected: expectedAuthorizationHash, current: stored.current });
+    this.#trustAuthority.activateFreshness({ workflowId, authorization, decision: freshnessDecision });
     return Object.freeze({ authorization: structuredClone(authorization), decision: structuredClone(freshnessDecision), path });
   }
 
@@ -201,7 +218,11 @@ export class GovernedAgentWorkflows {
     const freshnessAuthorization = await this.#store.has(freshnessPath) ? await this.#get("conductor", freshnessPath) : null;
     const freshnessDecisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-decision.json`;
     const freshnessDecision = await this.#store.has(freshnessDecisionPath) ? await this.#get("conductor", freshnessDecisionPath) : null;
-    const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, current, validator: this.#validator, now: this.#clock.now() });
+    const runtimeTrust = {
+      review: receipt && decisionState ? this.#trustAuthority.verifyReview({ workflowId, receipt, decision: decisionState }) : false,
+      freshness: freshnessAuthorization && freshnessDecision ? this.#trustAuthority.verifyFreshness({ workflowId, authorization: freshnessAuthorization, decision: freshnessDecision }) : false
+    };
+    const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, runtimeTrust, current, validator: this.#validator, now: this.#clock.now() });
     if (!assessment.allowed) throw new GovernanceError("KDLC_PUBLICATION_DENIED", "Publication policy gates failed", { failures: assessment.failures });
     const intent = {
       api_version: "kdlc.dev/publication-intent/v1alpha1",
@@ -224,7 +245,7 @@ export class GovernedAgentWorkflows {
     const packet = await this.#get("integrator", `workflow/runs/${workflowId}/reviews/${reviewedProposalId}/packet.json`);
     const receipt = await this.#get("integrator", `workflow/runs/${workflowId}/receipts/${receiptId}.json`);
     const decision = await this.#get("integrator", `workflow/runs/${workflowId}/reviews/${reviewedProposalId}/decision.json`);
-    if (decision.decision !== "approved" || decision.receipt_id !== receipt.id || decision.receipt_hash !== artifactHash(receipt) || decision.packet_hash !== artifactHash(packet)) throw new GovernanceError("KDLC_RECONCILE_BINDING_INVALID", "Reconciliation requires the active authenticated approval");
+    if (decision.decision !== "approved" || decision.receipt_id !== receipt.id || decision.receipt_hash !== artifactHash(receipt) || decision.packet_hash !== artifactHash(packet) || !this.#trustAuthority.verifyReview({ workflowId, receipt, decision })) throw new GovernanceError("KDLC_RECONCILE_BINDING_INVALID", "Reconciliation requires the active authenticated approval");
     const proposal = reconcileDirectEdit({ proposalId, workflowId, target, reviewedConcept, currentConcept, packet, receipt, validator: this.#validator });
     const path = `workflow/runs/${workflowId}/proposals/${proposalId}.json`;
     await this.#put("integrator", path, proposal);
