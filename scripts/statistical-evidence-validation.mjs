@@ -50,20 +50,22 @@ const usable = (source, context) => current(source, context) && accessible(sourc
 const assertionIn = (assertion, source) => source.claims.some((claim) => same(claim, assertion));
 const citationIn = (citation, source) => citation.source_id === source.source_id && same(citation.locator, source.locator);
 const words = (value) => [...value.normalize("NFKC").toLocaleLowerCase("und").matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({ value: match[0], index: match.index }));
-const negations = new Set(["not", "no", "never", "without", "false", "incorrect", "wrong", "untrue", "deny", "denies", "denied", "refutes", "isnt", "arent", "nunca", "falso", "falsa", "ない", "不是"]);
-const quotedAt = (value, index) => {
-  const prefix = value.slice(0, index);
-  return (prefix.match(/"/g)?.length ?? 0) % 2 === 1 || (prefix.match(/'/g)?.length ?? 0) % 2 === 1 || prefix.lastIndexOf("“") > prefix.lastIndexOf("”") || prefix.lastIndexOf("‘") > prefix.lastIndexOf("’");
-};
+const negations = new Set(["not", "no", "never", "neither", "nor", "without", "cannot", "false", "incorrect", "wrong", "untrue", "deny", "denies", "denied", "refute", "refutes", "refuted", "isnt", "arent", "wasnt", "werent", "nunca", "sin", "falso", "falsa"]);
+const contradictionMarkers = new Set(["although", "but", "however", "instead", "rather", "versus", "vs", "obsolete", "superseded", "outdated", "aunque", "pero", "sino"]);
+const quotationMark = /[\p{Pi}\p{Pf}"'`«»‹›「」『』《》〈〉【】〔〕〝〞〟＂＇]/u;
+const numericTokens = (value) => value.normalize("NFKC").match(/\p{N}+(?:[.,]\p{N}+)?/gu) ?? [];
 export function affirmativelyContains(answer, phrase) {
   const normalized = answer.normalize("NFKC").toLocaleLowerCase("und"); const answerWords = words(normalized); const phraseWords = words(phrase).map(({ value }) => value);
   if (!phraseWords.length) return false;
+  const tokens = answerWords.map(({ value }) => value);
+  // Free text is never authoritative evidence. Credit only a simple affirmative
+  // rendering: any quotation, negation, contrast, or alternative numeric value
+  // makes the rendering ambiguous and therefore fails closed.
+  if (quotationMark.test(normalized) || tokens.some((token) => negations.has(token) || contradictionMarkers.has(token)) || normalized.includes("ない") || normalized.includes("不是")) return false;
+  const permittedNumbers = new Set(numericTokens(phrase));
+  if (numericTokens(normalized).some((number) => !permittedNumbers.has(number))) return false;
   for (let index = 0; index <= answerWords.length - phraseWords.length; index += 1) {
     if (!phraseWords.every((word, offset) => answerWords[index + offset].value === word)) continue;
-    if (quotedAt(normalized, answerWords[index].index)) continue;
-    const windowStart = Math.max(0, index - 3); const phraseStart = index - windowStart;
-    const nearby = answerWords.slice(windowStart, index + phraseWords.length + 3);
-    if (nearby.some(({ value }, offset) => (offset < phraseStart || offset >= phraseStart + phraseWords.length) && negations.has(value))) continue;
     return true;
   }
   return false;

@@ -227,17 +227,35 @@ test("REQ-EVAL-001 scorer gives no grounded credit for wrong decisions, echoed/n
 test("REQ-EVAL-001 answer scoring rejects unrelated, negated, quoted-only, and confusable renderings despite exact structured fields", async () => {
   assert.equal(affirmativelyContains("The period is 30 DAYS.", "30 days"), true);
   assert.equal(affirmativelyContains("El período es 30 di\u0301as.", "30 días"), true);
-  for (const answer of ["THIS ANSWER IS FALSE AND UNRELATED", "not 30 days", "30 days is false", "the source says ‘30 days’", "30 dаys", "no son 30 días"]) assert.equal(affirmativelyContains(answer, answer.includes("días") ? "30 días" : "30 days"), false, answer);
-  const captures = await Promise.all(Array.from({ length: 30 }, (_, index) => perfectCapture(index + 1)));
-  for (const capture of captures) {
-    for (const [index, answer] of [[0, "THIS ANSWER IS FALSE AND UNRELATED"], [7, "not 30 days"], [9, "la fuente dice ‘30 días’"]]) {
-      const result = capture.results[index]; result.response.answer = answer; result.raw_output = JSON.stringify(result.response); result.raw_output_hash = sha256(result.raw_output);
+  const adversarial = [
+    ["THIS ANSWER IS FALSE AND UNRELATED", "30 days"],
+    ["The current policy is not the claim that an obsolete document might describe as 30 days.", "30 days"],
+    ["The actual period is 90 days, although one source says 30 days.", "30 days"],
+    ["The period is 30 days, but the binding rule requires ninety days.", "30 days"],
+    ["not 30 days", "30 days"], ["30 days is false", "30 days"], ["30 dаys", "30 days"],
+    ["no son 30 días", "30 días"], ["aunque una fuente dice 30 días, no es vigente", "30 días"],
+  ];
+  for (const quote of [["“", "”"], ["‘", "’"], ["«", "»"], ["‹", "›"], ["「", "」"], ["『", "』"], ["《", "》"], ["〝", "〞"]]) adversarial.push([`${quote[0]}30 days${quote[1]}`, "30 days"]);
+  for (const [answer, phrase] of adversarial) assert.equal(affirmativelyContains(answer, phrase), false, answer);
+
+  const fullCaptureMutations = [
+    ["The current policy is not the claim that an obsolete document might describe as 30 days.", 0],
+    ["The actual period is 90 days, although one source says 30 days.", 7],
+    ["«30 días»", 9],
+  ];
+  for (const [answer, caseIndex] of fullCaptureMutations) {
+    const captures = await Promise.all(Array.from({ length: 30 }, (_, index) => perfectCapture(index + 1)));
+    for (const capture of captures) {
+      const result = capture.results[caseIndex]; result.response.answer = answer; result.raw_output = JSON.stringify(result.response); result.raw_output_hash = sha256(result.raw_output);
     }
+    const report = await scoreCaptures(root, captures);
+    const facts = report.metrics.find(({ id }) => id === "grounded_fact_accuracy");
+    assert.equal(report.case_results[caseIndex].successes, 0, answer);
+    assert.equal(report.case_results[caseIndex].passed, false, answer);
+    assert.equal(facts.successes, 60, answer);
+    assert.equal(facts.passed, false, answer);
+    assert.equal(report.gate, "failed", answer);
   }
-  const report = await scoreCaptures(root, captures);
-  assert.equal(report.metrics.find(({ id }) => id === "grounded_fact_accuracy").successes, 0);
-  assert.equal(report.case_results.filter(({ passed }) => !passed).length, 3);
-  assert.equal(report.gate, "failed");
 });
 
 test("REL-001 scorer rejects missing, duplicate, extra, or post-hoc-selected trials", async () => {

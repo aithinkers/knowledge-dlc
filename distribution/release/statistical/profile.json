@@ -13,7 +13,7 @@
     "id": "kdlc-offline-statistical-scorer",
     "version": 2,
     "path": "scripts/statistical-evidence-validation.mjs",
-    "sha256": "sha256:7acaf25edb396a66d7ca9dba0f4d33615a8cdd8da38f40f0958ecb0b277722b6"
+    "sha256": "sha256:ad882eca65c7e1975dc48fa4ad2d47996ad4d915917ab318f9b2d06d27952b50"
   },
   "required_trials": 30,
   "confidence": 0.95,
