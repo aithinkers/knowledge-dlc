@@ -20,6 +20,7 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.deepEqual(new Set(releaseMatrixCells.map(({ os }) => os)), new Set(["linux", "win32", "darwin"]));
   assert.deepEqual(releaseMatrixCommandIds, ["full", "offline", "release", "statistical", "clean-rebuild", "supply-chain", "pack", "cli", "import"]);
   const workflow = await readFile(resolve(root, ".github/workflows/release-matrix.yml"), "utf8");
+  const collector = await readFile(resolve(root, "scripts/collect-release-state.mjs"), "utf8");
   const derivationSource = await readFile(resolve(root, "scripts/derive-release-artifacts.mjs"), "utf8");
   const attributes = await readFile(resolve(root, ".gitattributes"), "utf8");
   const parsedWorkflow = parseYamlArtifact(workflow);
@@ -43,6 +44,9 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.equal(stateSteps.filter((step) => step.uses?.startsWith("actions/checkout@")).length, 1);
   assert.equal(stateSteps.find((step) => step.name === "Check out trusted release-state collector").with.ref, "${{ github.event.pull_request.base.sha || github.sha }}");
   assert.match(stateSteps.find((step) => step.name === "Collect live state without candidate checkout or execution").run, /node trusted\/scripts\/collect-release-state\.mjs/);
+  assert.equal(stateSteps.find((step) => step.name === "Collect live state without candidate checkout or execution").env.KDLC_ADMIN_SETTINGS_ATTESTATION, "${{ vars.KDLC_ADMIN_SETTINGS_ATTESTATION }}");
+  assert.doesNotMatch(collector, /actions\/permissions\/workflow/);
+  assert.match(collector, /evaluateAdminSettingsAttestation/);
 });
 
 test("REL-001 release matrix aggregator rejects missing or substituted cells", async (context) => {

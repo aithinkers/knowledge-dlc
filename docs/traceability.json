@@ -230,6 +230,26 @@
       }
     },
     {
+      "id": "REQ-RELEASE-001",
+      "title": "Bind administration-only release settings through owner attestation",
+      "issue": 44,
+      "specification_sections": ["35", "36"],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          ".github/workflows/release-matrix.yml",
+          "scripts/collect-release-state.mjs",
+          "scripts/create-admin-settings-attestation.mjs",
+          "scripts/release-state-derivation.mjs",
+          "scripts/release-evidence-validation.mjs"
+        ],
+        "tests": [
+          "tests/governance/release-matrix.test.mjs",
+          "tests/governance/release-candidate-evidence.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REQ-SUPPLY-001",
       "title": "Refresh dependency and GitHub Action runtimes before release",
       "issue": 36,

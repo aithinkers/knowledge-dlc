@@ -92,6 +92,37 @@ read-token job executes only the trusted-base live-state collector and never
 checks out or executes candidate code. Passing workflow evidence is still
 required before release.
 
+The read-only Actions token cannot read the administration-only default
+workflow-permission endpoint. A repository owner must therefore capture that
+endpoint outside Actions, manually cross-check the same values in repository
+settings, and publish the resulting compact JSON as the owner-controlled
+repository variable `KDLC_ADMIN_SETTINGS_ATTESTATION`:
+
+```sh
+node scripts/create-admin-settings-attestation.mjs \
+  capture --repository aithinkers/knowledge-dlc --output admin-settings-pending.json
+# Now manually compare the pending record's settings with the live Actions UI.
+node scripts/create-admin-settings-attestation.mjs \
+  confirm --repository aithinkers/knowledge-dlc --output admin-attestation.json \
+  --manual-confirmed admin-settings-pending.json
+gh variable set KDLC_ADMIN_SETTINGS_ATTESTATION --body "$(tr -d '\n' < admin-attestation.json)"
+```
+
+The local files contain live administrative evidence and must not be committed.
+The capture command obtains fresh bytes directly from the authenticated GitHub
+API; it accepts no cached input and cannot run in Actions. It produces only a
+pending record and never asserts a manual confirmation. The separate confirm
+command re-authenticates the same owner, verifies the pending byte and canonical
+hashes, and records a later confirmation time. The attestation binds the
+repository, exact settings, `https://api.github.com` origin, API endpoint,
+response hash, capture and manual-check
+times, actor, capture method, and canonical hash. Missing or stale evidence does
+not make an ordinary private prerelease PR inoperable, but a release candidate
+fails closed unless the record is authentic, policy-preserving, manually
+cross-checked, and no more than 24 hours old. Public visibility, rulesets,
+issues, checks, and review facts continue to come directly from GitHub's API in
+the trusted-base token job.
+
 ## Live repository settings (verified 2026-08-15)
 
 - Private vulnerability reporting, secret scanning, push protection, and

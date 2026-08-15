@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { deriveRulesetState } from "./release-state-derivation.mjs";
+import { deriveRulesetState, evaluateAdminSettingsAttestation } from "./release-state-derivation.mjs";
 
 const [output] = process.argv.slice(2); if (!output || process.argv.length !== 3) throw new Error("usage: node scripts/collect-release-state.mjs <output-directory>");
 const [owner, repository] = (process.env.GITHUB_REPOSITORY ?? "").split("/"); const token = process.env.GH_TOKEN; const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"));
@@ -9,14 +9,16 @@ if (!owner || !repository || !token || !event.pull_request) throw new Error("tru
 const headers = { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" };
 const api = async (path) => { const response = await fetch(`https://api.github.com/repos/${owner}/${repository}${path}`, { headers }); if (!response.ok) throw new Error(`${path}: ${response.status}`); return response.json(); };
 const apiAll = async (path) => { const values = []; for (let page = 1; ; page += 1) { const batch = await api(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`); values.push(...batch); if (batch.length < 100) return values; } };
-const [repo, workflowPermissions] = await Promise.all([api(""), api("/actions/permissions/workflow")]);
+const repo = await api("");
 const dependencies = await Promise.all(Array.from({ length: 8 }, (_, index) => api(`/issues/${index + 2}`)));
 const summaries = await api("/rulesets?includes_parents=true&per_page=100");
 const rulesets = await Promise.all(summaries.filter(({ target, enforcement }) => target === "branch" && enforcement === "active").map(({ id }) => api(`/rulesets/${id}`)));
 const derivedRuleset = deriveRulesetState(rulesets, { baseRef: event.pull_request.base.ref, defaultBranch: repo.default_branch });
+const admin = evaluateAdminSettingsAttestation(process.env.KDLC_ADMIN_SETTINGS_ATTESTATION, { repository: `${owner}/${repository}` });
 const settings = {
   visibility: repo.visibility ?? "unknown",
-  actions: { default_workflow_permissions: workflowPermissions.default_workflow_permissions ?? "unknown", can_approve_pull_request_reviews: workflowPermissions.can_approve_pull_request_reviews === true },
+  actions: admin.attestation?.settings ?? { default_workflow_permissions: "unknown", can_approve_pull_request_reviews: null },
+  admin_attestation: { status: admin.status, record: admin.attestation },
   release_blocking_issues_closed: dependencies.every(({ state, pull_request }) => state === "closed" && !pull_request),
   ruleset: derivedRuleset
 };
