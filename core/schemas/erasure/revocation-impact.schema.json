@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/erasure/revocation-impact-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "source", "inventory_hash", "surface_plan_hash", "nodes", "edges"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/revocation-impact/v1alpha1"},
+    "source": {"$ref": "#/$defs/source"},
+    "inventory_hash": {"$ref": "#/$defs/hash"},
+    "surface_plan_hash": {"$ref": "#/$defs/hash"},
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "strategy", "retained_until", "identity_hash", "depends_on"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "kind": {"enum": ["original", "normalized", "claim", "concept", "quote", "cache", "index", "embedding", "graph", "export", "log", "backup", "proposal", "receipt", "audit"]},
+          "strategy": {"enum": ["purge", "tombstone", "external-delete"]},
+          "retained_until": {"type": ["string", "null"], "format": "date-time"},
+          "identity_hash": {"$ref": "#/$defs/hash"},
+          "depends_on": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {"from": {"$ref": "#/$defs/id"}, "to": {"$ref": "#/$defs/id"}}
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["id", "hash"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "hash": {"$ref": "#/$defs/hash"}}
+    }
+  }
+}

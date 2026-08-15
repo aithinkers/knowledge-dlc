@@ -5,6 +5,7 @@ import { artifactHash, byteHash, canonicalJson, isRfc3339Instant, isStaleOn, par
 import { parseYamlArtifact } from "../../contracts/index.mjs";
 import { GovernanceControlEngine, verifyGovernanceRetrievalProof } from "../../governance/index.mjs";
 import { traverseHierarchicalIndex } from "./index-traversal.mjs";
+import { bindInternalSources } from "./internal-source-bindings.mjs";
 import { retrievalFail } from "./errors.mjs";
 
 const MODES = new Set(["wiki-only", "sources-only", "trusted-only", "fresh-only", "exploratory", "audit", "refresh"]);
@@ -132,7 +133,8 @@ export class FederatedRetriever {
             }))));
             if (sourceAllowed.some((value) => value !== true)) internallyDenied = true;
             const sourceCitations = immutableJson(sources.filter((_, sourceIndex) => sourceAllowed[sourceIndex] === true).map(({ citation }) => citation));
-            return deepFreeze({ metadata: immutableJson(metadata), concept, sourceCitations, governance: allowed[index], fileIdentity: fileIdentity(await lstat(conceptPath)) });
+            return deepFreeze({ metadata: immutableJson(metadata), concept, sourceCitations,
+              allSourceCitations: immutableJson(sources.map(({ citation }) => citation)), governance: allowed[index], fileIdentity: fileIdentity(await lstat(conceptPath)) });
           } catch (error) {
             if (error?.code?.startsWith?.("KDLC_")) throw error;
             retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
@@ -180,7 +182,9 @@ export class FederatedRetriever {
         if (byteHash(bytes) !== prepared.metadata.byte_hash) throw new Error("byte mismatch");
       } catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
       const qualified = `kb://${mountId}@${preparedMount.mount.resolved_ref}/${conceptId}`;
-      return immutableJson({ status: "ok", uri: qualified, body: bytes.toString("utf8"), content_hash: byteHash(bytes), citations: [{ concept: qualified, knowledge_base_id: mountId, revision: preparedMount.mount.resolved_ref, tree_hash: preparedMount.mount.tree_hash }], source_citations: prepared.sourceCitations, timing_class: "bounded-floor" });
+      const result = immutableJson({ status: "ok", uri: qualified, body: bytes.toString("utf8"), content_hash: byteHash(bytes), citations: [{ concept: qualified, knowledge_base_id: mountId, revision: preparedMount.mount.resolved_ref, tree_hash: preparedMount.mount.tree_hash }], source_citations: prepared.sourceCitations, timing_class: "bounded-floor" });
+      bindInternalSources(result, prepared.allSourceCitations);
+      return result;
     } finally {
       const remaining = this.minimumDurationMs - (this.monotonic() - started);
       if (remaining > 0) await this.wait(remaining);
@@ -213,7 +217,7 @@ export class FederatedRetriever {
           const freshnessEligible = !(mode === "fresh-only" || staleBehavior === "exclude") || !isStale;
           if (!modeEligible || !trustEligible || !freshnessEligible) continue;
           const score = rawScore(queryTerms, concept);
-          eligible.push({ mount, concept, sourceCitations, score, tier, isStale });
+          eligible.push({ mount, concept, sourceCitations, allSourceCitations: prepared.allSourceCitations, score, tier, isStale });
         }
       }
       const candidates = eligible.filter(({ score }) => score > 0);
@@ -239,10 +243,12 @@ export class FederatedRetriever {
         const citation = { concept: qualified, knowledge_base_id: item.mount.id, revision: item.mount.resolved_ref, tree_hash: item.mount.tree_hash, ...governance };
         citations.push(citation);
         const sourceCitations = includeSources || mode === "audit" ? item.sourceCitations : [];
-        results.push({ id: `kb://${item.mount.id}/${item.concept.id}`, title: typeof item.concept.frontmatter.title === "string" && item.concept.frontmatter.title ? item.concept.frontmatter.title : item.concept.id.split("/").at(-1),
+        const result = { id: `kb://${item.mount.id}/${item.concept.id}`, title: typeof item.concept.frontmatter.title === "string" && item.concept.frontmatter.title ? item.concept.frontmatter.title : item.concept.id.split("/").at(-1),
           description: typeof item.concept.frontmatter.description === "string" ? item.concept.frontmatter.description : null, score: Number(item.normalized.toFixed(6)), trust: item.tier,
           freshness: item.isStale ? "stale" : "current", citation, source_citations: sourceCitations, ...governance,
-          applicability: item.concept.frontmatter.applicability ?? null });
+          applicability: item.concept.frontmatter.applicability ?? null };
+        bindInternalSources(result, item.allSourceCitations);
+        results.push(result);
         if (item.isStale) warnings.push({ code: "KDLC_STALE", subject: `kb://${item.mount.id}/${item.concept.id}` });
         for (const relationship of list(item.concept.frontmatter.relationships)) {
           const target = livingReference(relationship.target);

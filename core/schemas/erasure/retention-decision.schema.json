@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/erasure/retention-decision-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "action", "source", "reason", "allowed", "policy", "authority", "authorization_hash", "impact_hash", "blocked", "tombstone_fields", "decided_at", "proof"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/retention-decision/v1alpha1"},
+    "action": {"enum": ["revoke", "erase"]},
+    "source": {"$ref": "#/$defs/source"},
+    "reason": {"$ref": "#/$defs/id"},
+    "allowed": {"type": "boolean"},
+    "policy": {"type": "object", "additionalProperties": false, "required": ["id", "version"], "properties": {"id": {"$ref": "#/$defs/id"}, "version": {"$ref": "#/$defs/id"}}},
+    "authority": {
+      "type": "object", "additionalProperties": false, "required": ["actor"],
+      "properties": {"actor": {"type": "string", "pattern": "^(?:human|process):[A-Za-z0-9._@/-]+$"}}
+    },
+    "authorization_hash": {"$ref": "#/$defs/hash"},
+    "impact_hash": {"$ref": "#/$defs/hash"},
+    "blocked": {
+      "type": "object", "additionalProperties": false, "required": ["legal_holds", "retention_surfaces"],
+      "properties": {"legal_holds": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}, "retention_surfaces": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}}
+    },
+    "tombstone_fields": {"type": "array", "uniqueItems": true, "items": {"enum": ["source_id", "source_hash", "event_id"]}},
+    "decided_at": {"type": "string", "format": "date-time"},
+    "proof": {
+      "type": "object", "additionalProperties": false, "required": ["algorithm", "key_id", "domain", "mac"],
+      "properties": {"algorithm": {"const": "hmac-sha256"}, "key_id": {"$ref": "#/$defs/id"}, "domain": {"const": "kdlc-retention-decision-1"}, "mac": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["id", "hash"], "properties": {"id": {"$ref": "#/$defs/id"}, "hash": {"$ref": "#/$defs/hash"}}}
+  }
+}

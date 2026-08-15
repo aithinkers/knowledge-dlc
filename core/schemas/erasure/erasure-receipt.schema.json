@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/erasure/erasure-receipt-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "job_id", "workflow_id", "action", "source", "result", "impact_hash", "decision_hash", "verification_hash", "treated", "completed_at", "proof"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/erasure-receipt/v1alpha1"},
+    "job_id": {"$ref": "#/$defs/id"},
+    "workflow_id": {"$ref": "#/$defs/id"},
+    "action": {"enum": ["revoke", "erase"]},
+    "source": {"$ref": "#/$defs/source"},
+    "result": {"enum": ["revoked", "erased"]},
+    "impact_hash": {"$ref": "#/$defs/hash"},
+    "decision_hash": {"$ref": "#/$defs/hash"},
+    "verification_hash": {"$ref": "#/$defs/hash"},
+    "treated": {
+      "type": "object", "additionalProperties": false, "required": ["total", "by_kind"],
+      "properties": {"total": {"type": "integer", "minimum": 1}, "by_kind": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}}}
+    },
+    "completed_at": {"type": "string", "format": "date-time"},
+    "proof": {
+      "type": "object", "additionalProperties": false, "required": ["algorithm", "key_id", "domain", "mac"],
+      "properties": {"algorithm": {"const": "hmac-sha256"}, "key_id": {"$ref": "#/$defs/id"}, "domain": {"const": "kdlc-erasure-receipt-1"}, "mac": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["id", "hash"], "properties": {"id": {"$ref": "#/$defs/id"}, "hash": {"$ref": "#/$defs/hash"}}}
+  }
+}

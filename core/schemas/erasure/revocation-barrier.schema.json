@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/erasure/revocation-barrier-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "source", "state", "workflow_id", "job_id", "impact_hash", "decision_hash", "activated_at"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/revocation-barrier/v1alpha1"},
+    "source": {"type": "object", "additionalProperties": false, "required": ["id", "hash"], "properties": {"id": {"$ref": "#/$defs/id"}, "hash": {"$ref": "#/$defs/hash"}}},
+    "state": {"enum": ["revoked", "erasure-pending", "erased", "held"]},
+    "workflow_id": {"$ref": "#/$defs/id"},
+    "job_id": {"$ref": "#/$defs/id"},
+    "impact_hash": {"$ref": "#/$defs/hash"},
+    "decision_hash": {"$ref": "#/$defs/hash"},
+    "activated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}
+  }
+}

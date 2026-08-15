@@ -23,6 +23,7 @@ import {
   parseYamlArtifact,
 } from "../contracts/index.mjs";
 import { FederationResolver } from "../federation/index.mjs";
+import { guardRetriever, RevocationGuard } from "../erasure/index.mjs";
 import { createExtensionValidator, previewMigration } from "../extensions/index.mjs";
 import { PrincipalAuthority, ReviewContextAuthority, RuntimeTrustAuthority } from "../agents/index.mjs";
 import { GovernanceControlAuthority, GovernanceControlEngine } from "../governance/index.mjs";
@@ -860,14 +861,18 @@ export function createLocalProjectEngine(options = {}) {
     };
     const authority = new GovernanceControlAuthority({ authenticate: async () => null, clock, audit });
     const governanceControls = await GovernanceControlEngine.create({ policy: governancePolicy, clock, audit, authority });
-    const retriever = new FederatedRetriever({
+    const baseRetriever = new FederatedRetriever({
       mounts,
       policy: pdp,
       governanceControls,
       minimumDurationMs: 25,
       authorizationTtlMs: 300_000,
     });
-    const authorization = await retriever.prepareAuthorization({ principal, query, queryModes });
+    const authorization = await baseRetriever.prepareAuthorization({ principal, query, queryModes });
+    const retriever = guardRetriever(
+      baseRetriever,
+      new RevocationGuard({ store: new NodeFileStore(root) }),
+    );
     return { retriever, authorization };
   };
   const authorizedRetriever = async (query, queryModes) => {

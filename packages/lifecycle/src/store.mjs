@@ -12,6 +12,7 @@ export class NodeFileStore {
     this.root = resolve(root);
     this.token = token;
     this.fence = new AsyncLocalStorage();
+    this.mutation = new AsyncLocalStorage();
     this.behavior = undefined;
   }
 
@@ -106,7 +107,20 @@ export class NodeFileStore {
   async readJson(relativePath) { return JSON.parse(await this.readText(relativePath)); }
   async tokenOf(relativePath) { return this.exists(relativePath) ? this.token(await this.readText(relativePath)) : null; }
 
-  async writeTextAtomic(relativePath, content) {
+  async mutationNamespace(relativePath) {
+    const configurationPath = ".kdlc/governed-mutation-namespace.json";
+    let configuration;
+    try { configuration = JSON.parse(await readFile(await this.safePath(configurationPath), "utf8")); }
+    catch (error) { if (error?.code === "ENOENT") return null; throw error; }
+    if (configuration?.api_version !== "kdlc.dev/governed-mutation-namespace/v1" ||
+      !Array.isArray(configuration.roots) || !configuration.roots.length ||
+      typeof configuration.lock_path !== "string" || typeof configuration.generation_path !== "string")
+      throw invalid("Governed mutation namespace is invalid");
+    const identity = await this.identity(relativePath);
+    return configuration.roots.some((root) => identity === root || identity.startsWith(`${root}/`)) ? configuration : null;
+  }
+
+  async #writeTextAtomic(relativePath, content) {
     await this.assertFence();
     const target = await this.safePath(relativePath);
     await mkdir(dirname(target), { recursive: true });
@@ -115,17 +129,60 @@ export class NodeFileStore {
     finally { await rm(temporary, { force: true }).catch(() => {}); }
   }
 
-  async replaceAtomic(source, target) { await rename(source, target); }
+  async #remove(relativePath) { await this.assertFence(); await rm(await this.safePath(relativePath), { force: true }); }
+
+  async #governedMutation(relativePath, action, before = async () => {}) {
+    const namespace = await this.mutationNamespace(relativePath);
+    const activeMutation = this.mutation.getStore();
+    if (!namespace || (activeMutation?.lock === namespace.lock_path && activeMutation.path === relativePath)) { await before(); return action(); }
+    const clock = { now: () => new Date().toISOString(), millis: () => Date.now() };
+    return this.withMutex(namespace.lock_path, { owner: `mutation:${process.pid}:${Math.random().toString(16).slice(2)}`, clock, timeoutMs: 250 }, async () => {
+      await before();
+      const current = await this.mutationGeneration(namespace);
+      const begun = current % 2 === 0 ? current + 1 : current + 2;
+      await this.#writeTextAtomic(namespace.generation_path, `${JSON.stringify({ generation: begun }, null, 2)}\n`);
+      const result = await this.mutation.run({ lock: namespace.lock_path, path: relativePath }, action);
+      await this.#writeTextAtomic(namespace.generation_path, `${JSON.stringify({ generation: begun + 1 }, null, 2)}\n`);
+      return result;
+    });
+  }
+
+  async writeTextAtomic(relativePath, content) { return this.#governedMutation(relativePath, () => this.#writeTextAtomic(relativePath, content)); }
+  async mutateGoverned(relativePath, before, action) {
+    if (typeof before !== "function" || typeof action !== "function") throw invalid("Governed mutation requires precondition and action functions");
+    return this.#governedMutation(relativePath, action, before);
+  }
+
+  async #replaceAtomic(source, target) { await rename(source, target); }
+  async replaceAtomic(source, target) {
+    const relativeTarget = relative(await realpath(this.root), target).split(sep).join("/");
+    return this.#governedMutation(relativeTarget, () => this.#replaceAtomic(source, target));
+  }
 
   async writeJsonAtomic(relativePath, value) { await this.writeTextAtomic(relativePath, `${JSON.stringify(value, null, 2)}\n`); }
-  async appendExclusive(relativePath, content) {
+  async #appendExclusive(relativePath, content) {
     await this.assertFence();
     const target = await this.safePath(relativePath);
     await mkdir(dirname(target), { recursive: true });
     const handle = await open(target, "a", 0o600);
     try { await this.assertFence(); await handle.write(content); await handle.sync(); } finally { await handle.close(); }
   }
-  async remove(relativePath) { await this.assertFence(); await rm(await this.safePath(relativePath), { force: true }); }
+  async appendExclusive(relativePath, content) { return this.#governedMutation(relativePath, () => this.#appendExclusive(relativePath, content)); }
+  async remove(relativePath) { return this.#governedMutation(relativePath, () => this.#remove(relativePath)); }
+
+  async mutationGeneration(namespace) {
+    if (!(await this.exists(namespace.generation_path))) return 0;
+    const value = await this.readJson(namespace.generation_path);
+    if (!Number.isSafeInteger(value?.generation) || value.generation < 0) throw invalid("Governed mutation generation is invalid");
+    return value.generation;
+  }
+
+  async withMutationNamespace({ owner, clock }, action) {
+    const configurationPath = ".kdlc/governed-mutation-namespace.json";
+    if (!(await this.exists(configurationPath))) throw invalid("Governed mutation namespace is not configured");
+    const namespace = await this.readJson(configurationPath);
+    return this.withMutex(namespace.lock_path, { owner, clock }, () => this.mutation.run({ lock: namespace.lock_path, path: null }, action));
+  }
   async createDirectoryExclusive(relativePath) {
     await this.assertFence();
     const target = await this.safePath(relativePath);

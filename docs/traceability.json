@@ -154,6 +154,34 @@
       }
     },
     {
+      "id": "FEAT-009",
+      "title": "Governed revocation, impact analysis, and verified erasure",
+      "issue": 24,
+      "specification_sections": ["12.6", "20.6", "27.6", "27.7", "35.11", "36"],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "core/schemas/erasure/erasure-receipt.schema.json",
+          "core/schemas/erasure/retention-decision.schema.json",
+          "core/schemas/erasure/revocation-barrier.schema.json",
+          "core/schemas/erasure/revocation-impact.schema.json",
+          "packages/erasure/index.mjs",
+          "packages/erasure/src/authority.mjs",
+          "packages/erasure/src/engine.mjs",
+          "packages/erasure/src/guard.mjs",
+          "packages/erasure/src/inventory.mjs",
+          "packages/erasure/src/project.mjs",
+          "packages/lifecycle/src/store.mjs",
+          "packages/retrieval/src/internal-source-bindings.mjs",
+          "packages/cli/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/core-contracts.test.mjs",
+          "tests/governance/revocation-erasure.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
