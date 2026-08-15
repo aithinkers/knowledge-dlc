@@ -152,8 +152,12 @@ export class McpProjectServer {
   engine(principal = this.principal) {
     const key = JSON.stringify({
       actor: principal.actor,
-      scopes: [...principal.scopes].sort(),
-      mode: principal.principal_mode ?? null,
+      principal_mode: principal.principal_mode ?? null,
+      issuer: principal.issuer ?? null,
+      subject: principal.subject ?? null,
+      os_uid: principal.os_uid ?? null,
+      os_username: principal.os_username ?? null,
+      scopes: [...new Set(principal.scopes)].sort(),
     });
     if (!this.engines.has(key))
       this.engines.set(key, this.engineFactory({ root: this.root, principal }));

@@ -807,6 +807,15 @@ test("FEAT-006 local CLI bootstrap is init-only and remote principals cannot sel
     const attempted = createLocalProjectEngine({ root, principal: spoof });
     assert.equal((await attempted.envelope("status")).error.code, "KDLC_POLICY_DENIED");
   }
+  ownerPolicy.principals.push({ id: "served-good", actor: "human:shared-actor", principal_mode: "served", issuer: "https://good.invalid", subject: "good-subject", review_roles: [], scopes: ["read"], clearance: "public", compartments: [] });
+  await writeFile(resolve(root, ".kdlc/principal-policy.json"), `${JSON.stringify(ownerPolicy)}\n`, { mode: 0o600 });
+  const identityServer = new McpProjectServer({ root, projectId: "fixture.project", engineFactory: createLocalProjectEngine });
+  const goodIdentity = { actor: "human:shared-actor", principal_mode: "served", issuer: "https://good.invalid", subject: "good-subject", scopes: ["read"] };
+  const evilIdentity = { actor: "human:shared-actor", principal_mode: "served", issuer: "https://evil.invalid", subject: "good-subject", scopes: ["read"] };
+  assert.notEqual(identityServer.engine(goodIdentity), identityServer.engine(evilIdentity));
+  assert.equal((await identityServer.engine(goodIdentity).envelope("status")).ok, true);
+  assert.equal((await identityServer.engine(evilIdentity).envelope("status")).error.code, "KDLC_POLICY_DENIED");
+  await identityServer.close();
   const defaultRemoteRoot = await temporary(t);
   const defaultServer = new McpProjectServer({ root: defaultRemoteRoot, projectId: "remote.default", principal: { actor: "human:remote", principal_mode: "served", issuer: "https://issuer.invalid", subject: "remote", scopes: ["mutate"] } });
   const remoteInit = await defaultServer.request({ jsonrpc: "2.0", id: 99, method: "tools/call", params: { name: "project_init", arguments: { project_id: "remote.default" } } });
