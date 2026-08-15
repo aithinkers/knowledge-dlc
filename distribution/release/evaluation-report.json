@@ -1,7 +1,8 @@
 {
   "api_version": "kdlc.dev/release-evaluation-report/v1alpha1",
   "release_status": "not-ready",
-  "run_hash": "sha256:df043a3cc2ce31005bf430d1e0c9439969c50898c558203c9cc17ea86a56bbf4",
+  "implementation_version": "0.0.0-private",
+  "run_hash": "sha256:c510bace06fd2e7972508a8b2f3b108c8ba89791234690e7f5ec93492df553c2",
   "summary": {"total": 9, "passed": 9, "failed": 0, "security_failures": 0, "structural_gate": "passed"},
   "statistical_suite": {"status": "pending", "release_blocking": true},
   "pending_release_evidence": [

@@ -99,7 +99,7 @@ test("REQ-SUPPLY-001 upgraded parser and SemVer runtime fail closed on adversari
 
   const manifest = JSON.parse(await readFile(join(packageRoot("compatible"), ".kdlc-plugin/plugin.json"), "utf8"));
   const malformedRange = structuredClone(manifest);
-  malformedRange.compatibility.framework = "1.x.2";
+  malformedRange.compatibility.framework = "1.2.3 - nope";
   expectCode("KDLC_EXTENSION_RANGE_INVALID", () => validatePluginManifest(malformedRange, validator));
 
   const nonCanonicalVersion = structuredClone(manifest);
@@ -115,9 +115,14 @@ test("FEAT-007 scanner detects post-open swaps without leaking descriptors", asy
   const scanner = new ExtensionPackageScanner({ validator, key: Buffer.alloc(32, 4), afterOpen: async ({ relativePath, absolutePath }) => {
     if (!swapped && relativePath === "tools/normalizer.mjs") { swapped = true; await rename(absolutePath, `${absolutePath}.original`); await symlink(outside, absolutePath); }
   } });
-  const before = (await readdir("/dev/fd")).length;
-  await expectCodeAsync("KDLC_EXTENSION_PACKAGE_RACE", () => scanner.scan(packageCopy));
-  assert.equal((await readdir("/dev/fd")).length, before);
+  if (process.platform === "win32") {
+    await expectCodeAsync("KDLC_EXTENSION_PACKAGE_RACE", () => scanner.scan(packageCopy));
+    await rename(`${join(packageCopy, "tools/normalizer.mjs")}.original`, join(packageCopy, "tools/normalizer.closed.mjs"));
+  } else {
+    const before = (await readdir("/dev/fd")).length;
+    await expectCodeAsync("KDLC_EXTENSION_PACKAGE_RACE", () => scanner.scan(packageCopy));
+    assert.equal((await readdir("/dev/fd")).length, before);
+  }
 });
 
 test("FEAT-007 exact-binds trusted framework, OKF revision/hash, and the complete installed graph", async () => {

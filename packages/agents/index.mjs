@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
-import { dirname, posix, resolve } from "node:path";
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson } from "../core/index.mjs";
@@ -169,7 +169,8 @@ export class RepositoryFileStore {
           const metadata = await lstat(candidate);
           if (metadata.isSymbolicLink()) throw new AgentPolicyError("KDLC_PATH_SYMLINK", `Capability path crosses a symbolic link: ${path}`);
           const canonical = await realpath(candidate);
-          if (!canonical.startsWith(`${canonicalRoot}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
+          const fromRoot = relative(canonicalRoot, canonical);
+          if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
           if (index < segments.length - 1 && !metadata.isDirectory()) throw new AgentPolicyError("KDLC_PATH_INVALID", `Capability path has a non-directory parent: ${path}`);
           ancestry.push({ path: canonical, dev: metadata.dev, ino: metadata.ino, directory: metadata.isDirectory() });
           current = canonical;

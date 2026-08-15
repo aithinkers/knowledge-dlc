@@ -90,11 +90,24 @@ export class NodeFileStore {
       }
     }
     try {
-      const metadata = await lstat(target);
-      if (metadata.isSymbolicLink()) throw invalid("Storage target must not be a symlink");
-      const canonical = await realpath(target);
-      const canonicalRel = relative(canonicalRoot, canonical);
-      if (canonicalRel === ".." || canonicalRel.startsWith(`..${sep}`) || isAbsolute(canonicalRel)) throw invalid("Storage target escapes configured root");
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const metadata = await lstat(target);
+        if (metadata.isSymbolicLink()) throw invalid("Storage target must not be a symlink");
+        const canonical = await realpath(target);
+        const canonicalRel = relative(canonicalRoot, canonical);
+        if (canonicalRel !== ".." && !canonicalRel.startsWith(`..${sep}`) && !isAbsolute(canonicalRel)) break;
+        const observed = await lstat(target);
+        if (observed.isSymbolicLink()) throw invalid("Storage target must not be a symlink");
+        // A mutex contender may rename the inspected directory for stale
+        // recovery and create a successor at the same lexical path. Retry only
+        // when that exact identity changed; a stable outside identity remains
+        // a containment violation and always fails closed.
+        if (metadata.dev !== observed.dev || metadata.ino !== observed.ino) {
+          if (attempt < 2) continue;
+          throw Object.assign(new Error("Storage target identity changed during containment validation"), { code: "EBADF" });
+        }
+        throw invalid("Storage target escapes configured root");
+      }
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
@@ -222,7 +235,10 @@ export class NodeFileStore {
         await this.writeJsonAtomic(leasePath, acquiredLease);
         break;
       } catch (error) {
-        if (error?.code === "ENOENT") continue;
+        // Windows may report EBADF when a contending stale-recovery rename
+        // wins between safe-path inspection and realpath. No mutation has
+        // occurred in this contender, so retry exactly as for ENOENT.
+        if (["ENOENT", "EBADF"].includes(error?.code)) continue;
         if (error?.code !== "EEXIST") throw error;
         let stale = false;
         let staleToken = null;
@@ -270,7 +286,11 @@ export class NodeFileStore {
             await rm(await this.safePath(recovery), { recursive: true, force: true });
             continue;
           } catch (recoveryError) {
-            if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(recoveryError?.code)) throw recoveryError;
+            // Windows can transiently refuse a directory rename while another
+            // contender is closing a handle beneath it. Treat that as ordinary
+            // contention and retry; the claim and owner-token checks still
+            // fence stale recovery before a later rename can succeed.
+            if (!["ENOENT", "EEXIST", "ENOTEMPTY", "EPERM", "EACCES"].includes(recoveryError?.code)) throw recoveryError;
           } finally {
             if (ownsClaim) await rm(await this.safePath(claimPath), { force: true }).catch(() => {});
           }
@@ -297,7 +317,22 @@ export class NodeFileStore {
           current.expires_at = new Date(clock.millis() + leaseMs).toISOString();
           const target = await this.safePath(leasePath);
           const temporary = `${target}.heartbeat-${process.pid}-${Math.random().toString(16).slice(2)}`;
-          try { await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx", mode: 0o600 }); await this.replaceAtomic(temporary, target); }
+          try {
+            await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+            for (let attempt = 0; ; attempt += 1) {
+              try { await this.replaceAtomic(temporary, target); break; }
+              catch (replaceError) {
+                if (!["EPERM", "EACCES"].includes(replaceError?.code) || process.platform !== "win32" || attempt >= 20) throw replaceError;
+                // Windows may briefly deny replacement while a contender has
+                // owner.json open. Re-check the exact lease before every retry;
+                // a reclaimed directory moves the temporary file with it, so
+                // this cannot overwrite a successor lease in a new directory.
+                const observed = await this.readJson(leasePath);
+                if (observed.lease_id !== acquiredLeaseId) throw conflict("Filesystem mutex lease was lost");
+                await new Promise((resolveDelay) => setTimeout(resolveDelay, 2));
+              }
+            }
+          }
           finally { await rm(temporary, { force: true }).catch(() => {}); }
         } catch (error) { if (error?.code !== "ENOENT") throw error; break; }
       }

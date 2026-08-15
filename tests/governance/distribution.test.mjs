@@ -899,7 +899,7 @@ test("FEAT-006 governed recorded workflow has equivalent semantics across shippe
     const call = async (operation, input) => {
       const command = operation === "proposal_create" ? "proposal" : operation === "review_submit" ? "review" : "publish";
       const args = operation === "proposal_create" ? [JSON.stringify(input)] : operation === "review_submit" ? [input.proposal_id, input.decision, input.receipt_id] : [input.proposal_id, input.receipt_id, JSON.stringify(input.current)];
-      const childArgs = executable.includes("/cli/") ? [executable, command, ...args, "--output", "json"] : [executable, command, "--output", "json", "--host-args-json", JSON.stringify(args)];
+      const childArgs = executable === resolve(repository, "packages/cli/bin.mjs") ? [executable, command, ...args, "--output", "json"] : [executable, command, "--output", "json", "--host-args-json", JSON.stringify(args)];
       const child = spawn(process.execPath, childArgs, { cwd: root, stdio: ["ignore", "pipe", "pipe"] }); let output = ""; child.stdout.on("data", (chunk) => { output += chunk; }); const [code] = await once(child, "exit"); assert.equal(code, 0, name); return JSON.parse(output);
     };
     outcomes.push(await semantics(call, context, `rr_${name}`));

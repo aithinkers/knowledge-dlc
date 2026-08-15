@@ -14,13 +14,18 @@ export function invocationHash(invocation) {
   return `sha256:${createHash("sha256").update(JSON.stringify(invocation)).digest("hex")}`;
 }
 
-export function scrubbedReleaseEnvironment(reportPath, { root, allowNormalizer = false } = {}) {
+export function scrubbedReleaseEnvironment(reportPath, { root, allowNormalizer = false, temporaryRoot = tmpdir() } = {}) {
   const invocation = allowNormalizer ? normalizerInvocation(root) : null;
+  const windowsRuntime = process.platform === "win32" ? Object.fromEntries([
+    ["SystemRoot", process.env.SystemRoot], ["WINDIR", process.env.WINDIR], ["ComSpec", process.env.ComSpec], ["PATHEXT", process.env.PATHEXT],
+    ["TEMP", temporaryRoot], ["TMP", temporaryRoot],
+  ].filter(([, value]) => typeof value === "string" && value.length > 0)) : {};
   return Object.freeze({
     PATH: process.env.PATH,
     LANG: "C",
     LC_ALL: "C",
-    TMPDIR: tmpdir(),
+    TMPDIR: temporaryRoot,
+    ...windowsRuntime,
     KDLC_RELEASE_EVALUATION_MODE: "recorded-offline",
     KDLC_RELEASE_BOUNDARY_REPORT: reportPath,
     ...(invocation ? { KDLC_RELEASE_ROOT: resolve(root), KDLC_RELEASE_ALLOWED_INVOCATION_HASH: invocationHash(invocation) } : {}),

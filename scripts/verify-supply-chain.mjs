@@ -5,10 +5,10 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "./supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, npmCommandInvocation, readTrustedFile } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDATE_ROOT) : resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const writing = process.argv.slice(2).includes("--write");
 if (process.argv.slice(2).some((argument) => argument !== "--write")) throw new Error("usage: node scripts/verify-supply-chain.mjs [--write]");
 
@@ -57,18 +57,19 @@ const policy = await json("security/supply-chain-policy.json");
 const failures = [];
 
 if (policy.version !== 1 || !Array.isArray(policy.allowed_licenses) || !policy.allowed_licenses.length || typeof policy.package_manifest !== "string") failures.push("supply-chain policy is invalid");
-if (packageDocument.private !== true || !String(packageDocument.version).endsWith("-private")) failures.push("pre-release package must remain private and non-final");
+const prereleaseIdentity = packageDocument.private === true && packageDocument.version === "0.0.0-private";
+const candidateIdentity = packageDocument.private === false && /^[1-9][0-9]*\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u.test(packageDocument.version ?? "");
+if (!prereleaseIdentity && !candidateIdentity) failures.push("package must be the private prerelease or a strict stable release candidate");
 if (packageDocument.license !== "MIT") failures.push("root package license must agree with LICENSE");
 if (JSON.stringify(packageDocument.files) !== JSON.stringify(policy.package_files)) failures.push("package files allowlist drifted from supply-chain policy");
 if (lock.name !== packageDocument.name || lock.version !== packageDocument.version || lock.packages?.[""]?.version !== packageDocument.version) failures.push("package-lock root identity drift");
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 let emittedFiles = [];
 try {
-  const { stdout } = await execute(npm, ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
+  const invocation = npmCommandInvocation(); const { stdout } = await execute(invocation.command, [...invocation.prefix, "pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
   const result = JSON.parse(stdout);
   if (!Array.isArray(result) || result.length !== 1 || !Array.isArray(result[0].files)) throw new Error("unexpected npm pack result");
-  emittedFiles = result[0].files.map(({ path }) => path).sort();
+  emittedFiles = result[0].files.map(({ path }) => normalizeNpmPackPath(path)).sort();
 } catch (error) { failures.push(`npm pack manifest unavailable: ${error.message}`); }
 
 const lockPackages = lock.packages ?? {};

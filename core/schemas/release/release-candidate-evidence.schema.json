@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/release/release-candidate-evidence-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "version", "changelog"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/release-candidate-evidence/v1alpha1"},
+    "version": {"type": "string", "pattern": "^[1-9][0-9]*\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"},
+    "changelog": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {
+      "path": {"const": "CHANGELOG.md"},
+      "sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}
+    }}
+  }
+}

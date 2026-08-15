@@ -149,12 +149,17 @@ test("FEAT-004 role and stage descriptors enforce runtime path capabilities", as
   await assert.rejects(() => RepositoryFileStore.create(repositoryRoot, ["workflow/runs/wf_ingest/state/link/safe.json"]), (error) => error.code === "KDLC_PATH_SYMLINK");
   const pinnedStore = await RepositoryFileStore.create(repositoryRoot, [{ path: "workflow/runs/wf_ingest/state/safe.json", write: true }]); t.after(() => pinnedStore.close());
   const fileRuntime = new MediatedAgentRuntime({ capabilities, store: pinnedStore });
-  await rename(resolve(repositoryRoot, "workflow/runs/wf_ingest/state"), resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original"));
-  await symlink(outsideRoot, resolve(repositoryRoot, "workflow/runs/wf_ingest/state"));
-  assert.deepEqual(await fileRuntime.read("conductor", "workflow/runs/wf_ingest/state/safe.json"), { safe: true });
-  await fileRuntime.write("conductor", "workflow/runs/wf_ingest/state/safe.json", { updated: true });
-  assert.deepEqual(JSON.parse(await readFile(resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original/safe.json"), "utf8")), { updated: true });
-  assert.deepEqual(JSON.parse(await readFile(resolve(outsideRoot, "safe.json"), "utf8")), { outside: true });
+  if (process.platform === "win32") {
+    await assert.rejects(rename(resolve(repositoryRoot, "workflow/runs/wf_ingest/state"), resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original")), (error) => ["EPERM", "EACCES"].includes(error.code));
+    assert.deepEqual(await fileRuntime.read("conductor", "workflow/runs/wf_ingest/state/safe.json"), { safe: true });
+  } else {
+    await rename(resolve(repositoryRoot, "workflow/runs/wf_ingest/state"), resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original"));
+    await symlink(outsideRoot, resolve(repositoryRoot, "workflow/runs/wf_ingest/state"));
+    assert.deepEqual(await fileRuntime.read("conductor", "workflow/runs/wf_ingest/state/safe.json"), { safe: true });
+    await fileRuntime.write("conductor", "workflow/runs/wf_ingest/state/safe.json", { updated: true });
+    assert.deepEqual(JSON.parse(await readFile(resolve(repositoryRoot, "workflow/runs/wf_ingest/state-original/safe.json"), "utf8")), { updated: true });
+    assert.deepEqual(JSON.parse(await readFile(resolve(outsideRoot, "safe.json"), "utf8")), { outside: true });
+  }
 
   for (const name of (await readdir(resolve(root, "packages/workflows/stages"))).sort()) {
     const stage = JSON.parse(await readFile(resolve(root, "packages/workflows/stages", name), "utf8"));

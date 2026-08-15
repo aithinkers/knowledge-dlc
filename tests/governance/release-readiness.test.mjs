@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
+import { assertArchiveManifestMatch, exactPackageManifestFailures, inspectPackageArchive, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, npmCommandInvocation, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const text = (path) => readFile(resolve(root, path), "utf8");
 const json = async (path) => JSON.parse(await text(path));
+function tarArchive(entries) {
+  const blocks = [];
+  for (const entry of entries) {
+    const content = Buffer.from(entry.content ?? "x"); const size = entry.size ?? content.byteLength; const header = Buffer.alloc(512); const octal = (value, width) => `${value.toString(8).padStart(width - 1, "0")}\0`;
+    header.write(entry.name); header.write(octal(0o644, 8), 100); header.write(octal(0, 8), 108); header.write(octal(0, 8), 116); header.write(octal(size, 12), 124); header.write(octal(0, 12), 136); header.fill(32, 148, 156); header[156] = (entry.type ?? "0").charCodeAt(0); header.write("ustar\0", 257); header.write("00", 263);
+    const sum = header.reduce((total, value) => total + value, 0); header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148); blocks.push(header); if (size <= content.byteLength) { blocks.push(content.subarray(0, size)); blocks.push(Buffer.alloc((512 - (size % 512)) % 512)); }
+  }
+  blocks.push(Buffer.alloc(1024)); return gzipSync(Buffer.concat(blocks));
+}
+function refreshTarChecksum(bytes, offset = 0) {
+  const header = bytes.subarray(offset, offset + 512); header.fill(32, 148, 156);
+  const sum = header.reduce((total, value) => total + value, 0); header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+}
 
 test("REL-001 public policies provide actionable low-disclosure security and conduct channels", async () => {
   const [readme, security, conduct, support, config] = await Promise.all([
@@ -64,6 +78,11 @@ test("REL-001 npm updates, installed licenses, dependency graph, and exact packa
   assert.ok(packageFiles.files.includes("packages/retrieval/src/retriever.mjs"));
   assert.deepEqual(exactPackageManifestFailures([...packageFiles.files, "packages/core/src/unexpected-secret.txt"], packageFiles.files), ["unexpected emitted package file: packages/core/src/unexpected-secret.txt"]);
   assert.deepEqual(exactPackageManifestFailures(packageFiles.files.filter((path) => path !== "package.json"), packageFiles.files), ["missing emitted package file: package.json"]);
+  assert.equal(normalizeNpmPackPath("distribution\\release\\evaluation-report.json"), "distribution/release/evaluation-report.json");
+  assert.deepEqual(npmCommandInvocation({ platform: "win32", environment: { npm_execpath: "C:\\hostedtoolcache\\node\\node_modules\\npm\\bin\\npm-cli.js" }, node: "C:\\node.exe" }), { command: "C:\\node.exe", prefix: ["C:\\hostedtoolcache\\node\\node_modules\\npm\\bin\\npm-cli.js"] });
+  assert.deepEqual(npmCommandInvocation({ platform: "win32", environment: { KDLC_NPM_CLI: "C:\\npm\\prefix\\node_modules\\npm\\bin\\npm-cli.js" }, node: "C:\\hostedtoolcache\\node\\node.exe" }), { command: "C:\\hostedtoolcache\\node\\node.exe", prefix: ["C:\\npm\\prefix\\node_modules\\npm\\bin\\npm-cli.js"] });
+  assert.throws(() => npmCommandInvocation({ platform: "win32", environment: {}, node: "C:\\hostedtoolcache\\node\\node.exe" }), /trusted Windows npm CLI/);
+  assert.throws(() => npmCommandInvocation({ platform: "win32", environment: { npm_execpath: "npm.cmd" } }), /trusted Windows npm CLI/);
   assert.deepEqual(installedMetadataFailures({ identity: { name: "example" }, entry: { version: "1.0.0" }, metadata: { name: "example", version: "1.0.1", license: "GPL-3.0" }, allowedLicenses: policy.allowed_licenses }), [
     "installed identity differs from lock: example@1.0.0", "installed license is not allowlisted: example@1.0.0 (GPL-3.0)"
   ]);
@@ -81,7 +100,9 @@ test("REL-001 readiness record keeps final release gates explicitly open", async
   const readiness = await text("docs/release-readiness.md");
   assert.match(readiness, /not a conformance statement,\s+release announcement, or evidence that REL-001 is complete/i);
   assert.match(readiness, /private vulnerability reporting/i);
-  assert.match(readiness, /secret scanning, non-provider patterns, validity checks, and\s+push protection/i);
+  assert.match(readiness, /secret scanning, push protection, and\s+Dependabot security updates are enabled/i);
+  assert.match(readiness, /non-provider secret patterns and validity checks are unavailable/i);
+  assert.match(readiness, /allowed_actions` remains `all`/);
   assert.match(readiness, /Final REL-001 blockers/);
 });
 
@@ -105,13 +126,53 @@ test("REL-001 package evidence reads are descriptor-pinned, no-follow, ancestry-
     await rename(resolve(directory, "package"), resolve(directory, "package.old"));
     await mkdir(resolve(directory, "package"));
     await writeFile(resolve(directory, "package/metadata.json"), "substituted");
-  } }), /identity changed|parent identity changed/);
-  await rm(resolve(directory, "package"), { recursive: true, force: true });
-  await rename(resolve(directory, "package.old"), resolve(directory, "package"));
+  } }), process.platform === "win32" ? /EPERM|EACCES/ : /identity changed|parent identity changed/);
+  if (await lstat(resolve(directory, "package.old")).then(() => true, () => false)) {
+    await rm(resolve(directory, "package"), { recursive: true, force: true });
+    await rename(resolve(directory, "package.old"), resolve(directory, "package"));
+  }
 
-  const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
-  const before = (await readdir(descriptorDirectory)).length;
-  for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
-  const after = (await readdir(descriptorDirectory)).length;
-  assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
+  if (process.platform === "win32") {
+    for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
+    await rename(resolve(directory, "package/metadata.json"), resolve(directory, "package/metadata.closed"));
+    await rename(resolve(directory, "package/metadata.closed"), resolve(directory, "package/metadata.json"));
+  } else {
+    const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+    const before = (await readdir(descriptorDirectory)).length;
+    for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
+    const after = (await readdir(descriptorDirectory)).length;
+    assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
+  }
+});
+
+test("REL-001 package archive inspection rejects aliases, links, traversal, and resource abuse before extraction", async (context) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "kdlc-hostile-tar-")); context.after(() => rm(directory, { recursive: true, force: true }));
+  const inspectBytes = async (name, bytes, pattern) => { const path = resolve(directory, `${name}.tgz`); await writeFile(path, bytes); await assert.rejects(inspectPackageArchive(path), pattern); };
+  const check = async (name, entries, pattern) => { const path = resolve(directory, `${name}.tgz`); await writeFile(path, tarArchive(entries)); if (pattern) await assert.rejects(inspectPackageArchive(path), pattern); else assert.equal((await inspectPackageArchive(path)).file_count, entries.length); };
+  await check("valid", [{ name: "package/index.mjs", content: "export {};\n" }]);
+  await check("duplicate", [{ name: "package/a.txt" }, { name: "package/a.txt" }], /duplicate|aliased/);
+  await check("case-alias", [{ name: "package/A.txt" }, { name: "package/a.txt" }], /duplicate|aliased/);
+  await check("unicode-alias", [{ name: "package/Caf\u00e9.txt" }, { name: "package/Cafe\u0301.txt" }], /duplicate|aliased/);
+  await check("traversal", [{ name: "package/../escape" }], /namespace/);
+  await check("backslash", [{ name: "package\\escape" }], /namespace/);
+  await check("symlink", [{ name: "package/link", type: "2" }], /links/);
+  await check("hardlink", [{ name: "package/link", type: "1" }], /links/);
+  await check("oversize", [{ name: "package/large", size: 16 * 1024 * 1024 + 1 }], /size/);
+
+  const valid = gunzipSync(tarArchive([{ name: "package/a.txt", content: "a" }]));
+  const hidden = gunzipSync(tarArchive([{ name: "package/hidden.txt", content: "hidden" }]));
+  await inspectBytes("hidden-after-one-zero", gzipSync(Buffer.concat([valid.subarray(0, -1024), Buffer.alloc(512), hidden])), /end marker|trailing/);
+  await inspectBytes("one-zero-only", gzipSync(Buffer.concat([valid.subarray(0, -1024), Buffer.alloc(512)])), /end marker|trailing/);
+  const badPadding = Buffer.from(valid); badPadding[513] = 1; await inspectBytes("nonzero-padding", gzipSync(badPadding), /padding/);
+  const badTrailing = Buffer.from(valid); badTrailing[badTrailing.length - 1] = 1; await inspectBytes("nonzero-trailing", gzipSync(badTrailing), /end marker|trailing/);
+  const badOctal = Buffer.from(valid); badOctal.write("00000000009\0", 124, "ascii"); refreshTarChecksum(badOctal); await inspectBytes("invalid-octal", gzipSync(badOctal), /entry size is invalid/);
+  const badChecksumOctal = Buffer.from(valid); badChecksumOctal.write("000009\0 ", 148, "ascii"); await inspectBytes("invalid-checksum-octal", gzipSync(badChecksumOctal), /header checksum is invalid/);
+  await inspectBytes("truncated-header", gzipSync(valid.subarray(0, 700)), /end marker|truncated/);
+  await inspectBytes("truncated-data", gzipSync(valid.subarray(0, 513)), /truncated/);
+  await inspectBytes("malformed-gzip", Buffer.from("not a gzip stream"), /gzip|header|incorrect|unknown/iu);
+
+  const validPath = resolve(directory, "manifest-match.tgz"); await writeFile(validPath, tarArchive([{ name: "package/a.txt", content: "a" }])); const contents = await inspectPackageArchive(validPath);
+  assert.doesNotThrow(() => assertArchiveManifestMatch(contents, [{ path: "a.txt", size: 1, mode: 0o644 }]));
+  assert.throws(() => assertArchiveManifestMatch(contents, []), /exactly match/);
+  assert.throws(() => assertArchiveManifestMatch(contents, [{ path: "substitute.txt", size: 1 }]), /exactly match/);
 });

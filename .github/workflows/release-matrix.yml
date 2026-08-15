@@ -1,0 +1,149 @@
+name: Release matrix
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  matrix:
+    name: ${{ matrix.cell }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {cell: ubuntu-node22, os: ubuntu-latest, node: 22.23.2}
+          - {cell: ubuntu-node24, os: ubuntu-latest, node: 24.5.0}
+          - {cell: windows-node22, os: windows-latest, node: 22.23.2}
+          - {cell: windows-node24, os: windows-latest, node: 24.5.0}
+          - {cell: macos-node22, os: macos-latest, node: 22.23.2}
+          - {cell: macos-node24, os: macos-latest, node: 24.5.0}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm install --global npm@11.5.1
+      - name: Bind exact installed npm CLI
+        shell: bash
+        run: |
+          npm_root="$(npm root --global)"
+          npm_cli="$(node -e 'const {resolve}=require("node:path"); process.stdout.write(resolve(process.argv[1], "npm/bin/npm-cli.js"))' "$npm_root")"
+          test -f "$npm_cli"
+          test "$(node "$npm_cli" --version)" = 11.5.1
+          printf 'KDLC_NPM_CLI=%s\n' "$npm_cli" >> "$GITHUB_ENV"
+      - run: npm ci --ignore-scripts
+      - run: node scripts/run-release-matrix-cell.mjs --cell ${{ matrix.cell }} --output result.json
+        env:
+          KDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-matrix-${{ matrix.cell }}
+          path: result.json
+          if-no-files-found: error
+
+  release-state:
+    name: Trusted release state
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted release-state collector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Collect live state without candidate checkout or execution
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if test "$KDLC_BASE_SHA" = fbdf6119c884484974c0b5075fcc60fc97454d5f; then
+            mkdir trusted-release-state
+            printf '{"bootstrap":"PR38-prerelease-only"}\n' > trusted-release-state/repository-settings.json
+            printf '{"decision":"unapproved"}\n' > trusted-release-state/independent-review.json
+          else
+            test -f trusted/scripts/collect-release-state.mjs
+            node trusted/scripts/collect-release-state.mjs trusted-release-state
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trusted-release-state
+          path: trusted-release-state
+          if-no-files-found: error
+
+  release-matrix:
+    name: Release matrix
+    if: ${{ always() }}
+    needs: [matrix, release-state]
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ needs.matrix.result != 'success' }}
+        run: exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Check out trusted release verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.5.0
+      - run: npm ci --ignore-scripts --prefix trusted
+      - name: Derive candidate artifacts in the tokenless aggregator
+        shell: bash
+        env:
+          KDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          KDLC_PR_NUMBER: ${{ github.event.pull_request.number }}
+          KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          npm ci --ignore-scripts
+          if test -f trusted/scripts/derive-release-artifacts.mjs; then
+            node trusted/scripts/derive-release-artifacts.mjs . "$RUNNER_TEMP/derived-release-artifacts.json"
+          else
+            test "$KDLC_PR_NUMBER" = 38
+            test "$KDLC_BASE_SHA" = fbdf6119c884484974c0b5075fcc60fc97454d5f
+            node scripts/derive-release-artifacts.mjs . "$RUNNER_TEMP/derived-release-artifacts.json"
+          fi
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-matrix-*
+          path: matrix-results
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: trusted-release-state
+          path: trusted-release-state
+      - name: Verify results with trusted code and locked dependencies
+        shell: bash
+        env:
+          KDLC_PR_NUMBER: ${{ github.event.pull_request.number }}
+          KDLC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          KDLC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          KDLC_TRUSTED_REPOSITORY_SNAPSHOT: ${{ github.workspace }}/trusted-release-state/repository-settings.json
+          KDLC_TRUSTED_REVIEW_RECORD: ${{ github.workspace }}/trusted-release-state/independent-review.json
+          KDLC_TRUSTED_ARTIFACT_EVIDENCE: ${{ runner.temp }}/derived-release-artifacts.json
+        run: |
+          if test -f trusted/scripts/verify-release-matrix.mjs; then
+            (cd trusted && KDLC_CANDIDATE_ROOT=.. node scripts/verify-release-matrix.mjs ../matrix-results)
+          else
+            # One-time introduction path: the independently reviewed base does
+            # not yet contain this verifier. After merge, this branch is dead.
+            test "$KDLC_PR_NUMBER" = 38
+            test "$KDLC_BASE_SHA" = fbdf6119c884484974c0b5075fcc60fc97454d5f
+            npm ci --ignore-scripts
+            node scripts/verify-release-matrix.mjs matrix-results
+          fi

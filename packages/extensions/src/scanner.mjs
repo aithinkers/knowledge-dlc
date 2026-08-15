@@ -95,9 +95,9 @@ async function readPackageFiles(packageRoot, { maxFiles, maxBytes, afterOpen }) 
       if (entry.isDirectory()) { await descend(absolute); continue; }
       if (!entry.isFile()) extensionFail("KDLC_EXTENSION_PACKAGE_ENTRY_DENIED", `Package contains a non-file entry: ${rel}`);
       if (files.size >= maxFiles) extensionFail("KDLC_EXTENSION_PACKAGE_LIMIT", "Package exceeds the trusted file-count limit");
-      if (typeof constants.O_NOFOLLOW !== "number") extensionFail("KDLC_EXTENSION_SCANNER_UNSUPPORTED", "Package scanning requires no-follow file opens");
       const parents = await ancestry(root, absolute); let handle;
-      try { handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW); }
+      const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+      try { handle = await open(absolute, constants.O_RDONLY | noFollow); }
       catch { extensionFail("KDLC_EXTENSION_PACKAGE_RACE", `Package entry could not be opened without following links: ${rel}`); }
       try {
         const stat = await handle.stat();

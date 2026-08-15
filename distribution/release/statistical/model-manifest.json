@@ -1,0 +1,4 @@
+{
+  "api_version": "kdlc.dev/statistical-manifest/v1alpha1", "kind": "model", "id": "provider-selection-pending", "version": 1, "status": "awaiting-provider-inputs",
+  "configuration": {"provider": null, "model": null, "revision": null, "temperature": 0, "seed": 421}
+}

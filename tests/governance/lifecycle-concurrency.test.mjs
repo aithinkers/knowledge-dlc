@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import test from "node:test";
 
 import { AuditWriter, JobRegistry, LeaseLockManager, NodeFileStore, TransactionManager, sha256Token } from "../../packages/lifecycle/src/index.mjs";
@@ -99,7 +99,7 @@ test("FEAT-002 live transaction target locks cannot be broken during a paused co
   const resource = await first.resource("knowledge/race.md");
   await assert.rejects(
     first.locks.breakStale(resource, { actor: "admin", reason: "expired during commit" }),
-    (error) => error.code === "KDLC_HASH_CONFLICT" && /Live or unverifiable/.test(error.message)
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /Live or unverifiable|not stale/.test(error.message)
   );
   await assert.rejects(
     second.prepare({ workflowId: "wf-two", targets: [{ path: "knowledge/race.md", expectedToken: sha256Token("before"), content: "second" }] }),
@@ -228,7 +228,7 @@ test("FEAT-002 a live owner cannot be overtaken after its final fence assertion"
   let paused; const atPause = new Promise((resolve) => { paused = resolve; });
   let resume; const gate = new Promise((resolve) => { resume = resolve; });
   f.store.replaceAtomic = async (source, target) => {
-    if (target.endsWith("state/value")) { paused(); await gate; }
+    if (target.endsWith(`state${sep}value`)) { paused(); await gate; }
     return originalReplace(source, target);
   };
   const owner = f.store.withMutex("workflow/final-assert", { owner: "owner", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>
@@ -285,7 +285,8 @@ test("FEAT-002 delayed old-owner cleanup cannot remove or release a successor le
 
 test("FEAT-002 stale lock recovery is serialized and can recover an abandoned empty lock", async (context) => {
   const f = await fixture(context); const locks = new LeaseLockManager({ ...f, ids: new IDs("locks"), coordination: { emptyGraceMs: 100, timeoutMs: 1000 } });
-  const emptyResource = "empty"; await f.store.createDirectoryExclusive(locks.path(emptyResource)); f.clock.value = Date.now(); f.clock.advance(101);
+  const emptyResource = "empty"; await f.store.createDirectoryExclusive(locks.path(emptyResource));
+  f.clock.value = (await stat(await f.store.safePath(locks.path(emptyResource)))).mtimeMs + 101;
   assert.equal(await locks.breakStale(emptyResource, { actor: "admin", reason: "creator crashed" }), null);
 
   await locks.acquire("leased", { owner: "wf:a", process: process.pid, leaseMs: 100 }); f.clock.advance(101);

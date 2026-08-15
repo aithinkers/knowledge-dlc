@@ -5,14 +5,16 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { artifactHash, byteHash, canonicalJson, generateHierarchicalIndexes, parseMarkdownConcept } from "../../packages/core/index.mjs";
 import { FederationResolver } from "../../packages/federation/index.mjs";
 import { GovernanceControlAuthority, GovernanceControlEngine } from "../../packages/governance/index.mjs";
 import { FederatedRetriever } from "../../packages/retrieval/index.mjs";
-import { validateReleaseEvidence, releaseEvidenceFiles, releaseEvidenceSchemas } from "../../scripts/release-evidence-validation.mjs";
+import { validateReleaseEvidence, validateReleaseLifecycle, releaseEvidenceFiles, releaseEvidenceSchemas } from "../../scripts/release-evidence-validation.mjs";
 import { scrubbedReleaseEnvironment } from "../../scripts/release-evaluation-boundary.mjs";
 import { cleanRebuildIndexes } from "../../scripts/release-evidence-definition.mjs";
+import { readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
@@ -22,6 +24,17 @@ async function makeRemovable(path) {
   let metadata; try { metadata = await lstat(path); } catch { return; }
   if (metadata.isDirectory()) { await chmod(path, 0o700); const directory = await opendir(path); for await (const entry of directory) await makeRemovable(resolve(path, entry.name)); }
   else if (!metadata.isSymbolicLink()) await chmod(path, 0o600);
+}
+const basePrimaryFixtureFiles = Object.freeze([
+  "index.md", "knowledge-base.yaml", "policies/authentication.md", "policies/index.md", "policies/nightfall.md",
+  "policies/spoof.md", "references/index.md", "references/sources/authentication.md", "references/sources/index.md", "retrieval-catalog.json"
+]);
+async function copyFixtureTree(sourceRoot, destination) {
+  for (const relativePath of basePrimaryFixtureFiles) {
+    const target = resolve(destination, relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, await readTrustedFile(sourceRoot, relativePath), { flag: "wx", mode: 0o600 });
+  }
 }
 async function listIndexFiles(directory, prefix = "") {
   const paths = []; const handle = await opendir(directory);
@@ -122,7 +135,7 @@ test("REL-001 replay boundary scrubs credentials and observes caught network or 
   const report = resolve(directory, "report.json"); const probe = resolve(root, "tests/fixtures/release/offline-probe.mjs");
   const environment = scrubbedReleaseEnvironment(report, { root, allowNormalizer: true });
   for (const secret of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY", "HTTP_PROXY", "HTTPS_PROXY"]) assert.equal(environment[secret], undefined);
-  await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, `--allow-fs-read=${process.platform === "darwin" ? "/var" : tmpdir()}`, `--allow-fs-write=${directory}`, "--import", resolve(root, "scripts/release-offline-guard.mjs"), probe], { cwd: root, env: { ...environment, OPENAI_API_KEY: undefined } });
+  await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, `--allow-fs-read=${process.platform === "darwin" ? "/var" : tmpdir()}`, `--allow-fs-write=${directory}`, "--import", pathToFileURL(resolve(root, "scripts/release-offline-guard.mjs")).href, probe], { cwd: root, env: { ...environment, OPENAI_API_KEY: undefined } });
   assert.deepEqual(await readJson(directory, "report.json"), { external_network_calls: 6, live_model_calls: 6, blocked_process_calls: 6 });
 });
 
@@ -130,7 +143,7 @@ test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval
   const projectRoot = await mkdtemp(resolve(tmpdir(), "kdlc-release-rebuild-"));
   context.after(async () => { await makeRemovable(projectRoot); await rm(projectRoot, { recursive: true, force: true }); });
   const primary = resolve(projectRoot, "primary");
-  await cp(resolve(root, "tests/fixtures/federation/base-primary"), primary, { recursive: true });
+  await copyFixtureTree(resolve(root, "tests/fixtures/federation/base-primary"), primary);
   await assertCommittedIndexes(primary);
   const driftPath = resolve(primary, committedIndexDefinitions[0].path); const committedBytes = await readFile(driftPath);
   await writeFile(driftPath, `${committedBytes.toString("utf8")}drift\n`); await assert.rejects(() => assertCommittedIndexes(primary)); await writeFile(driftPath, committedBytes);
@@ -170,7 +183,7 @@ test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval
 test("REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift", async (context) => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), "kdlc-release-federated-"));
   context.after(async () => { await makeRemovable(projectRoot); await rm(projectRoot, { recursive: true, force: true }); });
-  await cp(resolve(root, "tests/fixtures/federation/base-primary"), resolve(projectRoot, "primary"), { recursive: true });
+  await copyFixtureTree(resolve(root, "tests/fixtures/federation/base-primary"), resolve(projectRoot, "primary"));
   const project = { api_version: "kdlc.dev/v1alpha1", kind: "Project", metadata: { name: "release-federated" }, purpose: "./purpose.md", profile: "base@1", knowledge_bases: [{ name: "primary", uri: "./primary", mode: "read-only", role: "primary", priority: 100 }] };
   const clock = { now: () => "2026-08-15T00:00:00.000Z" }; const audit = { append: async () => {} };
   const governancePolicy = { api_version: "kdlc.dev/governance-policy/v1alpha1", id: "release-federated", version: 1, minimum_independent_sources: 1, required_erasure_surfaces: [], waiver_authorities: {}, declassification_authorities: {}, erasure_policy_refs: {}, external_models: {} };
@@ -196,7 +209,7 @@ test("REL-001 emitted package smoke includes exact release contracts and evidenc
   const destination = await mkdtemp(resolve(tmpdir(), "kdlc-release-package-"));
   context.after(() => rm(destination, { recursive: true, force: true }));
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const { stdout } = await execute(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await execute(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: root, maxBuffer: 16 * 1024 * 1024, ...(process.platform === "win32" ? { shell: true } : {}) });
   const packed = JSON.parse(stdout);
   assert.equal(packed.length, 1);
   const paths = new Set(packed[0].files.map(({ path }) => path));
@@ -240,4 +253,24 @@ test("REL-001 Governed conformance literally binds merged FEAT-009 erasure evide
   assert.equal(trace.issue, 24);
   assert(["implemented", "verified", "released"].includes(trace.status));
   assert(trace.evidence.tests.includes("tests/governance/revocation-erasure.test.mjs"));
+});
+
+test("REL-001 release lifecycle accepts only coherent prerelease and qualified final-candidate phases", () => {
+  const pending = { id: "REL-001", status: "in-progress" }; const verified = { id: "REL-001", status: "verified" };
+  const prerelease = { release_status: "not-ready", implementation: { version: "0.0.0-private", private: true }, pending_requirements: [{ id: "REL-001" }] };
+  const candidate = { release_status: "release-candidate", implementation: { version: "1.0.0", private: false }, pending_requirements: [] };
+  const pendingReport = { release_status: "not-ready", implementation_version: "0.0.0-private", summary: { structural_gate: "passed" }, statistical_suite: { status: "pending", release_blocking: true }, pending_release_evidence: ["statistical-quality-report"] };
+  const candidateReport = { release_status: "release-candidate", implementation_version: "1.0.0", summary: { structural_gate: "passed" }, statistical_suite: { status: "qualified", release_blocking: false }, pending_release_evidence: [] };
+  const privateLock = { version: "0.0.0-private", packages: { "": { version: "0.0.0-private" } } }; const candidateLock = { version: "1.0.0", packages: { "": { version: "1.0.0" } } };
+  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "0.0.0-private", private: true }, lock: privateLock, conformance: prerelease, report: pendingReport, rel: pending, statisticalPhase: "pending" }), []);
+  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: candidateReport, rel: verified, statisticalPhase: "qualified" }), []);
+  for (const mutation of [
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: candidateReport, rel: verified, statisticalPhase: "pending" },
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: pendingReport, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: { ...candidate, pending_requirements: [{ id: "FEAT-999" }] }, report: candidateReport, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, lock: { ...candidateLock, version: "2.0.0" }, conformance: candidate, report: candidateReport, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.01.0", private: false }, lock: { version: "1.01.0", packages: { "": { version: "1.01.0" } } }, conformance: { ...candidate, implementation: { version: "1.01.0", private: false } }, report: { ...candidateReport, implementation_version: "1.01.0" }, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, lock: candidateLock, conformance: candidate, report: candidateReport, rel: { ...verified, status: "released" }, statisticalPhase: "qualified" },
+    { manifest: { version: "0.0.0-private", private: true }, lock: privateLock, conformance: { ...prerelease, pending_requirements: [] }, report: pendingReport, rel: pending, statisticalPhase: "pending" }
+  ]) assert.ok(validateReleaseLifecycle(mutation).length > 0);
 });

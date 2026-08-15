@@ -200,9 +200,33 @@
           "distribution/release/recorded-run.json",
           "distribution/release/evaluation-report.json",
           "scripts/run-release-evaluation.mjs",
-          "scripts/verify-release-evidence.mjs"
+          "scripts/verify-release-evidence.mjs",
+          "core/schemas/release/statistical-corpus.schema.json",
+          "core/schemas/release/statistical-profile.schema.json",
+          "core/schemas/release/statistical-manifest.schema.json",
+          "core/schemas/release/statistical-capture.schema.json",
+          "core/schemas/release/statistical-report.schema.json",
+          "core/schemas/release/release-matrix-result.schema.json",
+          "distribution/release/statistical/corpus.json",
+          "distribution/release/statistical/profile.json",
+          "distribution/release/statistical/prompt-manifest.json",
+          "distribution/release/statistical/tool-manifest.json",
+          "distribution/release/statistical/model-manifest.json",
+          "distribution/release/statistical/capture-status.json",
+          "scripts/capture-statistical-evaluation.mjs",
+          "scripts/score-statistical-evaluation.mjs",
+          "scripts/statistical-evidence-validation.mjs",
+          "scripts/verify-statistical-evidence.mjs",
+          "scripts/release-matrix-definition.mjs",
+          "scripts/run-release-matrix-cell.mjs",
+          "scripts/verify-release-matrix.mjs",
+          ".github/workflows/release-matrix.yml"
         ],
-        "tests": ["tests/governance/release-evidence.test.mjs"]
+        "tests": [
+          "tests/governance/release-evidence.test.mjs",
+          "tests/governance/statistical-release.test.mjs",
+          "tests/governance/release-matrix.test.mjs"
+        ]
       }
     },
     {

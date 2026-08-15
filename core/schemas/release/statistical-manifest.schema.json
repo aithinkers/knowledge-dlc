@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/release/statistical-manifest-1.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "kind", "id", "version", "status", "configuration"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/statistical-manifest/v1alpha1"}, "kind": {"enum": ["prompt", "tool", "model"]},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "version": {"const": 1},
+    "status": {"enum": ["frozen", "awaiting-provider-inputs"]},
+    "configuration": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "prompt"}}},
+      "then": {"properties": {"status": {"const": "frozen"}, "configuration": {"type": "object", "additionalProperties": false, "required": ["template", "response_schema"], "properties": {"template": {"type": "string", "minLength": 1}, "response_schema": {"type": "object"}}}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "tool"}}},
+      "then": {"properties": {"status": {"const": "frozen"}, "configuration": {"type": "object", "additionalProperties": false, "required": ["mode", "tools"], "properties": {"mode": {"const": "none"}, "tools": {"const": []}}}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "model"}}},
+      "then": {
+        "properties": {"configuration": {"type": "object", "additionalProperties": false, "required": ["provider", "model", "revision", "temperature", "seed"], "properties": {"provider": {"type": ["string", "null"]}, "model": {"type": ["string", "null"]}, "revision": {"type": ["string", "null"]}, "temperature": {"const": 0}, "seed": {"const": 421}}}},
+        "allOf": [
+          {"if": {"properties": {"status": {"const": "awaiting-provider-inputs"}}}, "then": {"properties": {"configuration": {"type": "object", "properties": {"provider": {"type": "null"}, "model": {"type": "null"}, "revision": {"type": "null"}}}}}},
+          {"if": {"properties": {"status": {"const": "frozen"}}}, "then": {"properties": {"configuration": {"type": "object", "properties": {"provider": {"type": "string", "minLength": 1}, "model": {"type": "string", "minLength": 1}, "revision": {"type": "string", "minLength": 1}}}}}}
+        ]
+      }
+    }
+  ]
+}
