@@ -7,6 +7,7 @@ import test from "node:test";
 import { artifactHash, byteHash } from "../../packages/core/index.mjs";
 import { createContractValidator } from "../../packages/contracts/index.mjs";
 import { createLocalProjectEngine, KdlcEngine } from "../../packages/cli/index.mjs";
+import { GovernanceControlAuthority, GovernanceControlEngine } from "../../packages/governance/index.mjs";
 import {
   RetentionDecisionAuthority,
   RevocationEngine,
@@ -23,6 +24,16 @@ const source = {
 };
 const now = "2026-08-14T15:00:00.000Z";
 const clock = { now: () => now, millis: () => Date.parse(now) };
+const governancePolicy = {
+  api_version: "kdlc.dev/governance-policy/v1alpha1",
+  version: 1,
+  minimum_independent_sources: 1,
+  required_erasure_surfaces: ["original", "normalized", "claim", "concept", "cache", "index", "audit", "proposal"],
+  waiver_authorities: {},
+  declassification_authorities: {},
+  erasure_policy_refs: { "policy://retention/7": { roles: ["records"], actions: ["revoke", "erase"] } },
+  external_models: {},
+};
 
 async function removeTree(root) {
   const writable = async (path) => {
@@ -61,22 +72,29 @@ async function fixture(context, { holds = [], immediate = ["privacy-delete"], fa
   ];
   for (const surface of surfaces) if (surface.path)
     await store.writeTextAtomic(surface.path, `sensitive:${surface.id}:Production API token is SECRET-123\n`);
+  const governanceEvents = [];
+  const governanceAuthority = new GovernanceControlAuthority({
+    authenticate: async (credential) => credential === "records-credential" ? { actor: "human:privacy-officer", roles: ["records"] } : null,
+    clock,
+    audit: { append: async (event) => { governanceEvents.push(structuredClone(event)); } },
+  });
   const authority = new RetentionDecisionAuthority({
-    principals: [{ id: "privacy-officer", actor: "human:privacy-officer", principal_mode: "local", permissions: ["revoke", "erase"] }],
-    policies: [{ id: "retention", version: "7", immediate_erasure_reasons: immediate, tombstone_fields: ["source_hash", "event_id"] }],
+    governanceAuthority,
+    policies: [{ id: "retention", version: "7", governance_ref: "policy://retention/7", immediate_erasure_reasons: immediate, tombstone_fields: ["source_hash", "event_id"] }],
     holds,
     key: Buffer.alloc(32, 7),
     keyId: "retention-authority",
     clock,
   });
+  const governance = await GovernanceControlEngine.create({ policy: governancePolicy, clock, audit: { append: async (event) => { governanceEvents.push(structuredClone(event)); } }, authority: governanceAuthority, erasureVerifier: authority.evidenceVerifier() });
+  const governanceSession = await governanceAuthority.openSession("records-credential");
   const inventory = new SurfaceInventory({ store, list: async () => structuredClone(surfaces) });
   const engine = new RevocationEngine({ store, clock, ids, audit, authority, inventory, fault, externalProcessors });
-  return { root, store, ids, audit, authority, inventory, engine, surfaces, session: authority.establish("privacy-officer") };
+  return { root, store, ids, audit, authority, governanceAuthority, governanceSession, governance, governanceEvents, inventory, engine, surfaces };
 }
 
-function request(session, overrides = {}) {
-  return {
-    session,
+async function request(state, overrides = {}) {
+  const input = {
     projectId: "project_alpha",
     workflowId: "wf_erase",
     sourceId: source.id,
@@ -88,6 +106,15 @@ function request(session, overrides = {}) {
     idempotencyKey: "erase-private-1",
     ...overrides,
   };
+  input.authorization = await state.governanceAuthority.issueErasureAuthorization(state.governanceSession, {
+    id: `authorization-${input.idempotencyKey}`,
+    subject: artifactHash({ id: input.sourceId, hash: input.sourceHash }),
+    action: input.action,
+    policy_ref: "policy://retention/7",
+    reason: input.reason,
+    expires_at: "2026-08-15T15:00:00Z",
+  });
+  return input;
 }
 
 test("FEAT-009 resolves a deterministic complete provenance impact graph and validates contracts", async (context) => {
@@ -102,8 +129,9 @@ test("FEAT-009 resolves a deterministic complete provenance impact graph and val
 });
 
 test("FEAT-009 erasure barriers retrieval, treats every local copy, minimizes audit, and issues a verified receipt", async (context) => {
-  const { engine, store, session, surfaces } = await fixture(context);
-  const started = await engine.start(request(session));
+  const state = await fixture(context);
+  const { engine, store, surfaces } = state;
+  const started = await engine.start(await request(state));
   assert.equal(started.job.state, "queued");
   const guard = new RevocationGuard({ store });
   assert.equal(await guard.revoked(source.id, source.hash), true);
@@ -146,7 +174,8 @@ test("FEAT-009 erasure barriers retrieval, treats every local copy, minimizes au
 
 test("FEAT-008 FEAT-009 exposes only instance-bound evidence derived from a verified durable purge", async (context) => {
   const state = await fixture(context);
-  const started = await state.engine.start(request(state.session));
+  const started = await state.engine.start(await request(state));
+  assert.equal(state.governanceEvents.some(({ action }) => action === "governance.erasure.authorized"), true);
   await state.engine.run("wf_erase", started.job.job_id);
   const token = await state.engine.issueGovernanceEvidence("wf_erase", started.job.job_id);
   const evidence = state.authority.evidenceVerifier().resolve(token);
@@ -161,10 +190,17 @@ test("FEAT-008 FEAT-009 exposes only instance-bound evidence derived from a veri
     ["audit", "cache", "claim", "concept", "index", "normalized", "original", "proposal"]);
   assert.equal(evidence.inventory.find(({ surface }) => surface === "concept").status, "tombstoned");
   assert.equal(evidence.inventory.find(({ surface }) => surface === "original").status, "purged");
-  assert.throws(() => state.authority.evidenceVerifier().resolve(Object.freeze({ kind: "kdlc-verified-erasure-evidence-1" })),
+  assert.equal((await state.governance.authorizeErasure({ subject: artifactHash(source), erasure_verification: token })).allowed, true);
+  await assert.rejects(state.governance.authorizeErasure({
+    subject: artifactHash(source),
+    erasure_verification: { ...evidence, inventory: evidence.inventory.map((item) => ({ ...item, status: "purged" })) },
+  }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+  assert.throws(() => state.authority.resolveGovernanceEvidence(Object.freeze({ kind: "kdlc-verified-erasure-evidence-1" })),
     (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
   const other = await fixture(context);
-  assert.throws(() => other.authority.evidenceVerifier().resolve(token),
+  assert.throws(() => other.authority.resolveGovernanceEvidence(token),
+    (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  await assert.rejects(other.engine.start(await request(state, { idempotencyKey: "cross-authority" })),
     (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
 });
 
@@ -200,17 +236,21 @@ test("FEAT-009 the shipped project engine enforces a newly installed barrier wit
 
 test("FEAT-009 legal hold and unexpired retention fail closed with authenticated audited blocked jobs", async (context) => {
   const held = await fixture(context, { holds: [{ id: "hold-case-7", source_id: source.id, status: "active", kinds: ["original", "concept"] }] });
-  const result = await held.engine.start(request(held.session));
+  const result = await held.engine.start(await request(held));
   assert.equal(result.decision.allowed, false);
   assert.equal(result.job.state, "failed");
   assert.deepEqual(result.decision.blocked.legal_holds, ["hold-case-7"]);
   assert.equal(await held.store.exists("sources/original/private.txt"), true);
   assert.equal((await held.store.readJson(held.engine.guard.path(source.id))).state, "held");
   assert.match(await held.store.readText("workflow/runs/wf_erase/audit.jsonl"), /erasure\.blocked/);
+  await assert.rejects(held.engine.issueGovernanceEvidence("wf_erase", result.job.job_id),
+    (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  await assert.rejects(held.governance.authorizeErasure({ subject: artifactHash(source), erasure_verification: Object.freeze({ kind: "kdlc-verified-erasure-evidence-1" }) }),
+    (error) => error.code === "KDLC_GOVERNANCE_DENIED");
 
   const retainedSurfaces = [{ id: "retained", kind: "original", path: "retained.txt", strategy: "purge", retained_until: "2027-08-14T15:00:00.000Z", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] }];
   const retained = await fixture(context, { immediate: [], surfaces: retainedSurfaces });
-  const blocked = await retained.engine.start(request(retained.session, { reason: "ordinary-delete", idempotencyKey: "retention-block" }));
+  const blocked = await retained.engine.start(await request(retained, { reason: "ordinary-delete", idempotencyKey: "retention-block" }));
   assert.equal(blocked.decision.allowed, false);
   assert.deepEqual(blocked.decision.blocked.retention_surfaces, ["retained"]);
 });
@@ -225,7 +265,7 @@ test("FEAT-009 crash after physical purge resumes idempotently without duplicate
       }
     },
   });
-  const started = await fixtureState.engine.start(request(fixtureState.session));
+  const started = await fixtureState.engine.start(await request(fixtureState));
   await assert.rejects(fixtureState.engine.run("wf_erase", started.job.job_id), /simulated process crash/);
   assert.equal((await fixtureState.engine.jobs.get(started.job.job_id)).state, "running");
   const receipt = await fixtureState.engine.run("wf_erase", started.job.job_id);
@@ -245,7 +285,7 @@ test("FEAT-009 crash after copy audit but before its checkpoint replays without 
       }
     },
   });
-  const started = await state.engine.start(request(state.session));
+  const started = await state.engine.start(await request(state));
   await assert.rejects(state.engine.run("wf_erase", started.job.job_id), /simulated audit checkpoint crash/);
   assert.equal((await state.engine.run("wf_erase", started.job.job_id)).result, "erased");
   const events = (await state.store.readText("workflow/runs/wf_erase/audit.jsonl")).trim().split("\n").map(JSON.parse);
@@ -263,7 +303,7 @@ test("FEAT-009 audit/receipt finalization crash gaps recover forward exactly onc
         }
       },
     });
-    const started = await state.engine.start(request(state.session, { workflowId: `wf_${crashPhase.replaceAll("-", "_")}`, idempotencyKey: `key-${crashPhase}` }));
+    const started = await state.engine.start(await request(state, { workflowId: `wf_${crashPhase.replaceAll("-", "_")}`, idempotencyKey: `key-${crashPhase}` }));
     await assert.rejects(state.engine.run(started.job.workflow_id, started.job.job_id), new RegExp(`crash:${crashPhase}`));
     const receipt = await state.engine.run(started.job.workflow_id, started.job.job_id);
     assert.equal(receipt.result, "erased");
@@ -281,7 +321,7 @@ test("FEAT-009 audit/receipt finalization crash gaps recover forward exactly onc
 
 test("FEAT-009 verification detects a late partial copy and refuses success until it is removed from the trusted inventory", async (context) => {
   const state = await fixture(context);
-  const started = await state.engine.start(request(state.session));
+  const started = await state.engine.start(await request(state));
   const late = { id: "late-backup", kind: "backup", path: "backups/late.txt", strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] };
   await state.store.writeTextAtomic(late.path, "SECRET-123 late copy\n");
   state.surfaces.push(late);
@@ -295,8 +335,11 @@ test("FEAT-009 verification detects a late partial copy and refuses success unti
 
 test("FEAT-009 revocation retains historical artifacts but invalidates every dependent and rejects spoofed authority", async (context) => {
   const state = await fixture(context);
-  await assert.rejects(state.engine.start(request(Object.freeze({ kind: "kdlc-revocation-session-1" }), { action: "revoke" })), (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
-  const started = await state.engine.start(request(state.session, { action: "revoke", reason: "source-revoked", idempotencyKey: "revoke-private-1" }));
+  await assert.rejects(state.engine.start({ ...await request(state, { action: "revoke", reason: "source-revoked", idempotencyKey: "forged-revoke" }), authorization: Object.freeze({ kind: "kdlc-erasure-authorization-1", id: "forged" }) }), (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  const exact = await request(state, { action: "revoke", reason: "source-revoked", idempotencyKey: "mismatched-binding" });
+  await assert.rejects(state.engine.start({ ...exact, reason: "privacy-delete" }),
+    (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  const started = await state.engine.start(await request(state, { action: "revoke", reason: "source-revoked", idempotencyKey: "revoke-private-1" }));
   const receipt = await state.engine.run("wf_erase", started.job.job_id);
   assert.equal(receipt.result, "revoked");
   assert.equal(await state.store.exists("knowledge/private.md"), true);
@@ -327,7 +370,7 @@ test("FEAT-009 a concurrent retrieval finishing after barrier installation canno
   }, new RevocationGuard({ store: state.store }));
   const query = guarded.search({ includeSources: true });
   await enteredPromise;
-  await state.engine.start(request(state.session));
+  await state.engine.start(await request(state));
   release();
   const result = await query;
   assert.equal(result.status, "not_found");
@@ -337,7 +380,7 @@ test("FEAT-009 a concurrent retrieval finishing after barrier installation canno
 test("FEAT-009 a legal hold activated after planning stops purge before any copy is treated", async (context) => {
   const activeHolds = [];
   const state = await fixture(context, { holds: () => structuredClone(activeHolds) });
-  const started = await state.engine.start(request(state.session));
+  const started = await state.engine.start(await request(state));
   activeHolds.push({ id: "late-hold", source_id: source.id, status: "active", kinds: ["original"] });
   await assert.rejects(state.engine.run("wf_erase", started.job.job_id), (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
   assert.equal(await state.store.exists("sources/original/private.txt"), true);
@@ -366,7 +409,7 @@ test("FEAT-009 external processors require minimized receipts and verified idemp
     },
   };
   const state = await fixture(context, { surfaces, externalProcessors: { vault: processor } });
-  const started = await state.engine.start(request(state.session));
+  const started = await state.engine.start(await request(state));
   assert.equal((await state.engine.run("wf_erase", started.job.job_id)).result, "erased");
   assert.equal(calls, 1);
   assert.equal((await state.engine.run("wf_erase", started.job.job_id)).result, "erased");
@@ -378,20 +421,20 @@ test("FEAT-009 external processors require minimized receipts and verified idemp
 
 test("FEAT-009 idempotent start returns the bound plan despite later inventory drift and rejects changed input", async (context) => {
   const state = await fixture(context);
-  const first = await state.engine.start(request(state.session));
-  assert.equal((await state.engine.start(request(state.session))).job.job_id, first.job.job_id);
+  const first = await state.engine.start(await request(state));
+  assert.equal((await state.engine.start(await request(state))).job.job_id, first.job.job_id);
   state.surfaces.push({ id: "new-copy", kind: "export", path: "exports/new.txt", strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] });
   await state.store.writeTextAtomic("exports/new.txt", "copy\n");
-  const replay = await state.engine.start(request(state.session));
+  const replay = await state.engine.start(await request(state));
   assert.equal(replay.reused, true);
   assert.deepEqual(replay.impact, first.impact);
-  await assert.rejects(state.engine.start(request(state.session, { reason: "source-revoked" })), (error) => error.code === "KDLC_ERASURE_CONFLICT");
+  await assert.rejects(state.engine.start(await request(state, { reason: "source-revoked" })), (error) => error.code === "KDLC_ERASURE_CONFLICT");
   assert.notEqual(artifactHash(first.impact), artifactHash(resolveImpact(await state.inventory.snapshot(), source)));
 });
 
 test("FEAT-009 signed impact binds exact deletion paths and invalid calendar retention fails closed", async (context) => {
   const state = await fixture(context);
-  const started = await state.engine.start(request(state.session));
+  const started = await state.engine.start(await request(state));
   const planPath = state.engine.planPath("wf_erase", started.job.job_id);
   const plan = await state.store.readJson(planPath);
   plan.surfaces[0].path = "unrelated.txt";
@@ -401,5 +444,5 @@ test("FEAT-009 signed impact binds exact deletion paths and invalid calendar ret
 
   const invalidDate = [{ id: "bad-date", kind: "original", path: "bad.txt", strategy: "purge", retained_until: "2027-02-30T00:00:00Z", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] }];
   const malformed = await fixture(context, { surfaces: invalidDate });
-  await assert.rejects(malformed.engine.start(request(malformed.session, { idempotencyKey: "bad-date" })), (error) => error.code === "KDLC_ERASURE_INCOMPLETE");
+  await assert.rejects(malformed.engine.start(await request(malformed, { idempotencyKey: "bad-date" })), (error) => error.code === "KDLC_ERASURE_INCOMPLETE");
 });

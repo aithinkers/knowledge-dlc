@@ -3,7 +3,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { artifactHash, canonicalJson } from "../../core/index.mjs";
 import { denied, invalid } from "./errors.mjs";
 
-const sessions = new WeakMap();
 const governanceEvidence = new WeakMap();
 const ACTOR = /^(?:human|process):[A-Za-z0-9._@/-]+$/;
 const ID = /^[A-Za-z0-9._-]{1,128}$/;
@@ -31,16 +30,9 @@ function unsigned(value) {
   return copy;
 }
 
-function validatePrincipal(principal) {
-  return principal && ID.test(principal.id ?? "") && ACTOR.test(principal.actor ?? "") &&
-    ["local", "served", "automation"].includes(principal.principal_mode) &&
-    (principal.principal_mode !== "served" || typeof principal.issuer === "string") &&
-    Array.isArray(principal.permissions) &&
-    principal.permissions.every((permission) => ["revoke", "erase"].includes(permission));
-}
-
 function validatePolicy(policy) {
   return policy && ID.test(policy.id ?? "") && ID.test(policy.version ?? "") &&
+    typeof policy.governance_ref === "string" && policy.governance_ref.length > 0 &&
     Array.isArray(policy.immediate_erasure_reasons) &&
     policy.immediate_erasure_reasons.every((reason) => ID.test(reason)) &&
     Array.isArray(policy.tombstone_fields) &&
@@ -48,24 +40,24 @@ function validatePolicy(policy) {
 }
 
 export class RetentionDecisionAuthority {
-  #principals;
+  #governanceAuthority;
   #policies;
   #holdsProvider;
   #key;
   #keyId;
   #clock;
 
-  constructor({ principals, policies, holds = [], key, keyId, clock }) {
-    if (!Array.isArray(principals) || principals.some((principal) => !validatePrincipal(principal)))
-      throw invalid("Trusted revocation principals are invalid");
+  constructor({ governanceAuthority, policies, holds = [], key, keyId, clock }) {
+    if (!governanceAuthority || typeof governanceAuthority.erasureAuthorization !== "function")
+      throw invalid("An instance-bound governance authorization authority is required");
     if (!Array.isArray(policies) || policies.some((policy) => !validatePolicy(policy)))
       throw invalid("Trusted retention policies are invalid");
-    if (new Set(principals.map(({ id }) => id)).size !== principals.length ||
-      new Set(policies.map(({ id, version }) => `${id}@${version}`)).size !== policies.length)
-      throw invalid("Trusted revocation principals and policies must have unique identities");
+    if (new Set(policies.map(({ id, version }) => `${id}@${version}`)).size !== policies.length ||
+      new Set(policies.map(({ governance_ref: reference }) => reference)).size !== policies.length)
+      throw invalid("Trusted retention policies must have unique identities and governance references");
     if (!Buffer.isBuffer(key) || key.byteLength < 32 || !ID.test(keyId ?? "") || typeof clock?.now !== "function")
       throw invalid("A trusted retention decision signing authority and clock are required");
-    this.#principals = new Map(principals.map((principal) => [principal.id, structuredClone(principal)]));
+    this.#governanceAuthority = governanceAuthority;
     this.#policies = new Map(policies.map((policy) => [`${policy.id}@${policy.version}`, structuredClone(policy)]));
     if (typeof holds !== "function" && !Array.isArray(holds)) throw invalid("Trusted legal holds are invalid");
     this.#holdsProvider = typeof holds === "function" ? holds : () => structuredClone(holds);
@@ -74,19 +66,11 @@ export class RetentionDecisionAuthority {
     this.#clock = clock;
   }
 
-  establish(principalId) {
-    const principal = this.#principals.get(principalId);
-    if (!principal) throw denied("Revocation authority principal is not established");
-    const session = Object.freeze({ kind: "kdlc-revocation-session-1" });
-    sessions.set(session, structuredClone(principal));
-    return session;
-  }
-
-  resolve(session, permission) {
-    const principal = sessions.get(session);
-    if (!principal || !principal.permissions.includes(permission))
-      throw denied("Revocation requires an authenticated principal with the requested authority");
-    return structuredClone(principal);
+  resolve(authorization) {
+    const resolved = this.#governanceAuthority.erasureAuthorization(authorization);
+    if (!resolved || !ACTOR.test(resolved.authority ?? ""))
+      throw denied("Revocation requires a current instance-bound governance authorization");
+    return structuredClone(resolved);
   }
 
   #activeHolds(sourceId, impactedKinds) {
@@ -107,16 +91,18 @@ export class RetentionDecisionAuthority {
     return createHmac("sha256", this.#key).update(canonicalJson(value)).digest("hex");
   }
 
-  decide({ session, request, impact }) {
-    const principal = sessions.get(session);
-    if (!principal) throw denied("Revocation requires an authenticated authority session");
+  decide({ authorization, request, impact }) {
+    const authenticated = this.resolve(authorization);
     if (!request || !["revoke", "erase"].includes(request.action) || !ID.test(request.reason ?? "") ||
       !ID.test(request.policy_id ?? "") || !ID.test(request.policy_version ?? "") ||
       !ID.test(request.source_id ?? "") || !HASH.test(request.source_hash ?? ""))
       throw invalid("Revocation request is invalid");
-    if (!principal.permissions.includes(request.action)) throw denied("Principal lacks revocation authority");
     const policy = this.#policies.get(`${request.policy_id}@${request.policy_version}`);
     if (!policy) throw denied("Retention policy is unresolved");
+    const subject = artifactHash({ id: request.source_id, hash: request.source_hash });
+    if (authenticated.subject !== subject || authenticated.action !== request.action ||
+      authenticated.reason !== request.reason || authenticated.policy_ref !== policy.governance_ref)
+      throw denied("Governance authorization does not exactly bind the revocation request");
     const now = this.#clock.now();
     if (!validTime(now)) throw invalid("Trusted authority clock is invalid");
     const impactedKinds = new Set(impact.nodes.map(({ kind }) => kind));
@@ -133,11 +119,8 @@ export class RetentionDecisionAuthority {
       reason: request.reason,
       allowed,
       policy: { id: policy.id, version: policy.version },
-      authority: {
-        actor: principal.actor,
-        principal_mode: principal.principal_mode,
-        ...(principal.issuer ? { issuer: principal.issuer } : {}),
-      },
+      authority: { actor: authenticated.authority },
+      authorization_hash: artifactHash(authenticated),
       impact_hash: artifactHash(impact),
       blocked: {
         legal_holds: activeHolds.map(({ id }) => id).sort(),
@@ -226,7 +209,9 @@ export class RetentionDecisionAuthority {
 
   evidenceVerifier() {
     const authority = this;
-    return Object.freeze({ resolve(token) { return authority.resolveGovernanceEvidence(token); } });
+    return Object.freeze({ resolve(token) {
+      try { return authority.resolveGovernanceEvidence(token); } catch { return undefined; }
+    } });
   }
 
   revalidate(decision, impact) {

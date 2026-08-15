@@ -3,7 +3,7 @@
   "$id": "https://kdlc.dev/schemas/erasure/retention-decision-1.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["api_version", "action", "source", "reason", "allowed", "policy", "authority", "impact_hash", "blocked", "tombstone_fields", "decided_at", "proof"],
+  "required": ["api_version", "action", "source", "reason", "allowed", "policy", "authority", "authorization_hash", "impact_hash", "blocked", "tombstone_fields", "decided_at", "proof"],
   "properties": {
     "api_version": {"const": "kdlc.dev/retention-decision/v1alpha1"},
     "action": {"enum": ["revoke", "erase"]},
@@ -12,9 +12,10 @@
     "allowed": {"type": "boolean"},
     "policy": {"type": "object", "additionalProperties": false, "required": ["id", "version"], "properties": {"id": {"$ref": "#/$defs/id"}, "version": {"$ref": "#/$defs/id"}}},
     "authority": {
-      "type": "object", "additionalProperties": false, "required": ["actor", "principal_mode"],
-      "properties": {"actor": {"type": "string", "pattern": "^(?:human|process):[A-Za-z0-9._@/-]+$"}, "principal_mode": {"enum": ["local", "served", "automation"]}, "issuer": {"type": "string", "minLength": 1}}
+      "type": "object", "additionalProperties": false, "required": ["actor"],
+      "properties": {"actor": {"type": "string", "pattern": "^(?:human|process):[A-Za-z0-9._@/-]+$"}}
     },
+    "authorization_hash": {"$ref": "#/$defs/hash"},
     "impact_hash": {"$ref": "#/$defs/hash"},
     "blocked": {
       "type": "object", "additionalProperties": false, "required": ["legal_holds", "retention_surfaces"],

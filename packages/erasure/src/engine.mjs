@@ -135,7 +135,7 @@ export class RevocationEngine {
     return blocked;
   }
 
-  async start({ session, projectId, workflowId, sourceId, sourceHash, action, reason, policyId, policyVersion, idempotencyKey }) {
+  async start({ authorization, projectId, workflowId, sourceId, sourceHash, action, reason, policyId, policyVersion, idempotencyKey }) {
     if (![projectId, workflowId, sourceId, reason, policyId, policyVersion, idempotencyKey].every((value) => ID.test(value ?? "")) ||
       !HASH.test(sourceHash ?? "") || !["revoke", "erase"].includes(action))
       throw invalid("Revocation job request is invalid");
@@ -147,7 +147,7 @@ export class RevocationEngine {
       source_id: sourceId,
       source_hash: sourceHash,
     };
-    const authenticated = this.authority.resolve(session, action);
+    const authenticated = this.authority.resolve(authorization);
     return this.coordinateIdempotency(projectId, workflowId, idempotencyKey, () => this.coordinate(sourceId, async () => {
       const idempotencyPath = this.idempotencyPath(projectId, workflowId, idempotencyKey);
       if (await this.store.exists(idempotencyPath)) {
@@ -177,8 +177,8 @@ export class RevocationEngine {
       const snapshot = await this.inventory.snapshot();
       const source = { id: sourceId, hash: sourceHash };
       const impact = resolveImpact(snapshot, source);
-      const decision = this.authority.decide({ session, request, impact });
-      if (decision.authority.actor !== authenticated.actor) throw denied("Retention decision authority identity drifted");
+      const decision = this.authority.decide({ authorization, request, impact });
+      if (decision.authority.actor !== authenticated.authority || decision.authorization_hash !== artifactHash(authenticated)) throw denied("Retention decision authority identity drifted");
       if (!this.authority.verify(decision, impact)) throw denied("Retention decision proof is invalid");
       const created = await this.jobs.create({
         principal: decision.authority.actor,
