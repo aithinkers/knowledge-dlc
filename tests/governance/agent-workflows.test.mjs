@@ -7,7 +7,7 @@ import test from "node:test";
 import { AGENT_WORKFLOW_SCHEMA_PATHS, AgentPolicyError, CapabilityRuntime, loadRoleDescriptors, MediatedAgentRuntime, PrincipalAuthority, RepositoryFileStore, ReviewContextAuthority } from "../../packages/agents/index.mjs";
 import { createContractValidator } from "../../packages/contracts/index.mjs";
 import { artifactHash } from "../../packages/core/index.mjs";
-import { assessPublication, createReviewReceipt, verificationStatus } from "../../packages/governance/index.mjs";
+import { assessPublication, createReviewReceipt, GovernanceControlAuthority, GovernanceControlEngine, verificationStatus } from "../../packages/governance/index.mjs";
 import { GovernedAgentWorkflows, MemoryArtifactStore } from "../../packages/workflows/index.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -28,7 +28,7 @@ async function normalizedFixture(name) {
 
 function reviewContext(sourceHash = digest("a")) {
   return {
-    evidence: [{ source_id: "src_alpha", source_hash: sourceHash, locator: { heading: "Token lifetime" }, excerpt: "Production API tokens expire after 60 minutes.", authority: "team:security", access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "high", warnings: [] }],
+    evidence: [{ source_id: "src_alpha", source_hash: sourceHash, locator: { heading: "Token lifetime" }, excerpt: "Production API tokens expire after 60 minutes.", authority: "team:security", access: { classification: "public" }, rights: { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" }, extraction_quality: "high", warnings: [] }],
     sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: digest("7") }],
     impact: { links: [], dependents: [], freshness_change: "2030-01-01", unresolved_conflicts: [] },
     resolved: {
@@ -75,8 +75,51 @@ test("FEAT-008 workflow profiles requiring built-in controls fail closed without
     reviewContextSession: trustedReviewContext("wf_ingest", context),
     reviewRequirements: { sensor_ids: ["secret-pattern"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }
   });
-  await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: await fixture("ingest"), normalizedEvidence: await normalizedFixture("ingest") });
-  await assert.rejects(harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_GOVERNANCE_CONTROLS_REQUIRED");
+  await assert.rejects(harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: await fixture("ingest"), normalizedEvidence: await normalizedFixture("ingest") }), (error) => error.code === "KDLC_GOVERNANCE_CONTROLS_REQUIRED");
+});
+
+test("FEAT-008 workflow integrates trusted ingest, retrieval, model-route, erasure, and claim propagation gates", async () => {
+  const events = [];
+  const audit = { append: async (event) => { events.push(structuredClone(event)); } };
+  const authority = new GovernanceControlAuthority({
+    authenticate: async (credential) => credential === "records" ? { actor: "human:records", roles: ["records"] } : null,
+    clock,
+    audit
+  });
+  const policy = {
+    api_version: "kdlc.dev/governance-policy/v1alpha1", id: "workflow-controls", version: 1, minimum_independent_sources: 1,
+    required_erasure_surfaces: ["original", "normalized", "claim", "concept", "quote", "cache", "index", "embedding", "graph", "export", "log", "backup"],
+    waiver_authorities: { "secret-pattern": { publication: ["security"] } }, declassification_authorities: {}, erasure_authorities: ["records"],
+    external_models: { "local/recorded": { allowed: true, max_classification: "restricted" }, "outside/general": { allowed: true, max_classification: "public" } }
+  };
+  const governanceControls = await GovernanceControlEngine.create({ policy, clock, audit, authority });
+  const context = reviewContext();
+  const harness = await GovernedAgentWorkflows.create({
+    clock, governanceControls,
+    session: principals.establishReviewSession("reviewer-123", "trust-reviewer"),
+    reviewContextSession: trustedReviewContext("wf_ingest", context),
+    reviewRequirements: { sensor_ids: ["secret-pattern"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }
+  });
+  const recording = await fixture("ingest");
+  recording.claims[0].access = { classification: "restricted" };
+  recording.claims[0].rights = { license: "LicenseRef-Attacker", redistribution: "allowed" };
+  const output = await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording, normalizedEvidence: await normalizedFixture("ingest") });
+  assert.deepEqual(output.claims[0].access, context.evidence[0].access);
+  assert.deepEqual(output.claims[0].rights, context.evidence[0].rights);
+  assert.equal((await harness.authorizeRetrieval({ workflowId: "wf_ingest", proposalId: "pr_alpha", principal: { clearance: "public", compartments: [] } })).allowed, true);
+  assert.equal((await harness.authorizeModelRoute({ workflowId: "wf_ingest", proposalId: "pr_alpha", provider: "outside", model: "general" })).allowed, true);
+  const inventory = policy.required_erasure_surfaces.map((surface) => ({ surface, known_copy: true, status: "purged" }));
+  const session = await authority.openSession("records");
+  const evidence = await authority.issueErasureEvidence(session, { id: "erase-workflow", subject: output.proposals[0].target.subject, legal_hold: false, inventory, propagation_verified: true, reason: "verified purge", expires_at: "2026-08-15T12:00:00Z" });
+  assert.equal((await harness.authorizeErasure({ workflowId: "wf_ingest", proposalId: "pr_alpha", erasureEvidence: evidence })).allowed, true);
+  assert.deepEqual(new Set(events.filter(({ action }) => action === "governance.gate.completed").map(({ gate }) => gate)), new Set(["ingest", "model-route", "retrieval", "erasure"]));
+});
+
+test("FEAT-008 invalid trusted access or rights cannot reach persisted claims", async () => {
+  const context = reviewContext();
+  context.evidence[0].rights = { use: "caller-defined" };
+  const harness = await GovernedAgentWorkflows.create({ clock, reviewContextSession: trustedReviewContext("wf_ingest", context) });
+  await assert.rejects(harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: await fixture("ingest"), normalizedEvidence: await normalizedFixture("ingest") }), (error) => error.code === "KDLC_CLAIM_GOVERNANCE_METADATA_INVALID");
 });
 
 test("FEAT-004 role and stage descriptors enforce runtime path capabilities", async (t) => {

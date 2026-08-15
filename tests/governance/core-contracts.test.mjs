@@ -178,7 +178,7 @@ test("FEAT-001 validates manifests, claims, extensions, packets, and receipts", 
     access: { classification: "internal", policy_ref: "acme-access@4" },
     status: "active"
   };
-  const claim = { id: "clm_01j5", text: "Tokens expire.", source_id: "src_01j5", source_hash: digest, locator: { heading: "Lifetime" }, extraction: "explicit", status: "candidate" };
+  const claim = { id: "clm_01j5", text: "Tokens expire.", source_id: "src_01j5", source_hash: digest, locator: { heading: "Lifetime" }, extraction: "explicit", access: source.access, rights: source.rights, status: "candidate" };
   const claimSidecarEntry = {
     assertion_key: "policies/authentication#token-lifetime",
     assertion: "Tokens expire.",
@@ -226,6 +226,8 @@ test("FEAT-001 validates manifests, claims, extensions, packets, and receipts", 
     const result = contracts.validate(name, value);
     assert.equal(result.valid, true, `${name}: ${JSON.stringify(result.errors)}`);
   }
+  const ungovernedClaim = structuredClone(claim); delete ungovernedClaim.access; delete ungovernedClaim.rights;
+  assert.equal(contracts.validate("claim", ungovernedClaim).valid, false);
 
   const ambiguousSource = { ...source, digest_evidence: { method: "etag", value: "abc" } };
   assert.equal(contracts.validate("sourceRecord", ambiguousSource).valid, false);

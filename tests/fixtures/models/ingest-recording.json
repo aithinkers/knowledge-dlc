@@ -5,7 +5,7 @@
   "model": {"provider": "recorded", "model": "fixture-model-1", "prompt": "extract-and-plan-v1", "recorded_at": "2026-08-14T12:00:00Z"},
   "input_hashes": {"normalized_evidence": "sha256:34d3efe02e0e1e38d4e87507edc1310baa1a9cc4ae8f1982bec76c98e45ead99"},
   "claims": [
-    {"id":"clm_alpha","text":"Production API tokens expire after 60 minutes.","source_id":"src_alpha","source_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","locator":{"heading":"Token lifetime"},"extraction":"explicit","status":"accepted"}
+    {"id":"clm_alpha","text":"Production API tokens expire after 60 minutes.","source_id":"src_alpha","source_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","locator":{"heading":"Token lifetime"},"extraction":"explicit","access":{"classification":"public"},"rights":{"license":"LicenseRef-Internal","redistribution":"prohibited","derivative_use":"allowed","commercial_use":"prohibited"},"status":"accepted"}
   ],
   "proposals": [
     {

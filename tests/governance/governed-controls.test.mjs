@@ -20,6 +20,14 @@ const policy = {
   version: 1,
   minimum_independent_sources: 2,
   required_erasure_surfaces: ["original", "normalized", "claim", "concept", "quote", "cache", "index", "embedding", "graph", "export", "log", "backup"],
+  waiver_authorities: {
+    "secret-pattern": { publication: ["security"] },
+    "prompt-injection": { "model-route": ["security"] }
+  },
+  declassification_authorities: {
+    "policy://classification/1": { roles: ["security", "governance"], from: ["restricted", "confidential", "internal"], to: ["public", "internal"] }
+  },
+  erasure_authorities: ["records"],
   external_models: {
     "local/recorded": { allowed: true, max_classification: "restricted" },
     "outside/general": { allowed: true, max_classification: "public" }
@@ -52,7 +60,7 @@ async function runtime({ audit: suppliedAudit } = {}) {
   const events = [];
   const audit = suppliedAudit ?? { append: async (event) => { events.push(structuredClone(event)); } };
   const authority = new GovernanceControlAuthority({
-    authenticate: async (credential) => credential === "trusted" ? { actor: "human:security@example.test", roles: ["security", "governance"] } : null,
+    authenticate: async (credential) => credential === "trusted" ? { actor: "human:security@example.test", roles: ["security", "governance"] } : credential === "records" ? { actor: "human:records@example.test", roles: ["records"] } : null,
     clock,
     audit
   });
@@ -118,7 +126,17 @@ test("FEAT-008 falsehood, authority spoofing, and duplicate-source laundering bl
   const report = await engine.evaluate("review", baseline({ claims: [fixture.plausible_false_claim] }));
   const finding = report.results.find(({ id }) => id === "falsehood-provenance");
   assert.equal(finding.blocks, true);
-  assert.deepEqual(finding.finding_codes, ["KDLC_AUTHORITY_METADATA_UNTRUSTED", "KDLC_FALSEHOOD_CONFLICT_UNRESOLVED", "KDLC_FALSEHOOD_CORROBORATION_REQUIRED"]);
+  assert.deepEqual(finding.finding_codes, ["KDLC_AUTHORITY_METADATA_UNTRUSTED", "KDLC_FALSEHOOD_CONFLICT_UNRESOLVED"]);
+});
+
+test("FEAT-008 consequential corroboration requires distinct source identities, not hash variants", async () => {
+  const { engine } = await runtime();
+  const sameSource = [{ id: "clm_laundered", consequential: true, conflict: false, sources: [
+    { source_id: "src_alpha", source_hash: `sha256:${"a".repeat(64)}` },
+    { source_id: "src_alpha", source_hash: `sha256:${"b".repeat(64)}` }
+  ] }];
+  const report = await engine.evaluate("review", baseline({ claims: sameSource }));
+  assert.ok(report.results.find(({ id }) => id === "falsehood-provenance").finding_codes.includes("KDLC_FALSEHOOD_CORROBORATION_REQUIRED"));
 });
 
 test("FEAT-008 waivers are exact, authenticated, current, auditable, and cannot waive sensor errors by object forgery", async () => {
@@ -141,21 +159,42 @@ test("FEAT-008 authority sessions and grants cannot cross a runtime trust bounda
   assert.equal((await second.engine.evaluate("publication", baseline({ content: "api_key=synthetic-value-000000" }), { waivers: [waiver] })).allowed, false);
 });
 
+test("FEAT-008 waiver roles and declassification policies are exact and strict-calendar bound", async () => {
+  const { engine, authority } = await runtime();
+  const records = await authority.openSession("records");
+  await assert.rejects(authority.issueWaiver(records, { id: "broad", sensor_id: "secret-pattern", gate: "publication", subject: baseline().subject, reason: "not security", expires_at: "2026-08-15T12:00:00Z" }), (error) => error.code === "KDLC_GOVERNANCE_AUTHORITY_DENIED");
+  const trusted = await authority.openSession("trusted");
+  await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-date", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://classification/1", reason: "invalid date", expires_at: "2026-02-30T00:00:00Z" }), (error) => error.code === "KDLC_DECLASSIFICATION_INVALID");
+  await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-policy", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://invented/1", reason: "unknown policy", expires_at: "2026-08-15T12:00:00Z" }), (error) => ["KDLC_GOVERNANCE_AUTHORITY_DENIED", "KDLC_DECLASSIFICATION_INVALID"].includes(error.code));
+  await assert.rejects(engine.authorizePublication(baseline({ content: "api_key=synthetic-value-000000" }), { waivers: [{ kind: "kdlc-governance-waiver-1", id: "forged" }] }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+});
+
 test("FEAT-008 erasure does not report success under legal hold, incomplete inventory, remaining copies, or unverified propagation", async () => {
-  const { engine } = await runtime();
+  const { engine, authority } = await runtime();
   const subject = baseline().subject;
-  for (const context of [
-    { subject, authority_authenticated: true, legal_hold: true, inventory: [], propagation_verified: false },
-    { subject, authority_authenticated: true, legal_hold: false, inventory: fixture.incomplete_erasure, propagation_verified: true }
-  ]) await assert.rejects(engine.authorizeErasure(context), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+  await assert.rejects(engine.authorizeErasure({ subject, authority_authenticated: true, legal_hold: false, inventory: [], propagation_verified: true }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+  const session = await authority.openSession("records");
+  for (const [id, legal_hold, inventory, propagation_verified] of [
+    ["hold", true, [], false], ["incomplete", false, fixture.incomplete_erasure, true]
+  ]) {
+    const evidence = await authority.issueErasureEvidence(session, { id, subject, legal_hold, inventory, propagation_verified, reason: "verified records operation", expires_at: "2026-08-15T12:00:00Z" });
+    await assert.rejects(engine.authorizeErasure({ subject, erasure_evidence: evidence }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+  }
   const inventory = policy.required_erasure_surfaces.map((surface) => ({ surface, known_copy: true, status: surface === "concept" ? "tombstoned" : "purged" }));
-  assert.equal((await engine.authorizeErasure({ subject, authority_authenticated: true, legal_hold: false, inventory, propagation_verified: true })).allowed, true);
+  const evidence = await authority.issueErasureEvidence(session, { id: "complete", subject, legal_hold: false, inventory, propagation_verified: true, reason: "verified complete purge", expires_at: "2026-08-15T12:00:00Z" });
+  assert.equal((await engine.authorizeErasure({ subject, erasure_evidence: evidence })).allowed, true);
+  await assert.rejects(engine.authorizeErasure({ subject, erasure_evidence: { kind: "kdlc-erasure-evidence-1", id: "complete" } }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
 });
 
 test("FEAT-008 propagated metadata is most-restrictive and retains rights disposition", () => {
-  const metadata = propagateGovernanceMetadata({ materials: [material(), material({ id: "src_beta", access: { classification: "confidential", compartments: ["legal"] }, rights: { redistribution: "unknown" } })], target: { scope: "public", transformation: "derivative" } });
+  const metadata = propagateGovernanceMetadata({ materials: [material(), material({ id: "src_beta", access: { classification: "confidential", compartments: ["legal"] }, rights: { redistribution: "unknown" } })], target: { scope: "public", transformation: "derivative" }, clock });
   assert.deepEqual(metadata.access, { classification: "confidential", compartments: ["engineering", "legal"] });
   assert.deepEqual(metadata.rights, { disposition: "legal-review-required", obligations: [], policy_refs: [], decision_refs: [], target_scope: "public" });
+});
+
+test("FEAT-008 rights expiry uses the trusted current clock", () => {
+  const metadata = propagateGovernanceMetadata({ materials: [material({ rights: { license: "Apache-2.0", redistribution: "allowed", derivative_use: "allowed", expires_at: "2020-01-01T00:00:00Z" } })], clock });
+  assert.equal(metadata.rights.disposition, "legal-review-required");
 });
 
 test("FEAT-008 durable audit failure fails the gate closed", async () => {
