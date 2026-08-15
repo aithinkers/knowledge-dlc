@@ -89,6 +89,36 @@ identify that self-difference as its sole failed check and bypass reason. This
 authority is consumed and expires immediately when PR #39 merges, and it does
 not authorize any later harness, reporter, workflow, or verifier change.
 
+PR #59, linked to issue #55, may use a one-time protected release-evidence
+bypass solely at head `c9c0f0ad5f1541d13bdcbdbe6ddadc6a147b9e0f` on base
+`7655fe4dbe8b187e7b895f3a52f46eb0154ac09c`. It authorizes exactly these
+SHA-256 transitions caused by rebinding the pinned byte hash of
+`tests/governance/agent-workflows.test.mjs` (whose role-set assertion grows
+from six to the nine specification §22 roles) and its dependent
+corpus/profile/run/report chain:
+
+- `distribution/release/evaluation-corpus.json` from
+  `4db53c124fbfcd5d80ce24735f9d9694b728f21ff58e42de74f2aabb76d7513f`
+  to `e9d61ae1cc10f53ed97e7e2de40490bae309bbef6b4435e63e283dac1fa51968`;
+- `distribution/release/evaluation-profile.json` from
+  `4e8e6634df73f613776226730750015c3f87fba132f6f4ddcf8e52898570a970`
+  to `3b0421e391a734a98d1c1c216ad07b86ab7e4402019debb30dc2d3750549cef4`.
+
+The complete PR #59 diff is limited to 25 paths (823 additions, 68 deletions):
+the three new role descriptors, the role-descriptor schema enum, authored
+agent definitions and generator wiring, generated Claude Code agent files and
+plugin manifest, the supply-chain package manifest, the agent-workflows
+role-set assertion, the FEAT-010 traceability entry, the new agent-layer test,
+and the mechanical recorded-run/report/conformance evidence rebinds those
+transitions require. No workflow, validator, scorer, statistical, schema
+(other than the role enum), or release-status byte may change. Candidate
+tests and every non-self check must pass; the owner exception record must
+identify the Repository policy protected self-difference as its sole failed
+check and bypass reason. An independent read-only agent review of exactly that
+head with no unresolved critical or high finding must be attached. This
+authority is consumed and expires immediately when PR #59 merges or is closed,
+and it does not authorize any later protected change.
+
 Repository administrators, write collaborators, and repository-configured
 GitHub Actions are inside the current CI trust boundary. Bare commit-status
 contexts are therefore enforcement against ordinary candidate changes, not a
