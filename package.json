@@ -4,6 +4,9 @@
   "private": true,
   "description": "K-DLC development and governance tooling",
   "type": "module",
+  "exports": {
+    "./normalizers": "./packages/normalizers/index.mjs"
+  },
   "packageManager": "npm@11.5.1",
   "engines": {
     "node": ">=22.23.2 <25",
@@ -17,6 +20,11 @@
   "dependencies": {
     "ajv-formats": "3.0.1",
     "canonicalize": "4.0.0",
+    "csv-parse": "7.0.2",
+    "fflate": "0.8.3",
+    "gifuct-js": "2.1.2",
+    "pdfjs-dist": "6.2.108",
+    "saxes": "6.0.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {

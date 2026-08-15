@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/normalization/normalizer-descriptor-1.json",
+  "type": "object",
+  "required": ["api_version", "id", "version", "parser", "accepted", "extraction", "output_schema", "locator_kinds", "capabilities", "limits", "encryption", "failure_modes", "fidelity_limitations"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/normalizer-descriptor/v1"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$"},
+    "version": {"type": "string", "minLength": 1},
+    "parser": {"type": "object", "required": ["name", "version", "license"], "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "license": {"type": "string"}}, "additionalProperties": false},
+    "accepted": {"type": "object", "required": ["media_types", "extensions"], "properties": {"media_types": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true}, "extensions": {"type": "array", "items": {"type": "string", "pattern": "^\\.[a-z0-9]+$"}, "minItems": 1, "uniqueItems": true}}, "additionalProperties": false},
+    "extraction": {"enum": ["deterministic", "probabilistic", "mixed"]},
+    "output_schema": {"const": "kdlc.dev/normalized-unit/v1"},
+    "locator_kinds": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "capabilities": {"type": "object", "required": ["network", "execute_code", "macros", "model", "native_converter"], "properties": {"network": {"type": "boolean"}, "execute_code": {"type": "boolean"}, "macros": {"type": "boolean"}, "model": {"type": "boolean"}, "native_converter": {"type": "boolean"}}, "additionalProperties": false},
+    "limits": {"$ref": "#/$defs/limits"},
+    "encryption": {"enum": ["quarantine", "reject", "supported"]},
+    "failure_modes": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "fidelity_limitations": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {"limits": {"type": "object", "required": ["source_bytes", "expanded_bytes", "pages", "sheets", "rows", "slides", "shapes", "frames", "processing_ms", "memory_bytes", "output_bytes"], "properties": {"source_bytes": {"type": "integer", "minimum": 1}, "expanded_bytes": {"type": "integer", "minimum": 1}, "pages": {"type": "integer", "minimum": 1}, "sheets": {"type": "integer", "minimum": 1}, "rows": {"type": "integer", "minimum": 1}, "slides": {"type": "integer", "minimum": 1}, "shapes": {"type": "integer", "minimum": 1}, "frames": {"type": "integer", "minimum": 1}, "processing_ms": {"type": "integer", "minimum": 1}, "memory_bytes": {"type": "integer", "minimum": 1}, "output_bytes": {"type": "integer", "minimum": 1}}, "additionalProperties": false}},
+  "additionalProperties": false
+}

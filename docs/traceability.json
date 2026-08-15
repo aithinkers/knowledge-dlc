@@ -67,8 +67,11 @@
       "title": "Bounded document normalization",
       "issue": 5,
       "specification_sections": ["12", "27.1", "27.2", "34", "35"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "implemented",
+      "evidence": {
+        "implementation": ["core/schemas/normalization/normalizer-descriptor.schema.json", "core/schemas/normalization/normalization-manifest.schema.json", "core/schemas/normalization/normalized-unit.schema.json", "packages/normalizers/index.mjs", "packages/normalizers/src/descriptors.mjs", "packages/normalizers/src/normalize.mjs", "packages/normalizers/src/worker-client.mjs", "workers/normalizer/worker.mjs", "workers/normalizer/protocol.schema.json"],
+        "tests": ["tests/governance/normalization.test.mjs", "fixtures/normalization/README.md"]
+      }
     },
     {
       "id": "FEAT-004",

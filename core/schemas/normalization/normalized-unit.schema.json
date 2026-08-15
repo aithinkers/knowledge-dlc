@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/normalization/normalized-unit-1.json",
+  "type": "object",
+  "required": ["unit_id", "kind", "order", "locator", "source_hash", "extraction_method", "quality_warnings"],
+  "properties": {
+    "unit_id": {"type": "string", "pattern": "^unit_[a-f0-9]{16}$"}, "kind": {"type": "string", "minLength": 1},
+    "parent_id": {"type": ["string", "null"]}, "order": {"type": "integer", "minimum": 0},
+    "text": {"type": "string"}, "structured_data": {},
+    "locator": {"oneOf": [
+      {"type":"object","required":["kind","start_line","end_line"],"properties":{"kind":{"const":"line-range"},"start_line":{"type":"integer","minimum":0},"end_line":{"type":"integer","minimum":0},"heading":{"type":"string"}},"additionalProperties":false},
+      {"type":"object","required":["kind","heading","line"],"properties":{"kind":{"const":"heading"},"heading":{"type":"string"},"line":{"type":"integer","minimum":1}},"additionalProperties":false},
+      {"type":"object","required":["kind","row"],"properties":{"kind":{"const":"row"},"row":{"type":"integer","minimum":1}},"additionalProperties":false},
+      {"type":"object","required":["kind","row","column"],"properties":{"kind":{"const":"cell"},"row":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1}},"additionalProperties":false},
+      {"type":"object","required":["kind","start_row","end_row","start_column","end_column"],"properties":{"kind":{"const":"range"},"start_row":{"type":"integer","minimum":1},"end_row":{"type":"integer","minimum":1},"start_column":{"type":"integer","minimum":1},"end_column":{"type":"integer","minimum":1}},"additionalProperties":false},
+      {"type":"object","required":["kind","page"],"properties":{"kind":{"enum":["page","slide","visio-page"]},"page":{"type":"integer","minimum":0}},"additionalProperties":false},
+      {"type":"object","required":["kind","page","x","y","width","height"],"properties":{"kind":{"const":"page-bbox"},"page":{"type":"integer","minimum":1},"x":{"type":"number"},"y":{"type":"number"},"width":{"type":"number","minimum":0},"height":{"type":"number","minimum":0}},"additionalProperties":false},
+      {"type":"object","required":["kind","part","paragraph"],"properties":{"kind":{"const":"part-paragraph"},"part":{"type":"string","minLength":1},"paragraph":{"type":"integer","minimum":0}},"additionalProperties":false},
+      {"type":"object","required":["kind","part","table"],"properties":{"kind":{"const":"part-table"},"part":{"type":"string","minLength":1},"table":{"type":"integer","minimum":1}},"additionalProperties":false},
+      {"type":"object","required":["kind","sheet","cell"],"properties":{"kind":{"const":"sheet-cell"},"sheet":{"type":"integer","minimum":1},"cell":{"type":"string","pattern":"^[A-Z]+[1-9][0-9]*$"}},"additionalProperties":false},
+      {"type":"object","required":["kind","sheet","range"],"properties":{"kind":{"const":"sheet-range"},"sheet":{"type":"integer","minimum":0},"range":{"type":["string","null"]}},"additionalProperties":false},
+      {"type":"object","required":["kind","page","shape"],"properties":{"kind":{"enum":["slide-shape","visio-shape"]},"page":{"type":"integer","minimum":1},"shape":{"oneOf":[{"type":"string","minLength":1},{"type":"integer","minimum":0}]}},"additionalProperties":false},
+      {"type":"object","required":["kind","page","cell"],"properties":{"kind":{"const":"diagram-cell"},"page":{"type":"integer","minimum":1},"cell":{"type":"string","minLength":1}},"additionalProperties":false},
+      {"type":"object","required":["kind","frame"],"properties":{"kind":{"const":"frame"},"frame":{"type":"integer","minimum":0}},"additionalProperties":false},
+      {"type":"object","required":["kind","frame","start_ms","end_ms"],"properties":{"kind":{"const":"time-range"},"frame":{"type":"integer","minimum":0},"start_ms":{"type":"number","minimum":0},"end_ms":{"type":"number","minimum":0}},"additionalProperties":false}
+    ]},
+    "source_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "extraction_method": {"type": "object", "required": ["mode", "normalizer", "version"], "properties": {"mode": {"enum": ["deterministic", "probabilistic"]}, "normalizer": {"type": "string"}, "version": {"type": "string"}, "model": {"type": "object", "required":["id","version","provider","recorded_output_hash"], "properties":{"id":{"type":"string","minLength":1},"version":{"type":"string","minLength":1},"provider":{"type":"string","minLength":1},"recorded_output_hash":{"type":"string","pattern":"^sha256:[a-f0-9]{64}$"}},"additionalProperties":false}}, "additionalProperties": false},
+    "language": {"type": "string"}, "quality_warnings": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  },
+  "anyOf": [{"properties": {"text": {}}, "required": ["text"]}, {"properties": {"structured_data": {}}, "required": ["structured_data"]}],
+  "allOf": [{"if":{"properties":{"extraction_method":{"type":"object","properties":{"mode":{"const":"probabilistic"}},"required":["mode"]}}},"then":{"properties":{"extraction_method":{"type":"object","properties":{"model":{}},"required":["model"]}}}}],
+  "additionalProperties": false
+}
