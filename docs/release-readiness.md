@@ -99,15 +99,22 @@ settings, and publish the resulting compact JSON as the owner-controlled
 repository variable `KDLC_ADMIN_SETTINGS_ATTESTATION`:
 
 ```sh
-gh api repos/aithinkers/knowledge-dlc/actions/permissions/workflow > admin-api.json
 node scripts/create-admin-settings-attestation.mjs \
-  --repository aithinkers/knowledge-dlc --actor owner:release \
-  --input admin-api.json --output admin-attestation.json
+  capture --repository aithinkers/knowledge-dlc --output admin-settings-pending.json
+# Now manually compare the pending record's settings with the live Actions UI.
+node scripts/create-admin-settings-attestation.mjs \
+  confirm --repository aithinkers/knowledge-dlc --output admin-attestation.json \
+  --manual-confirmed admin-settings-pending.json
 gh variable set KDLC_ADMIN_SETTINGS_ATTESTATION --body "$(tr -d '\n' < admin-attestation.json)"
 ```
 
 The local files contain live administrative evidence and must not be committed.
-The attestation binds the repository, exact settings, capture and manual-check
+The capture command obtains fresh bytes directly from the authenticated GitHub
+API; it accepts no cached input and cannot run in Actions. It produces only a
+pending record and never asserts a manual confirmation. The separate confirm
+command re-authenticates the same owner, verifies the pending byte and canonical
+hashes, and records a later confirmation time. The attestation binds the
+repository, exact settings, API endpoint, response hash, capture and manual-check
 times, actor, capture method, and canonical hash. Missing or stale evidence does
 not make an ordinary private prerelease PR inoperable, but a release candidate
 fails closed unless the record is authentic, policy-preserving, manually
