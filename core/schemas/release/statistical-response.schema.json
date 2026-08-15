@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://kdlc.dev/schemas/release/statistical-response-1.json",
+  "$defs":{
+    "assertion":{"type":"object","additionalProperties":false,"required":["subject","predicate","object"],"properties":{"subject":{"type":"string","minLength":1},"predicate":{"type":"string","minLength":1},"object":{"type":"string","minLength":1}}},
+    "locator":{"oneOf":[
+      {"type":"object","additionalProperties":false,"required":["kind","document","section"],"properties":{"kind":{"const":"section"},"document":{"type":"string","minLength":1},"section":{"type":"string","minLength":1}}},
+      {"type":"object","additionalProperties":false,"required":["kind","document","table","row","column"],"properties":{"kind":{"const":"table-cell"},"document":{"type":"string","minLength":1},"table":{"type":"string","minLength":1},"row":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1}}},
+      {"type":"object","additionalProperties":false,"required":["kind","document","record"],"properties":{"kind":{"const":"record"},"document":{"type":"string","minLength":1},"record":{"type":"string","minLength":1}}}
+    ]},
+    "citation":{"type":"object","additionalProperties":false,"required":["source_id","locator"],"properties":{"source_id":{"type":"string","pattern":"^[a-z][a-z0-9-]+$"},"locator":{"$ref":"#/$defs/locator"}}}
+  },
+  "type":"object","additionalProperties":false,"required":["decision","answer","assertions","citations"],
+  "properties":{"decision":{"enum":["answer","abstain","deny","conflict"]},"answer":{"type":"string"},"assertions":{"type":"array","items":{"$ref":"#/$defs/assertion"}},"citations":{"type":"array","items":{"$ref":"#/$defs/citation"}}}
+}

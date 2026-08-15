@@ -1,18 +1,36 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kdlc.dev/schemas/release/statistical-corpus-1.json",
-  "type": "object", "additionalProperties": false,
-  "required": ["api_version", "id", "version", "frozen_before_capture", "cases"],
-  "properties": {
-    "api_version": {"const": "kdlc.dev/statistical-corpus/v1alpha1"},
-    "id": {"const": "kdlc-mvp-statistical"}, "version": {"const": 1},
-    "frozen_before_capture": {"const": true},
-    "cases": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["id", "category", "prompt_id", "input", "expected", "security"], "properties": {
-      "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
-      "category": {"enum": ["source", "contradiction", "temporal", "ambiguity", "restriction", "prompt-injection", "falsehood", "format", "revocation", "multilingual", "human-edit"]},
-      "prompt_id": {"const": "governed-answer-v1"}, "input": {"type": "string", "minLength": 1},
-      "expected": {"type": "object", "additionalProperties": false, "required": ["decision", "required_terms"], "properties": {"decision": {"enum": ["answer", "abstain", "deny", "conflict"]}, "required_terms": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}},
-      "security": {"type": "boolean"}
-    }}}
-  }
+  "$defs": {
+    "assertion": {"$ref":"https://kdlc.dev/schemas/release/statistical-response-1.json#/$defs/assertion"},
+    "locator": {"$ref":"https://kdlc.dev/schemas/release/statistical-response-1.json#/$defs/locator"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_id", "content", "claims", "authority", "valid_from", "valid_until", "classification", "permitted_labels", "language", "contains_untrusted_instruction", "revocation", "locator", "normalized_source_hash"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "content": {"type": "string", "minLength": 1},
+        "claims": {"type": "array", "items": {"$ref": "#/$defs/assertion"}, "uniqueItems": true},
+        "authority": {"enum": ["authoritative", "equal-authority", "unverified"]}, "valid_from": {"type": "string", "format": "date-time"}, "valid_until": {"type": ["string", "null"], "format": "date-time"},
+        "classification": {"enum": ["public", "confidential", "restricted"]}, "permitted_labels": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}},
+        "language": {"enum": ["en", "es", "ja"]}, "contains_untrusted_instruction": {"type": "boolean"},
+        "revocation": {"type": "object", "additionalProperties": false, "required": ["state", "effective_at", "barrier_completed_at"], "properties": {"state": {"enum": ["active", "revoked"]}, "effective_at": {"type": ["string", "null"], "format": "date-time"}, "barrier_completed_at": {"type": ["string", "null"], "format": "date-time"}}},
+        "locator": {"$ref": "#/$defs/locator"}, "normalized_source_hash": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "context": {
+      "type": "object", "additionalProperties": false, "required": ["trusted_query_time", "principal", "policy", "evidence", "entities", "artifact"],
+      "properties": {
+        "trusted_query_time": {"type": "string", "format": "date-time"},
+        "principal": {"type": "object", "additionalProperties": false, "required": ["principal_id", "access_labels"], "properties": {"principal_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "access_labels": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}}}},
+        "policy": {"type": "object", "additionalProperties": false, "required": ["policy_id", "current_sources_only", "source_instructions_are_data", "complete_evidence_set", "unresolved_equal_authority_is_conflict", "stable_requires_reconciliation"], "properties": {"policy_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "current_sources_only": {"type": "boolean"}, "source_instructions_are_data": {"type": "boolean"}, "complete_evidence_set": {"type": "boolean"}, "unresolved_equal_authority_is_conflict": {"type": "boolean"}, "stable_requires_reconciliation": {"type": "boolean"}}},
+        "evidence": {"type": "array", "maxItems": 4, "items": {"$ref": "#/$defs/source"}},
+        "entities": {"type": "array", "maxItems": 4, "items": {"type": "object", "additionalProperties": false, "required": ["entity_id", "name", "owner"], "properties": {"entity_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "name": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1}}}},
+        "artifact": {"oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "required": ["artifact_id", "approved_hash", "current_hash", "packet_hash", "receipt_hash", "mutation_time", "reconciliation_receipt"], "properties": {"artifact_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "approved_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "current_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "packet_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "receipt_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "mutation_time": {"type": "string", "format": "date-time"}, "reconciliation_receipt": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"}}}]}
+      }
+    },
+    "publicCase": {"type": "object", "additionalProperties": false, "required": ["case_key", "input", "context"], "properties": {"case_key": {"type": "string", "pattern": "^case-(?:00[1-9]|01[0-2])$"}, "input": {"type": "string", "minLength": 1}, "context": {"$ref": "#/$defs/context"}}},
+    "providerProjection": {"type": "object", "additionalProperties": false, "required": ["input", "context"], "properties": {"input": {"type": "string", "minLength": 1}, "context": {"$ref": "#/$defs/context"}}}
+  },
+  "type": "object", "additionalProperties": false, "required": ["api_version", "id", "version", "frozen_before_capture", "cases"],
+  "properties": {"api_version": {"const": "kdlc.dev/statistical-corpus/v1alpha1"}, "id": {"const": "kdlc-mvp-statistical"}, "version": {"const": 2}, "frozen_before_capture": {"const": true}, "cases": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"$ref": "#/$defs/publicCase"}}}
 }

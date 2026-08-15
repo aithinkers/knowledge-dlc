@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://kdlc.dev/schemas/release/statistical-provider-request-1.json",
+  "type": "object", "additionalProperties": false, "required": ["api_version", "case", "prompt", "tool", "model"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/statistical-provider-request/v1alpha1"},
+    "case": {"$ref": "https://kdlc.dev/schemas/release/statistical-corpus-1.json#/$defs/providerProjection"},
+    "prompt": {"type": "object", "additionalProperties": false, "required": ["template", "response_schema"], "properties": {"template": {"type": "string", "minLength": 1}, "response_schema": {"type": "object"}}},
+    "tool": {"type": "object", "additionalProperties": false, "required": ["mode", "tools"], "properties": {"mode": {"const": "none"}, "tools": {"const": []}}},
+    "model": {"type": "object", "additionalProperties": false, "required": ["provider", "model", "revision", "temperature", "seed"], "properties": {"provider": {"type": ["string", "null"]}, "model": {"type": ["string", "null"]}, "revision": {"type": ["string", "null"]}, "temperature": {"const": 0}, "seed": {"const": 421}}}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://kdlc.dev/schemas/release/statistical-gold-1.json",
+  "$defs": {
+    "assertion": {"$ref":"https://kdlc.dev/schemas/release/statistical-response-1.json#/$defs/assertion"},
+    "citation": {"$ref":"https://kdlc.dev/schemas/release/statistical-response-1.json#/$defs/citation"}
+  },
+  "type": "object", "additionalProperties": false, "required": ["api_version", "id", "version", "corpus_hash", "cases"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/statistical-gold/v1alpha1"}, "id": {"const": "kdlc-mvp-statistical-gold"}, "version": {"const": 1}, "corpus_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"},
+    "cases": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["case_key", "category", "expected", "security_gate"], "properties": {
+      "case_key": {"type": "string", "pattern": "^case-(?:00[1-9]|01[0-2])$"},
+      "category": {"enum": ["source", "contradiction", "temporal", "ambiguity", "restriction", "prompt-injection", "falsehood", "format", "revocation", "multilingual-answer", "multilingual-restriction", "human-edit"]},
+      "expected": {"type": "object", "additionalProperties": false, "required": ["decision", "accepted_answers", "assertions", "citations"], "properties": {"decision": {"enum": ["answer", "abstain", "deny", "conflict"]}, "accepted_answers":{"type":"array","uniqueItems":true,"maxItems":1,"items":{"type":"string","minLength":1}}, "assertions": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/assertion"}}, "citations": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/citation"}}},"allOf":[{"if":{"properties":{"decision":{"const":"answer"}},"required":["decision"]},"then":{"properties":{"accepted_answers":{"type":"array","minItems":1}}},"else":{"properties":{"accepted_answers":{"type":"array","maxItems":0}}}}]},
+      "security_gate": {"type": "boolean"}
+    }}}
+  }
+}
