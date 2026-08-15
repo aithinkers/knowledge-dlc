@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createContractValidator } from "../../packages/contracts/index.mjs";
+import { artifactHash } from "../../packages/core/index.mjs";
 import {
   BUILT_IN_GOVERNANCE_SENSORS,
   GOVERNANCE_CONTROL_SCHEMA_PATHS,
@@ -27,7 +28,7 @@ const policy = {
   declassification_authorities: {
     "policy://classification/1": { roles: ["security", "governance"], from: ["restricted", "confidential", "internal"], to: ["public", "internal"] }
   },
-  erasure_authorities: ["records"],
+  erasure_policy_refs: { "policy://retention/1": { roles: ["records"], actions: ["revoke", "erase"] } },
   external_models: {
     "local/recorded": { allowed: true, max_classification: "restricted" },
     "outside/general": { allowed: true, max_classification: "public" }
@@ -56,7 +57,7 @@ const baseline = (extra = {}) => ({
   ...extra
 });
 
-async function runtime({ audit: suppliedAudit } = {}) {
+async function runtime({ audit: suppliedAudit, erasureVerifier } = {}) {
   const events = [];
   const audit = suppliedAudit ?? { append: async (event) => { events.push(structuredClone(event)); } };
   const authority = new GovernanceControlAuthority({
@@ -64,7 +65,7 @@ async function runtime({ audit: suppliedAudit } = {}) {
     clock,
     audit
   });
-  const engine = await GovernanceControlEngine.create({ policy, clock, audit, authority });
+  const engine = await GovernanceControlEngine.create({ policy, clock, audit, authority, erasureVerifier });
   return { engine, authority, audit, events };
 }
 
@@ -166,24 +167,24 @@ test("FEAT-008 waiver roles and declassification policies are exact and strict-c
   const trusted = await authority.openSession("trusted");
   await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-date", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://classification/1", reason: "invalid date", expires_at: "2026-02-30T00:00:00Z" }), (error) => error.code === "KDLC_DECLASSIFICATION_INVALID");
   await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-policy", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://invented/1", reason: "unknown policy", expires_at: "2026-08-15T12:00:00Z" }), (error) => ["KDLC_GOVERNANCE_AUTHORITY_DENIED", "KDLC_DECLASSIFICATION_INVALID"].includes(error.code));
+  await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-offset", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://classification/1", reason: "nonstandard offset", expires_at: "2026-08-15T12:00:00+23:59" }), (error) => error.code === "KDLC_DECLASSIFICATION_INVALID");
   await assert.rejects(engine.authorizePublication(baseline({ content: "api_key=synthetic-value-000000" }), { waivers: [{ kind: "kdlc-governance-waiver-1", id: "forged" }] }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
 });
 
-test("FEAT-008 erasure does not report success under legal hold, incomplete inventory, remaining copies, or unverified propagation", async () => {
-  const { engine, authority } = await runtime();
-  const subject = baseline().subject;
+test("FEAT-008 erasure accepts only opaque completed-workflow verification and never actor assertions", async () => {
+  const verified = new WeakMap();
+  const erasureVerifier = { resolve: (token) => verified.get(token) };
+  const { engine, authority } = await runtime({ erasureVerifier });
+  const subject = artifactHash({ id: "src_alpha", hash: material().source_hash });
   await assert.rejects(engine.authorizeErasure({ subject, authority_authenticated: true, legal_hold: false, inventory: [], propagation_verified: true }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
   const session = await authority.openSession("records");
-  for (const [id, legal_hold, inventory, propagation_verified] of [
-    ["hold", true, [], false], ["incomplete", false, fixture.incomplete_erasure, true]
-  ]) {
-    const evidence = await authority.issueErasureEvidence(session, { id, subject, legal_hold, inventory, propagation_verified, reason: "verified records operation", expires_at: "2026-08-15T12:00:00Z" });
-    await assert.rejects(engine.authorizeErasure({ subject, erasure_evidence: evidence }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
-  }
+  const authorization = await authority.issueErasureAuthorization(session, { id: "erase-1", subject, action: "erase", policy_ref: "policy://retention/1", reason: "approved source erasure", expires_at: "2026-08-15T12:00:00Z" });
+  assert.equal(authority.erasureAuthorization(authorization).subject, subject);
   const inventory = policy.required_erasure_surfaces.map((surface) => ({ surface, known_copy: true, status: surface === "concept" ? "tombstoned" : "purged" }));
-  const evidence = await authority.issueErasureEvidence(session, { id: "complete", subject, legal_hold: false, inventory, propagation_verified: true, reason: "verified complete purge", expires_at: "2026-08-15T12:00:00Z" });
-  assert.equal((await engine.authorizeErasure({ subject, erasure_evidence: evidence })).allowed, true);
-  await assert.rejects(engine.authorizeErasure({ subject, erasure_evidence: { kind: "kdlc-erasure-evidence-1", id: "complete" } }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+  const verification = Object.freeze({ kind: "kdlc-erasure-workflow-verification-1" });
+  verified.set(verification, Object.freeze({ subject, action: "erase", result: "erased", impact_hash: artifactHash("impact"), decision_hash: artifactHash("decision"), verification_hash: artifactHash("verification"), receipt_hash: artifactHash("receipt"), inventory, completed_at: instant }));
+  assert.equal((await engine.authorizeErasure({ subject, erasure_verification: verification })).allowed, true);
+  await assert.rejects(engine.authorizeErasure({ subject, erasure_verification: { kind: "kdlc-erasure-workflow-verification-1" } }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
 });
 
 test("FEAT-008 propagated metadata is most-restrictive and retains rights disposition", () => {
@@ -195,6 +196,15 @@ test("FEAT-008 propagated metadata is most-restrictive and retains rights dispos
 test("FEAT-008 rights expiry uses the trusted current clock", () => {
   const metadata = propagateGovernanceMetadata({ materials: [material({ rights: { license: "Apache-2.0", redistribution: "allowed", derivative_use: "allowed", expires_at: "2020-01-01T00:00:00Z" } })], clock });
   assert.equal(metadata.rights.disposition, "legal-review-required");
+});
+
+test("FEAT-008 malformed rights and trusted clock instants fail closed", async () => {
+  const malformed = propagateGovernanceMetadata({ materials: [material({ rights: { license: "Apache-2.0", redistribution: "allowed", derivative_use: "allowed", expires_at: "not-an-instant" } })], clock });
+  assert.equal(malformed.rights.disposition, "legal-review-required");
+  const invalidClock = { now: () => "2026-02-30T00:00:00Z" };
+  const audit = { append: async () => {} };
+  const authority = new GovernanceControlAuthority({ authenticate: async () => ({ actor: "human:security", roles: ["security"] }), clock: invalidClock, audit });
+  await assert.rejects(GovernanceControlEngine.create({ policy, clock: invalidClock, audit, authority }).then((engine) => engine.evaluate("review", baseline())), (error) => error.code === "KDLC_TRUSTED_CLOCK_INVALID");
 });
 
 test("FEAT-008 durable audit failure fails the gate closed", async () => {

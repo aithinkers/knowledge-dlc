@@ -841,6 +841,7 @@ export function createLocalProjectEngine(options = {}) {
       );
     const pdp = {
       authorizeMount: async ({ mount }) => allowed(mount.access),
+      authorizeGovernance: async ({ concept }) => allowed(concept.access),
       authorizeConcept: async ({ concept }) => allowed(concept.access),
       authorizeSource: async ({ source }) => allowed(source.access),
     };

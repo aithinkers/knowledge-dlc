@@ -69,7 +69,7 @@ async function verifyMountIdentity(mount) {
 export class FederatedRetriever {
   constructor({ mounts, policy, now = () => new Date(), minimumDurationMs = 25, monotonic = () => performance.now(), wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     authorizationTtlMs = 60_000, authorizationMonotonic = () => performance.now(), readConcept = readFile, audit }) {
-    if (!policy?.authorizeMount || !policy?.authorizeConcept) retrievalFail("KDLC_POLICY_REQUIRED", "Retrieval requires trusted mount and concept authorization functions");
+    if (!policy?.authorizeMount || !policy?.authorizeConcept || !policy?.authorizeGovernance) retrievalFail("KDLC_POLICY_REQUIRED", "Retrieval requires trusted mount, concept, and governance authorization functions");
     if (!Number.isSafeInteger(authorizationTtlMs) || authorizationTtlMs < 1 || authorizationTtlMs > 300_000) retrievalFail("KDLC_AUTHORIZATION_TTL", "Authorization snapshot lifetime must be between 1 and 300000 milliseconds");
     this.mounts = [...mounts]; this.policy = policy; this.now = now; this.minimumDurationMs = minimumDurationMs; this.monotonic = monotonic; this.wait = wait;
     this.authorizationTtlMs = authorizationTtlMs; this.authorizationMonotonic = authorizationMonotonic; this.readConcept = readConcept; this.audit = audit;
@@ -89,9 +89,14 @@ export class FederatedRetriever {
         await verifySnapshot(mount);
         const paths = await traverseHierarchicalIndex(mount.root); const catalogPaths = mount.retrieval_catalog.map(({ path }) => path).sort();
         if (canonicalJson([...paths].sort()) !== canonicalJson(catalogPaths)) retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
-        const allowed = await Promise.all(mount.retrieval_catalog.map((metadata) => this.policy.authorizeConcept({
-          principal, mount, concept: { id: metadata.id, access: metadata.access }, queryMode, capability: "read"
-        })));
+        const allowed = await Promise.all(mount.retrieval_catalog.map(async (metadata) => {
+          const concept = { id: metadata.id, access: metadata.access };
+          const [governed, conceptAllowed] = await Promise.all([
+            this.policy.authorizeGovernance({ principal: principalSnapshot, mount: { id: mount.id, access: mount.access ?? null }, concept, queryMode, gate: "retrieval", capability: "read" }),
+            this.policy.authorizeConcept({ principal, mount, concept, queryMode, capability: "read" })
+          ]);
+          return governed === true && conceptAllowed === true;
+        }));
         if (allowed.some((value) => value !== true)) internallyDenied = true;
         const concepts = await Promise.all(mount.retrieval_catalog.map(async (metadata, index) => {
           if (allowed[index] !== true) return null;

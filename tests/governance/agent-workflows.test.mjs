@@ -78,7 +78,7 @@ test("FEAT-008 workflow profiles requiring built-in controls fail closed without
   await assert.rejects(harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: await fixture("ingest"), normalizedEvidence: await normalizedFixture("ingest") }), (error) => error.code === "KDLC_GOVERNANCE_CONTROLS_REQUIRED");
 });
 
-test("FEAT-008 workflow integrates trusted ingest, retrieval, model-route, erasure, and claim propagation gates", async () => {
+test("FEAT-008 workflow integrates trusted ingest, retrieval, model-route, and claim propagation gates", async () => {
   const events = [];
   const audit = { append: async (event) => { events.push(structuredClone(event)); } };
   const authority = new GovernanceControlAuthority({
@@ -89,7 +89,7 @@ test("FEAT-008 workflow integrates trusted ingest, retrieval, model-route, erasu
   const policy = {
     api_version: "kdlc.dev/governance-policy/v1alpha1", id: "workflow-controls", version: 1, minimum_independent_sources: 1,
     required_erasure_surfaces: ["original", "normalized", "claim", "concept", "quote", "cache", "index", "embedding", "graph", "export", "log", "backup"],
-    waiver_authorities: { "secret-pattern": { publication: ["security"] } }, declassification_authorities: {}, erasure_authorities: ["records"],
+    waiver_authorities: { "secret-pattern": { publication: ["security"] } }, declassification_authorities: {}, erasure_policy_refs: { "policy://retention/1": { roles: ["records"], actions: ["revoke", "erase"] } },
     external_models: { "local/recorded": { allowed: true, max_classification: "restricted" }, "outside/general": { allowed: true, max_classification: "public" } }
   };
   const governanceControls = await GovernanceControlEngine.create({ policy, clock, audit, authority });
@@ -108,11 +108,7 @@ test("FEAT-008 workflow integrates trusted ingest, retrieval, model-route, erasu
   assert.deepEqual(output.claims[0].rights, context.evidence[0].rights);
   assert.equal((await harness.authorizeRetrieval({ workflowId: "wf_ingest", proposalId: "pr_alpha", principal: { clearance: "public", compartments: [] } })).allowed, true);
   assert.equal((await harness.authorizeModelRoute({ workflowId: "wf_ingest", proposalId: "pr_alpha", provider: "outside", model: "general" })).allowed, true);
-  const inventory = policy.required_erasure_surfaces.map((surface) => ({ surface, known_copy: true, status: "purged" }));
-  const session = await authority.openSession("records");
-  const evidence = await authority.issueErasureEvidence(session, { id: "erase-workflow", subject: output.proposals[0].target.subject, legal_hold: false, inventory, propagation_verified: true, reason: "verified purge", expires_at: "2026-08-15T12:00:00Z" });
-  assert.equal((await harness.authorizeErasure({ workflowId: "wf_ingest", proposalId: "pr_alpha", erasureEvidence: evidence })).allowed, true);
-  assert.deepEqual(new Set(events.filter(({ action }) => action === "governance.gate.completed").map(({ gate }) => gate)), new Set(["ingest", "model-route", "retrieval", "erasure"]));
+  assert.deepEqual(new Set(events.filter(({ action }) => action === "governance.gate.completed").map(({ gate }) => gate)), new Set(["ingest", "model-route", "retrieval"]));
 });
 
 test("FEAT-008 invalid trusted access or rights cannot reach persisted claims", async () => {

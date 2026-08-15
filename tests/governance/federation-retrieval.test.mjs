@@ -119,6 +119,7 @@ function policy(state = policyState) {
     && (access.compartments ?? []).every((compartment) => compartments.has(compartment));
   return {
     authorizeMount: async ({ mount, queryMode }) => state.query_modes.includes(queryMode) && allows(mount.access),
+    authorizeGovernance: async ({ concept }) => allows(concept.access ?? undefined),
     authorizeConcept: async ({ concept }) => allows(concept.access ?? undefined),
     authorizeSource: async ({ source }) => allows(source.access ?? undefined)
   };
@@ -133,6 +134,7 @@ async function rewritePrimaryConcept(root, relativePath, transform) {
 
 test("FEAT-005 traverses hierarchical indexes and retrieves across mounts with qualified conflicts", async (context) => {
   const root = await workspace(context); const { mounts } = await new FederationResolver({ projectRoot: root, now: fixedNow }).resolveProject(project(root));
+  assert.throws(() => new FederatedRetriever({ mounts, policy: { authorizeMount: async () => true, authorizeConcept: async () => true } }), retrievalCode("KDLC_POLICY_REQUIRED"));
   assert.deepEqual(await traverseHierarchicalIndex(mounts.find(({ alias }) => alias === "primary").root), [
     "policies/authentication.md", "policies/nightfall.md", "policies/spoof.md", "references/sources/authentication.md"
   ]);

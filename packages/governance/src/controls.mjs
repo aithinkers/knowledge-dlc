@@ -34,7 +34,8 @@ function isRfc3339Instant(value) {
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]
     && Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 59
-    && Number(match[7] ?? 0) <= 23 && Number(match[8] ?? 0) <= 59 && Number.isFinite(Date.parse(value));
+    && Number(match[7] ?? 0) <= 14 && Number(match[8] ?? 0) <= 59
+    && (Number(match[7] ?? 0) < 14 || Number(match[8] ?? 0) === 0) && Number.isFinite(Date.parse(value));
 }
 
 function fail(code, message, details = {}) { throw new GovernanceError(code, message, details); }
@@ -43,6 +44,7 @@ function stringArray(value) { return Array.isArray(value) && value.every((item) 
 function classification(value) { return Object.hasOwn(CLASSIFICATION, value) ? value : null; }
 function at(clock) {
   const value = clock.now();
+  if (!(value instanceof Date) && !isRfc3339Instant(value)) fail("KDLC_TRUSTED_CLOCK_INVALID", "Trusted governance clock returned a non-RFC3339 instant");
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) fail("KDLC_TRUSTED_CLOCK_INVALID", "Trusted governance clock returned an invalid instant");
   return date;
@@ -96,7 +98,8 @@ function rightsCodes(context) {
     if (["public", "external"].includes(context.target?.scope) && ["prohibited", "metadata-only"].includes(rights?.redistribution) && context.transformation !== "metadata-only") codes.push("KDLC_RIGHTS_REDISTRIBUTION_PROHIBITED");
     if (context.transformation === "derivative" && rights?.derivative_use !== "allowed") codes.push("KDLC_RIGHTS_DERIVATIVE_PROHIBITED");
     if (context.target?.commercial === true && rights?.commercial_use !== "allowed") codes.push("KDLC_RIGHTS_COMMERCIAL_PROHIBITED");
-    if (rights?.expires_at && Date.parse(rights.expires_at) <= context.nowMillis) codes.push("KDLC_RIGHTS_EXPIRED");
+    if (rights?.expires_at && !isRfc3339Instant(rights.expires_at)) codes.push("KDLC_RIGHTS_EXPIRY_INVALID");
+    else if (rights?.expires_at && Date.parse(rights.expires_at) <= context.nowMillis) codes.push("KDLC_RIGHTS_EXPIRED");
   }
   return distinct(codes);
 }
@@ -114,7 +117,7 @@ function falsehoodCodes(context, policy) {
 }
 
 export class GovernanceControlAuthority {
-  #authenticate; #clock; #audit; #policy; #waivers = new WeakMap(); #declassifications = new WeakMap(); #erasureEvidence = new WeakMap();
+  #authenticate; #clock; #audit; #policy; #waivers = new WeakMap(); #declassifications = new WeakMap(); #erasureAuthorizations = new WeakMap();
   constructor({ authenticate, clock, audit }) {
     if (typeof authenticate !== "function" || typeof clock?.now !== "function" || typeof audit?.append !== "function") fail("KDLC_GOVERNANCE_AUTHORITY_INVALID", "Governance authority requires authentication, a trusted clock, and durable audit");
     this.#authenticate = authenticate; this.#clock = clock; this.#audit = audit;
@@ -154,25 +157,29 @@ export class GovernanceControlAuthority {
     await this.#audit.append(Object.freeze({ action: "governance.declassification.issued", actor: identity.actor, subject, from, to, policy_ref, authorization_id: id, at: state.issued_at }));
     this.#declassifications.set(token, state); return token;
   }
-  async issueErasureEvidence(session, { id, subject, legal_hold, inventory, propagation_verified, reason, expires_at }) {
-    const identity = this.#identity(session, this.#policy?.erasure_authorities ?? []); const now = at(this.#clock);
-    if (!id || !subject || typeof legal_hold !== "boolean" || !Array.isArray(inventory) || typeof propagation_verified !== "boolean" || !reason || !isRfc3339Instant(expires_at) || Date.parse(expires_at) <= now.getTime()) fail("KDLC_ERASURE_EVIDENCE_INVALID", "Erasure evidence must be authenticated, complete, scoped, and current");
-    const evidence = Object.freeze({ id, subject, legal_hold, inventory: jsonClone(inventory), propagation_verified, authority: identity.actor, issued_at: now.toISOString(), expires_at });
-    const token = Object.freeze({ kind: "kdlc-erasure-evidence-1", id });
-    await this.#audit.append(Object.freeze({ action: "governance.erasure.evidence-issued", actor: identity.actor, subject, evidence_hash: artifactHash(evidence), at: evidence.issued_at }));
-    this.#erasureEvidence.set(token, evidence); return token;
+  async issueErasureAuthorization(session, { id, subject, action, policy_ref, reason, expires_at }) {
+    const rule = this.#policy?.erasure_policy_refs?.[policy_ref];
+    const identity = this.#identity(session, rule?.roles ?? []); const now = at(this.#clock);
+    if (!rule || !id || !subject || !["revoke", "erase"].includes(action) || !rule.actions?.includes(action) || !reason || !isRfc3339Instant(expires_at) || Date.parse(expires_at) <= now.getTime()) fail("KDLC_ERASURE_AUTHORIZATION_INVALID", "Revocation or erasure authorization must be policy-scoped and current");
+    const authorization = Object.freeze({ id, subject, action, policy_ref, reason, authority: identity.actor, issued_at: now.toISOString(), expires_at });
+    const token = Object.freeze({ kind: "kdlc-erasure-authorization-1", id });
+    await this.#audit.append(Object.freeze({ action: "governance.erasure.authorized", actor: identity.actor, subject, requested_action: action, authorization_hash: artifactHash(authorization), at: authorization.issued_at }));
+    this.#erasureAuthorizations.set(token, authorization); return token;
   }
   waiver(token) { return this.#waivers.get(token); }
   declassification(token) { return this.#declassifications.get(token); }
-  erasureEvidence(token) { return this.#erasureEvidence.get(token); }
+  erasureAuthorization(token) {
+    const authorization = this.#erasureAuthorizations.get(token); const now = at(this.#clock);
+    return authorization && isRfc3339Instant(authorization.issued_at) && isRfc3339Instant(authorization.expires_at) && Date.parse(authorization.issued_at) <= now.getTime() && Date.parse(authorization.expires_at) > now.getTime() ? authorization : undefined;
+  }
 }
 
 export class GovernanceControlEngine {
-  #policy; #policyHash; #clock; #audit; #authority; #validator;
-  constructor({ policy, clock, audit, authority, validator }) {
-    if (!policy || policy.api_version !== "kdlc.dev/governance-policy/v1alpha1" || !Number.isInteger(policy.version) || policy.version < 1 || !Number.isInteger(policy.minimum_independent_sources) || policy.minimum_independent_sources < 1 || !Array.isArray(policy.required_erasure_surfaces) || !policy.external_models || typeof policy.external_models !== "object" || !policy.waiver_authorities || !policy.declassification_authorities || !stringArray(policy.erasure_authorities)) fail("KDLC_GOVERNANCE_POLICY_INVALID", "A complete versioned governance policy is required");
+  #policy; #policyHash; #clock; #audit; #authority; #validator; #erasureVerifier;
+  constructor({ policy, clock, audit, authority, validator, erasureVerifier }) {
+    if (!policy || policy.api_version !== "kdlc.dev/governance-policy/v1alpha1" || !Number.isInteger(policy.version) || policy.version < 1 || !Number.isInteger(policy.minimum_independent_sources) || policy.minimum_independent_sources < 1 || !Array.isArray(policy.required_erasure_surfaces) || !policy.external_models || typeof policy.external_models !== "object" || !policy.waiver_authorities || !policy.declassification_authorities || !policy.erasure_policy_refs) fail("KDLC_GOVERNANCE_POLICY_INVALID", "A complete versioned governance policy is required");
     if (typeof clock?.now !== "function" || typeof audit?.append !== "function" || !(authority instanceof GovernanceControlAuthority) || !validator) fail("KDLC_GOVERNANCE_RUNTIME_INVALID", "Governance controls require trusted clock, audit, authority, and schemas");
-    this.#policy = Object.freeze(jsonClone(policy)); this.#policyHash = artifactHash(this.#policy); this.#clock = clock; this.#audit = audit; this.#authority = authority; this.#validator = validator; authority.bindPolicy(this.#policy);
+    this.#policy = Object.freeze(jsonClone(policy)); this.#policyHash = artifactHash(this.#policy); this.#clock = clock; this.#audit = audit; this.#authority = authority; this.#validator = validator; this.#erasureVerifier = erasureVerifier; authority.bindPolicy(this.#policy);
   }
   static async create(options) {
     return new GovernanceControlEngine({ ...options, validator: options.validator ?? await createContractValidator(undefined, GOVERNANCE_CONTROL_SCHEMA_PATHS) });
@@ -201,22 +208,20 @@ export class GovernanceControlEngine {
     if (sensor.id === "retention-legal-hold") {
       if (context.gate === "ingest" && context.regulated === true && context.storage?.erasable !== true) return ["KDLC_RETENTION_STORAGE_INCOMPATIBLE"];
       if (context.gate !== "erasure") return [];
-      const evidence = this.#authority.erasureEvidence(context.erasure_evidence);
-      if (!evidence || evidence.subject !== context.subject || !isRfc3339Instant(evidence.issued_at) || !isRfc3339Instant(evidence.expires_at) || Date.parse(evidence.issued_at) > now.getTime() || Date.parse(evidence.expires_at) <= now.getTime()) return ["KDLC_ERASURE_AUTHORITY_REQUIRED"];
-      if (evidence.legal_hold === true) return ["KDLC_LEGAL_HOLD"];
-      const inventory = evidence.inventory;
+      const evidence = this.#erasureVerifier?.resolve?.(context.erasure_verification);
+      if (!evidence || evidence.subject !== context.subject || evidence.action !== "erase" || evidence.result !== "erased" || !isRfc3339Instant(evidence.completed_at) || Date.parse(evidence.completed_at) > now.getTime() || !/^sha256:[a-f0-9]{64}$/.test(evidence.impact_hash ?? "") || !/^sha256:[a-f0-9]{64}$/.test(evidence.decision_hash ?? "") || !/^sha256:[a-f0-9]{64}$/.test(evidence.verification_hash ?? "") || !/^sha256:[a-f0-9]{64}$/.test(evidence.receipt_hash ?? "")) return ["KDLC_ERASURE_WORKFLOW_VERIFICATION_REQUIRED"];
+      const inventory = Array.isArray(evidence.inventory) ? evidence.inventory : [];
       const bySurface = new Map(inventory.map((item) => [item.surface, item]));
       if (this.#policy.required_erasure_surfaces.some((surface) => !bySurface.has(surface))) return ["KDLC_ERASURE_INVENTORY_INCOMPLETE"];
       if (inventory.some((item) => item.known_copy === true && !["purged", "crypto-shredded", "tombstoned"].includes(item.status))) return ["KDLC_ERASURE_COPY_REMAINS"];
-      if (evidence.propagation_verified !== true) return ["KDLC_ERASURE_PROPAGATION_UNVERIFIED"];
       return [];
     }
     return ["KDLC_SENSOR_UNKNOWN"];
   }
   async evaluate(gate, input, { waivers = [] } = {}) {
     if (!GATES.has(gate) || !input || typeof input.subject !== "string" || !input.subject) fail("KDLC_GOVERNANCE_CONTEXT_INVALID", "A supported gate and stable subject are required");
-    const now = at(this.#clock); const { declassification, erasure_evidence, ...serializableInput } = input;
-    const context = { ...jsonClone({ ...serializableInput, gate }), declassification, erasure_evidence };
+    const now = at(this.#clock); const { declassification, erasure_verification, ...serializableInput } = input;
+    const context = { ...jsonClone({ ...serializableInput, gate }), declassification, erasure_verification };
     const results = [];
     for (const sensor of BUILT_IN_GOVERNANCE_SENSORS.filter(({ gates }) => gates.includes(gate))) {
       const findingCodes = this.#codes(sensor, context, now); let result = findingCodes.length ? "failed" : "passed"; let blocks = findingCodes.length > 0; let waiverView;

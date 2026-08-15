@@ -306,10 +306,9 @@ export class GovernedAgentWorkflows {
     return this.#governanceControls.authorizeExternalModel({ ...this.#governanceInput({ proposal, claims, context, subject: proposal.target.subject, concept: proposal.concept.after }), provider, model, declassification }, { waivers: governanceWaivers });
   }
 
-  async authorizeErasure({ workflowId, proposalId, erasureEvidence, governanceWaivers = [] }) {
+  async authorizeErasure({ subject, erasureVerification, governanceWaivers = [] }) {
     if (!(this.#governanceControls instanceof GovernanceControlEngine)) throw new GovernanceError("KDLC_GOVERNANCE_CONTROLS_REQUIRED", "Erasure requires trusted governance controls");
-    const proposal = await this.#get("conductor", `workflow/runs/${workflowId}/proposals/${proposalId}.json`);
-    return this.#governanceControls.authorizeErasure({ subject: proposal.target.subject, erasure_evidence: erasureEvidence }, { waivers: governanceWaivers });
+    return this.#governanceControls.authorizeErasure({ subject, erasure_verification: erasureVerification }, { waivers: governanceWaivers });
   }
 
   async assembleReview({ workflowId, proposalId, governanceWaivers = [] }) {
