@@ -119,6 +119,42 @@ head with no unresolved critical or high finding must be attached. This
 authority is consumed and expires immediately when PR #59 merges or is closed,
 and it does not authorize any later protected change.
 
+The REL-002 implementation PR, linked to issue #57, may use a one-time
+protected release-evidence bypass solely at head
+`b84581584220d0702c160864e500abcd01de9a19` on base
+`ddcd442bb58d2c25767ffc9d1be83bfff2003339`. It authorizes exactly these
+SHA-256 transitions: the preregistered prompt template gained canonical-answer
+and decision-rule sentences before any qualified claim, and the dependent
+profile/corpus chains rebound mechanically —
+
+- `distribution/release/statistical/prompt-manifest.json` from
+  `26f4342f693f7ae15068008286e54be0853ac3558887de90b7739b23f7198bef`
+  to `302445ce8e9997cfc2ec6e062beadbc9914a7ac9073cacdb453a9ae6d11dbe3b`;
+- `distribution/release/evaluation-profile.json` from
+  `3b0421e391a734a98d1c1c216ad07b86ab7e4402019debb30dc2d3750549cef4`
+  to `44d67c715e6f51ee22fca24a952d0543c1253125eade6ccd63f29363edfbcc6f`;
+- `distribution/release/evaluation-corpus.json` from
+  `e9d61ae1cc10f53ed97e7e2de40490bae309bbef6b4435e63e283dac1fa51968`
+  to `49e682a01da2a3aa949091be7ee362fabc47b4081b0b335629e50738aea2fb5f`.
+
+The complete PR diff is limited to 53 paths (7608 additions, 123 deletions):
+the frozen anthropic/claude-sonnet-5 model manifest, the two template
+amendments above, thirty captured trial files and the qualified statistical
+report/status, the capture producer script, the release-candidate flip
+(version 1.0.0, conformance/report/lifecycle, CHANGELOG, candidate evidence),
+the REL-001/REL-002 traceability updates, candidate-state test amendments,
+release-readiness disclosure, supply-chain manifest, and the mechanical
+evidence-hash rebinds those transitions require. No workflow, validator,
+scorer, or schema byte may change. Candidate tests and every non-self check
+must pass; the owner exception record must identify the Repository policy
+protected self-difference as its sole failed check and bypass reason. An
+independent read-only agent review of exactly that head with no unresolved
+critical or high finding must be attached. Two prior failed capture attempts
+(claude-haiku-4-5-20251001; claude-sonnet-5 before the rubric amendments) are
+recorded in issue #57 and were never presented as qualified. This authority is
+consumed and expires immediately when the implementation PR merges or is
+closed, and it does not authorize any later protected change.
+
 Repository administrators, write collaborators, and repository-configured
 GitHub Actions are inside the current CI trust boundary. Bare commit-status
 contexts are therefore enforcement against ordinary candidate changes, not a
