@@ -1,8 +1,8 @@
 {
   "api_version": "kdlc.dev/recorded-release-run/v1alpha1",
   "id": "pre-release-recorded-1",
-  "corpus_hash": "sha256:ed593716099076851352f9915d6769e66f7f2611db87152e0eac2f75f243e64f",
-  "profile_hash": "sha256:1333e5b283ed6f670370745abbeb33ed4728cfb79cd5944375235201abcbe38e",
+  "corpus_hash": "sha256:182b2936500eee01435d1e093cd1513e39fd172ac6d04a875c204fdbeb756df6",
+  "profile_hash": "sha256:e1a7eeeb58e725860f08f9a2ecd9d904f7a3a07626997abb85dee2cb50390952",
   "runtime": {"node": "24.5.0", "npm": "11.5.1"},
   "external_network_calls": 0,
   "live_model_calls": 0,
@@ -12,7 +12,7 @@
     {"case_id": "adversarial-governance", "case_hash":"sha256:12179053f70d8f50ec0575cfde4c0324168ba60e564647c71f66ecc08f14945c", "status": "passed", "observations": ["Recorded injection, falsehood, rights, and authority-spoofing cases fail closed."], "evidence_hash":"sha256:6afd8731bb1883573e59ff08d74c2471b2608db687ed0e3a454cc7ea7f0c1f6c"},
     {"case_id": "bounded-normalization", "case_hash":"sha256:50111f300e2d193e938ff29fe6a9e98f979da21358942e1505b925ac3031554a", "status": "passed", "observations": ["Structural profiles remain bounded and unsafe inputs quarantine."], "evidence_hash":"sha256:8c784c4f8d27f447c373af8e17665e7e7d67330203ee56e60f0387d752dc7230"},
     {"case_id": "federated-nondisclosure", "case_hash":"sha256:4d0e6d17002535bc5a008787de4b49b19705d0acb44fe476dc383c2cd5444261", "status": "passed", "observations": ["Pre-query authorization, integrity, conflict, and nondisclosure cases pass."], "evidence_hash":"sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724"},
-    {"case_id": "durable-concurrency", "case_hash":"sha256:2ea04f0a5c1b177f43465fe8332cc9309f96fdf2be0aabd17971afffac809f56", "status": "passed", "observations": ["Cross-instance and crash boundaries preserve durable serialization."], "evidence_hash":"sha256:d9adeb8e92b65ac4065b9582a6f8ef89a6745bb7e73a53749e918c7e408e11af"},
+    {"case_id": "durable-concurrency", "case_hash":"sha256:805764720dbaea376bcc32c01777479aab183a5bbed243197b85383db8f0a500", "status": "passed", "observations": ["Cross-instance and crash boundaries preserve durable serialization."], "evidence_hash":"sha256:bf7fdc0fa8037cb7bece5e7f318216dfb2a665d61af3c410fa5788cf6732238e"},
     {"case_id": "transport-equivalence", "case_hash":"sha256:cbce7f56dc638442eec986817c1d5a5515f3db25cb8d8ab0bd6b08b70461490a", "status": "passed", "observations": ["Recorded governed workflow semantics agree across shipped transports and adapters."], "evidence_hash":"sha256:4e84aefd0804df3da6ee94d93319d9455cba1b429548365c2707b9384bc025a7"},
     {"case_id": "clean-rebuild", "case_hash":"sha256:d6f0d5b105c8449e2230d9df09f8ba708878da99ed9de3c2fb4e7d9f4adb8738", "status": "passed", "observations": ["Clean deterministic index generation reproduces committed bytes and exact retrieval records after cache removal."], "evidence_hash":"sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724"},
     {"case_id": "governed-revocation-erasure", "case_hash":"sha256:f34a0771e8eb78fcca384434c27d8f6ac12abbdaed2313804e1f9868d3b0846f", "status": "passed", "observations": ["Merged FEAT-009 evidence covers exact impact, authorization, durable erasure, late-copy fencing, legal hold, crash recovery, and retrieval nondisclosure."], "evidence_hash":"sha256:cc3b37fe2511228e6e763d4922f8e9920dd7553a4b1eaa7906d241fae7a635d8"}

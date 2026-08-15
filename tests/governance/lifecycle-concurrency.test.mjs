@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import test from "node:test";
@@ -285,7 +285,8 @@ test("FEAT-002 delayed old-owner cleanup cannot remove or release a successor le
 
 test("FEAT-002 stale lock recovery is serialized and can recover an abandoned empty lock", async (context) => {
   const f = await fixture(context); const locks = new LeaseLockManager({ ...f, ids: new IDs("locks"), coordination: { emptyGraceMs: 100, timeoutMs: 1000 } });
-  const emptyResource = "empty"; await f.store.createDirectoryExclusive(locks.path(emptyResource)); f.clock.value = Date.now(); f.clock.advance(101);
+  const emptyResource = "empty"; await f.store.createDirectoryExclusive(locks.path(emptyResource));
+  f.clock.value = (await stat(await f.store.safePath(locks.path(emptyResource)))).mtimeMs + 101;
   assert.equal(await locks.breakStale(emptyResource, { actor: "admin", reason: "creator crashed" }), null);
 
   await locks.acquire("leased", { owner: "wf:a", process: process.pid, leaseMs: 100 }); f.clock.advance(101);

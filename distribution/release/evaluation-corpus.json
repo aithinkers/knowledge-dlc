@@ -61,8 +61,8 @@
       "id": "durable-concurrency",
       "category": "concurrency",
       "requirement_ids": ["FEAT-002"],
-      "fixtures": [{"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:d9adeb8e92b65ac4065b9582a6f8ef89a6745bb7e73a53749e918c7e408e11af"}],
-      "executable_evidence": {"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:d9adeb8e92b65ac4065b9582a6f8ef89a6745bb7e73a53749e918c7e408e11af", "test_ids": ["FEAT-002 finalizing publication recovers forward after audit without rollback", "FEAT-002 finalizing crash recovery reacquires dead target leases durably"]},
+      "fixtures": [{"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:bf7fdc0fa8037cb7bece5e7f318216dfb2a665d61af3c410fa5788cf6732238e"}],
+      "executable_evidence": {"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:bf7fdc0fa8037cb7bece5e7f318216dfb2a665d61af3c410fa5788cf6732238e", "test_ids": ["FEAT-002 finalizing publication recovers forward after audit without rollback", "FEAT-002 finalizing crash recovery reacquires dead target leases durably"]},
       "expected": ["cross-instance mutations are serialized", "crash recovery does not create partial canonical state"],
       "security": true
     },
