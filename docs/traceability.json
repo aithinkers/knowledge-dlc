@@ -412,7 +412,9 @@
       "issue": 56,
       "specification_sections": [
         "9.2",
-        "25"
+        "19.4",
+        "25",
+        "27.3"
       ],
       "status": "implemented",
       "evidence": {
