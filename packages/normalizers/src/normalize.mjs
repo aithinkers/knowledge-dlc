@@ -207,7 +207,14 @@ function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJ
 function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error) {
   return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: plainObject(settings) ? serializable(settings) : {}, coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
 }
-const semanticsHash = ({ descriptor, units, probabilisticUnits, manifest }) => byteHash(canonicalJson({ descriptor, units, probabilisticUnits, manifest }));
+function semanticIdentity({ descriptor, units, probabilisticUnits, manifest }) { const { semantics_hash: ignored, ...manifestSemantics } = manifest; return byteHash(canonicalJson({ descriptor, units, probabilisticUnits, manifest: manifestSemantics })); }
+function bindSemanticIdentity(normalized) { normalized.manifest.semantics_hash = semanticIdentity(normalized); return normalized; }
+function assertSupportedSemantics(format, settings, coverage, emitted) {
+  const allowed = { csv: new Set(["delimiter", "sample_rows", "language"]), gif: new Set(["sample_frames", "language"]) }[format] ?? new Set(["language"]);
+  if (Object.keys(settings).some((name) => !allowed.has(name)) || (settings.language !== undefined && !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(settings.language)) || (settings.delimiter !== undefined && (typeof settings.delimiter !== "string" || settings.delimiter.length !== 1 || /[\r\n"']/.test(settings.delimiter))) || [settings.sample_rows, settings.sample_frames].some((value) => value !== undefined && (!Number.isSafeInteger(value) || value <= 0))) throw new Error("Manifest settings do not match the supported format profile");
+  const expectedCoverage = format === "gif" ? ["discovered", "duration_ms", "emitted", "height", "width"] : ["discovered", "emitted"];
+  if (canonicalJson(Object.keys(coverage).sort()) !== canonicalJson(expectedCoverage) || coverage.emitted !== emitted || !Number.isSafeInteger(coverage.discovered) || coverage.discovered < 1) throw new Error("Manifest coverage does not match the supported format profile");
+}
 
 export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
   if (process.env.KDLC_RESTRICTED_WORKER !== "1" || !process.permission || process.permission.has("child") || process.permission.has("fs.write", "/")) throw new Error("Direct normalization requires the restricted worker capability boundary");
@@ -219,6 +226,7 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     for (const [name, value] of Object.entries(limits)) { if (!(name in defaultLimits) || !Number.isSafeInteger(value) || value <= 0 || value > defaultLimits[name]) throw new Quarantine("invalid-limits", "Normalizer limits may only tighten trusted ceilings", { limit: name }); resolvedLimits[name] = value; }
     if (sourceHash && sourceHash !== computedHash) throw new Quarantine("source-hash-mismatch", "Declared source hash does not match input bytes", { declared: sourceHash, actual: computedHash });
     settings = JSON.parse(canonicalJson(settings));
+    if (Object.keys(settings).some((name) => !["language", "delimiter", "sample_rows", "sample_frames"].includes(name)) || (settings.sample_rows !== undefined && (!Number.isSafeInteger(settings.sample_rows) || settings.sample_rows <= 0)) || (settings.sample_frames !== undefined && (!Number.isSafeInteger(settings.sample_frames) || settings.sample_frames <= 0))) throw new Quarantine("invalid-settings", "Normalization settings are unsupported or invalid");
     exceed("source_bytes", input.byteLength, resolvedLimits.source_bytes); const started = performance.now(); let format = detect(input, filename, mediaType); let result;
     if (format === "zip") result = officeProfile(input, hash, resolvedLimits);
     else if (format === "markdown" || format === "text") result = linesProfile(input, format, hash);
@@ -227,6 +235,7 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     else if (format === "drawio") result = drawioProfile(input, hash, resolvedLimits);
     else if (format === "gif") result = gifProfile(input, hash, settings, resolvedLimits);
     format = result.descriptor.id.slice(5); exceed("processing_ms", performance.now() - started, resolvedLimits.processing_ms);
+    try { assertSupportedSemantics(format, settings, { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, result.units.length); } catch (error) { throw new Quarantine("invalid-settings", error.message); }
     if (settings.language) {
       if (!/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(settings.language)) throw new Quarantine("invalid-language", "Language must be a BCP 47 tag");
       result.units = result.units.map((unit) => ({ ...unit, language: settings.language }));
@@ -240,15 +249,16 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     const qualityWarnings = [...new Set([...result.warnings, ...result.units.flatMap((unit) => unit.quality_warnings)])].sort();
     const omissions = qualityWarnings.filter((warning) => /sampled|scanned|omitted|excluded/i.test(warning)).map((reason) => ({ reason }));
     const manifest = { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security };
-    if (!validateManifest(manifest)) throw new Quarantine("invalid-output-schema", "Normalizer manifest failed its schema contract");
-    const normalized = { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest }; return { ...normalized, semantics_hash: semanticsHash(normalized) };
+    const normalized = bindSemanticIdentity({ descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest });
+    if (!validateManifest(normalized.manifest)) throw new Quarantine("invalid-output-schema", "Normalizer manifest failed its schema contract");
+    return normalized;
   } catch (error) {
     const quarantined = error instanceof Quarantine ? error : new Quarantine("malformed", "Normalizer failed safely", { parser: error.message });
     const safeSourceId = typeof sourceId === "string" && portableSourceId.test(sourceId) ? sourceId : `source-${hash.slice(7, 23)}`;
     const safeNormalizedAt = validRfc3339(normalizedAt) ? normalizedAt : "1970-01-01T00:00:00.000Z";
-    const manifest = quarantineManifest(safeSourceId, hash, safeNormalizedAt, settings, quarantined);
-    if (!validateManifest(manifest)) throw new Error("Quarantine manifest failed its schema contract");
-    const normalized = { descriptor: null, units: [], probabilisticUnits: [], manifest }; return { ...normalized, semantics_hash: semanticsHash(normalized) };
+    const normalized = bindSemanticIdentity({ descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(safeSourceId, hash, safeNormalizedAt, quarantined.code === "invalid-settings" ? {} : settings, quarantined) });
+    if (!validateManifest(normalized.manifest)) throw new Error("Quarantine manifest failed its schema contract");
+    return normalized;
   }
 }
 
@@ -256,7 +266,7 @@ export function portableArtifacts(result, sourceId) {
   if (!portableSourceId.test(sourceId)) throw new Error("Source ID is not portable");
   if (sourceId !== result?.manifest?.source_id) throw new Error("Source ID does not match the normalization manifest");
   if (!validateManifest(result.manifest)) throw new Error("Normalization manifest is invalid");
-  if (result.semantics_hash !== semanticsHash(result)) throw new Error("Normalization descriptor or manifest semantics were mutated");
+  if (result.manifest.semantics_hash !== semanticIdentity(result)) throw new Error("Normalization descriptor or manifest semantics were mutated");
   const quarantined = result.manifest.status === "quarantined";
   if (quarantined) {
     if (result.descriptor !== null || result.units.length || result.probabilisticUnits.length || result.manifest.format !== null || result.manifest.normalizer !== null || result.manifest.coverage.discovered !== 0 || result.manifest.coverage.emitted !== 0 || result.manifest.outputs.length) throw new Error("Quarantine result semantics are inconsistent");
@@ -265,6 +275,7 @@ export function portableArtifacts(result, sourceId) {
     if (!expectedDescriptor || canonicalJson(result.descriptor) !== canonicalJson(expectedDescriptor)) throw new Error("Normalizer descriptor does not match the trusted format profile");
     if (result.manifest.normalizer.id !== result.descriptor.id || result.manifest.normalizer.version !== result.descriptor.version || canonicalJson(result.manifest.normalizer.parser) !== canonicalJson(result.descriptor.parser)) throw new Error("Manifest normalizer provenance does not match its descriptor");
     if (result.manifest.coverage.emitted !== result.units.length || (result.manifest.status === "complete") !== (result.manifest.omissions.length === 0) || (result.manifest.status === "partial") !== (result.manifest.omissions.length > 0)) throw new Error("Manifest coverage or omission semantics are inconsistent");
+    assertSupportedSemantics(result.manifest.format, result.manifest.settings, result.manifest.coverage, result.units.length);
     const allowed = new Set(result.descriptor.locator_kinds);
     if (result.units.some((unit) => unit.extraction_method.mode !== "deterministic" || unit.extraction_method.normalizer !== result.descriptor.id || unit.extraction_method.version !== result.descriptor.version || !allowed.has(unit.locator.kind)) || result.probabilisticUnits.some((unit) => unit.extraction_method.mode !== "probabilistic" || !allowed.has(unit.locator.kind))) throw new Error("Unit extraction provenance does not match its descriptor");
     if (result.manifest.settings.language && result.units.some((unit) => unit.language !== result.manifest.settings.language)) throw new Error("Unit language does not match manifest settings");
@@ -274,7 +285,7 @@ export function portableArtifacts(result, sourceId) {
   if (result.units.some((unit) => !validateUnit(unit) || unit.source_hash !== result.manifest.source_hash) || result.probabilisticUnits.some((unit) => !validateUnit(unit) || unit.source_hash !== result.manifest.source_hash)) throw new Error("Normalized units are invalid or source-unbound");
   const expectedOutputs = quarantined ? [] : [{ path: "units.jsonl", hash: byteHash(deterministic), bytes: Buffer.byteLength(deterministic), mode: "deterministic" }, ...(result.probabilisticUnits.length ? [{ path: "probabilistic-units.jsonl", hash: byteHash(probabilistic), bytes: Buffer.byteLength(probabilistic), mode: "probabilistic" }] : [])];
   if (canonicalJson(result.manifest.outputs) !== canonicalJson(expectedOutputs)) throw new Error("Normalization manifest output hashes do not match serialized bytes");
-  const basis = result.manifest.outputs.find(({ mode }) => mode === "deterministic")?.hash ?? result.manifest.source_hash;
+  const basis = result.manifest.semantics_hash;
   const directory = `sources/normalized/${sourceId}/${basis.replace("sha256:", "sha256-")}`;
   const files = { [`${directory}/manifest.json`]: `${canonicalJson(result.manifest)}\n` };
   if (result.manifest.status !== "quarantined") {

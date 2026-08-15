@@ -99,7 +99,7 @@ test("FEAT-003 deterministic units and probabilistic model-derived units remain 
   const derived = { unit_id: "unit_0123456789abcdef", kind: "ocr", parent_id: null, order: 0, text: "model text", locator: { kind: "line-range", start_line: 1, end_line: 1 }, source_hash: sourceHash, extraction_method: { mode: "probabilistic", normalizer: "kdlc.ocr", version: "1.0.0", model: { id: "fixture", version: "1", provider: "recorded-fixture", recorded_output_hash: `sha256:${"b".repeat(64)}` } }, quality_warnings: ["probabilistic"] };
   const result = await normalize({ bytes, filename: "source.txt", sourceId: "src_fixture", probabilisticUnits: [derived] });
   assert(result.units.length > 0); assert.equal(result.probabilisticUnits.length, 1); assert.deepEqual(result.manifest.outputs.map(({ mode }) => mode), ["deterministic", "probabilistic"]);
-  const invalid = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, extraction_method: { ...derived.extraction_method, model: undefined } }] }); assert.equal(invalid.manifest.status, "quarantined");
+  await assert.rejects(normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, extraction_method: { ...derived.extraction_method, model: undefined } }] }), /plain data/);
   const invalidLocator = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, locator: { kind: "page" } }] }); assert.equal(invalidLocator.manifest.quarantine.code, "invalid-probabilistic-output");
   const wrongProfileLocator = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, locator: { kind: "page", page: 1 } }] }); assert.equal(wrongProfileLocator.manifest.quarantine.code, "invalid-probabilistic-output");
   const localized = await normalize({ bytes, filename: "source.txt", settings: { language: "en-US" } }); assert(localized.units.every(({ language }) => language === "en-US"));
@@ -120,6 +120,10 @@ test("FEAT-003 restricted JSONL worker refuses active policy and returns bounded
   const nearMegabyte = { text: "x".repeat(999_000) };
   await assert.rejects(runRestrictedNormalizer({ id: "cumulative", bytes_base64: "", filename: "safe.txt", probabilisticUnits: Array(10_000).fill(nearMegabyte) }), /serialized size limit/);
   await assert.rejects(normalize({ bytes: new Uint8Array(25_000_001), filename: "huge.txt" }), /Raw normalization source/);
+  let getterCalls = 0; const getterUnit = {}; Object.defineProperty(getterUnit, "text", { enumerable: true, get() { getterCalls += 1; return "changed"; } });
+  await assert.rejects(runRestrictedNormalizer({ id: "getter", bytes_base64: "", probabilisticUnits: [getterUnit] }), /accessors/); assert.equal(getterCalls, 0);
+  let toJsonCalls = 0; const toJsonUnit = { toJSON() { toJsonCalls += 1; return { text: "changed" }; } };
+  await assert.rejects(runRestrictedNormalizer({ id: "tojson", bytes_base64: "", probabilisticUnits: [toJsonUnit] }), /toJSON/); assert.equal(toJsonCalls, 0);
 });
 
 test("FEAT-003 trusted ceilings, package identity, provenance, and portable paths fail closed", async () => {
@@ -150,6 +154,9 @@ test("FEAT-003 trusted ceilings, package identity, provenance, and portable path
   assert.equal(invalidCalendar.manifest.quarantine.code, "invalid-source-metadata"); assert.equal(invalidCalendar.manifest.normalized_at, "1970-01-01T00:00:00.000Z"); assert.equal(manifestValidator(invalidCalendar.manifest), true, JSON.stringify(manifestValidator.errors));
   const valid = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "source-7", normalizedAt: "2026-08-15T00:00:00Z" });
   assert.equal(valid.manifest.source_id, "source-7"); assert.equal(valid.manifest.normalized_at, "2026-08-15T00:00:00Z"); assert.equal(manifestValidator(valid.manifest), true, JSON.stringify(manifestValidator.errors));
+  assert.match(valid.manifest.semantics_hash, /^sha256:[a-f0-9]{64}$/);
+  const later = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "source-7", normalizedAt: "2026-08-15T00:00:01Z" });
+  assert.notEqual(portableArtifacts(valid, "source-7").directory, portableArtifacts(later, "source-7").directory);
   const changedUnit = structuredClone(valid); changedUnit.units[0].source_hash = `sha256:${"0".repeat(64)}`;
   assert.throws(() => portableArtifacts(changedUnit, "source-7"), /semantics|source-unbound/);
   const changedManifest = structuredClone(valid); changedManifest.manifest.outputs[0].hash = `sha256:${"0".repeat(64)}`;

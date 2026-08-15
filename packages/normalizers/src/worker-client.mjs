@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { types } from "node:util";
 
 import { defaultLimits } from "./descriptors.mjs";
 
@@ -25,7 +26,23 @@ function boundedJsonSize(value, maximum) {
   visit(value, 0); return size;
 }
 
+function snapshotPlainJson(value, seen = new Set(), depth = 0) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "object") throw new Error("Normalizer worker request must be JSON serializable plain data");
+  if (depth > 100) throw new Error("Normalizer worker request exceeds nesting limit");
+  if (seen.has(value)) throw new Error("Normalizer worker request must be acyclic JSON data");
+  if (types.isProxy(value)) throw new Error("Normalizer worker request cannot contain proxies");
+  const prototype = Object.getPrototypeOf(value); if (prototype !== Object.prototype && prototype !== null && prototype !== Array.prototype) throw new Error("Normalizer worker request must use plain JSON objects and arrays");
+  if (Object.hasOwn(value, "toJSON")) throw new Error("Normalizer worker request cannot define toJSON");
+  if (Object.getOwnPropertySymbols(value).length) throw new Error("Normalizer worker request cannot contain symbol keys");
+  seen.add(value); const output = Array.isArray(value) ? [] : {};
+  for (const key of Object.keys(value)) { const descriptor = Object.getOwnPropertyDescriptor(value, key); if (!descriptor || descriptor.get || descriptor.set) throw new Error("Normalizer worker request cannot contain accessors"); output[key] = snapshotPlainJson(descriptor.value, seen, depth + 1); }
+  seen.delete(value); return output;
+}
+
 export async function runRestrictedNormalizer(request, { timeoutMs, memoryBytes, outputBytes } = {}) {
+  request = snapshotPlainJson(request);
   for (const [name, value] of Object.entries(request.limits ?? {})) if (!(name in defaultLimits) || !Number.isSafeInteger(value) || value <= 0 || value > defaultLimits[name]) throw new Error(`Normalizer limit cannot relax trusted ceiling: ${name}`);
   const limits = { ...defaultLimits, ...(request.limits ?? {}) };
   const bounded = (value, ceiling, name) => { if (value === undefined) return ceiling; if (!Number.isSafeInteger(value) || value <= 0 || value > ceiling) throw new Error(`${name} cannot relax trusted worker ceiling`); return value; };
@@ -35,7 +52,7 @@ export async function runRestrictedNormalizer(request, { timeoutMs, memoryBytes,
   if (decodedBytes > defaultLimits.source_bytes) throw new Error("Normalizer source exceeds trusted source_bytes ceiling");
   if (request.probabilisticUnits !== undefined && (!Array.isArray(request.probabilisticUnits) || request.probabilisticUnits.length > MAX_PROBABILISTIC_ITEMS)) throw new Error("Normalizer probabilistic unit count exceeds protocol limits");
   let probabilisticBytes = 0;
-  for (const unit of request.probabilisticUnits ?? []) { boundedJsonSize(unit, MAX_PROBABILISTIC_ITEM_BYTES); const serialized = JSON.stringify(unit); const bytes = Buffer.byteLength(serialized); if (bytes > MAX_PROBABILISTIC_ITEM_BYTES || (probabilisticBytes += bytes) > MAX_PROBABILISTIC_BYTES) throw new Error("Normalizer probabilistic payload exceeds serialized size limit"); }
+  for (const unit of request.probabilisticUnits ?? []) { const bytes = boundedJsonSize(unit, MAX_PROBABILISTIC_ITEM_BYTES); if ((probabilisticBytes += bytes) > MAX_PROBABILISTIC_BYTES) throw new Error("Normalizer probabilistic payload exceeds serialized size limit"); }
   let payload; try { payload = `${JSON.stringify({ ...request, network: false, execute: false })}\n`; } catch { throw new Error("Normalizer worker request must be JSON serializable"); }
   const directory = await mkdtemp(join(tmpdir(), "kdlc-normalizer-"));
   try {
