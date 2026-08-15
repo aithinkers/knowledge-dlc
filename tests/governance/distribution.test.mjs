@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { PassThrough } from "node:stream";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, opendir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -12,6 +12,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
 import { distributionDefinition } from "../../packages/adapters/index.mjs";
+import { artifactHash } from "../../packages/core/index.mjs";
 import { NodeFileStore } from "../../packages/lifecycle/src/store.mjs";
 import {
   CLI_COMMANDS,
@@ -32,7 +33,22 @@ import {
 const repository = process.cwd();
 const temporary = async (t) => {
   const root = await mkdtemp(resolve(tmpdir(), "kdlc-distribution-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(async () => {
+    const writable = async (path) => {
+      let metadata; try { metadata = await lstat(path); } catch { return; }
+      if (metadata.isDirectory()) {
+        await chmod(path, 0o700);
+        let directory; try { directory = await opendir(path); } catch (error) { if (error.code === "ENOENT") return; throw error; }
+        for await (const entry of directory) await writable(resolve(path, entry.name));
+      }
+      else if (!metadata.isSymbolicLink()) await chmod(path, 0o600);
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await writable(root);
+      try { await rm(root, { recursive: true, force: true }); break; }
+      catch (error) { if (error.code !== "ENOTEMPTY" || attempt === 4) throw error; await new Promise((resolveDelay) => setTimeout(resolveDelay, 20)); }
+    }
+  });
   return root;
 };
 const clock = { now: () => "2026-08-15T00:00:00.000Z" };
@@ -738,22 +754,39 @@ test("FEAT-006 MCP resources, schemas, metadata, doctor, and generated drift are
 
 test("FEAT-006 local CLI bootstrap is init-only and remote principals cannot self-bootstrap", async (t) => {
   const root = await temporary(t);
-  const run = async () => {
-    const child = spawn(process.execPath, [resolve(repository, "packages/cli/bin.mjs"), "init", "--output", "json"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+  const run = async (...args) => {
+    const child = spawn(process.execPath, [resolve(repository, "packages/cli/bin.mjs"), ...args, "--output", "json"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = ""; child.stdout.on("data", (chunk) => { stdout += chunk; }); child.stderr.on("data", (chunk) => { stderr += chunk; });
     const [code] = await once(child, "exit");
     return { code, envelope: JSON.parse(stdout || stderr) };
   };
-  const first = await run();
+  const first = await run("init");
   assert.equal(first.code, 0);
   assert.equal(first.envelope.ok, true);
-  const second = await run();
+  const query = await run("query", "absent");
+  assert.equal(query.envelope.ok, true);
+  assert.equal(query.envelope.result.status, "not_found");
+  const second = await run("init");
   assert.equal(second.code, EXIT.conflict);
   const remoteRoot = await temporary(t);
   const remote = createLocalProjectEngine({ root: remoteRoot, principal: { actor: "human:remote", principal_mode: "served", issuer: "https://issuer.invalid", scopes: ["mutate"] } });
   const denied = await remote.envelope("project_init", { project_id: "remote.project" });
   assert.equal(denied.ok, false);
   assert.equal(denied.error.code, "KDLC_POLICY_DENIED");
+  const ownerPolicy = JSON.parse(await readFile(resolve(root, ".kdlc/principal-policy.json"), "utf8"));
+  const owner = ownerPolicy.principals[0];
+  for (const spoof of [
+    { actor: owner.actor, principal_mode: "served", issuer: "https://evil.invalid", subject: owner.subject, scopes: owner.scopes },
+    { actor: owner.actor, principal_mode: "served", issuer: "https://issuer.invalid", subject: "evil", scopes: owner.scopes },
+  ]) {
+    const attempted = createLocalProjectEngine({ root, principal: spoof });
+    assert.equal((await attempted.envelope("status")).error.code, "KDLC_POLICY_DENIED");
+  }
+  const defaultRemoteRoot = await temporary(t);
+  const defaultServer = new McpProjectServer({ root: defaultRemoteRoot, projectId: "remote.default", principal: { actor: "human:remote", principal_mode: "served", issuer: "https://issuer.invalid", subject: "remote", scopes: ["mutate"] } });
+  const remoteInit = await defaultServer.request({ jsonrpc: "2.0", id: 99, method: "tools/call", params: { name: "project_init", arguments: { project_id: "remote.default" } } });
+  assert.equal(remoteInit.result.structuredContent.error.code, "KDLC_POLICY_DENIED");
+  await defaultServer.close();
 });
 
 test("FEAT-006 governed packet, decision, and publication survive engine restart", async (t) => {
@@ -762,6 +795,19 @@ test("FEAT-006 governed packet, decision, and publication survive engine restart
   assert.equal((await bootstrap.envelope("project_init", { project_id: "governed.project" })).ok, true);
   const recording = JSON.parse(await readFile(resolve(repository, "tests/fixtures/models/ingest-recording.json"), "utf8"));
   const normalized_evidence = JSON.parse(await readFile(resolve(repository, "tests/fixtures/workflows/ingest-normalized.json"), "utf8"));
+  const untrustedContext = createLocalProjectEngine({ root });
+  await assert.rejects(() => untrustedContext.execute("proposal_create", { proposal: { workflow_id: "wf_ingest", task: "ingest", recording, normalized_evidence } }), (error) => error.code === "KDLC_DEPENDENCY_MISSING");
+  await untrustedContext.close();
+  const policyPath = resolve(root, ".kdlc/principal-policy.json");
+  const policy = JSON.parse(await readFile(policyPath, "utf8"));
+  policy.review_contexts.push({ workflow_id: "wf_ingest", context: {
+    evidence: normalized_evidence.units.map((unit) => ({ source_id: normalized_evidence.source_id, source_hash: normalized_evidence.source_hash, locator: unit.locator, excerpt: unit.text, authority: "trusted:test", access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "deterministic", warnings: [] })),
+    sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: artifactHash("sensor") }],
+    impact: { links: [], dependents: [], freshness_change: null, unresolved_conflicts: [] },
+    resolved: { profile: { id: "kdlc-base", version: "0.2.0", hash: artifactHash("profile") }, policies: [{ id: "team-policy", version: "1", hash: artifactHash("policy") }], dependencies: {} },
+    provenance: { models: [{ id: "fixture-model-1" }], tools: [{ id: "kdlc-harness/0.2.0" }] }, budget: { model_tokens: 0, model_cost_usd: 0 },
+  } });
+  await writeFile(policyPath, `${JSON.stringify(policy)}\n`, { mode: 0o600 });
   const first = createLocalProjectEngine({ root });
   const created = await first.execute("proposal_create", { proposal: { workflow_id: "wf_ingest", task: "ingest", recording, normalized_evidence } });
   const proposal = created.proposals[0];

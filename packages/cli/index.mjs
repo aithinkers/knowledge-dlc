@@ -23,6 +23,7 @@ import {
   parseYamlArtifact,
 } from "../contracts/index.mjs";
 import { FederationResolver } from "../federation/index.mjs";
+import { createExtensionValidator, previewMigration } from "../extensions/index.mjs";
 import { PrincipalAuthority, ReviewContextAuthority, RuntimeTrustAuthority } from "../agents/index.mjs";
 import { NodeFileStore } from "../lifecycle/src/index.mjs";
 import { normalize } from "../normalizers/index.mjs";
@@ -100,6 +101,10 @@ export const localOwnerActor = () => {
   const identity = userInfo();
   const stable = `${identity.username}-${identity.uid}`.replace(/[^A-Za-z0-9._-]/g, "-");
   return `human:${stable}`;
+};
+const localOwnerIdentity = () => {
+  const identity = userInfo();
+  return { principal_mode: "local", subject: `${identity.username}:${identity.uid}`, os_uid: identity.uid, os_username: identity.username };
 };
 
 export class EngineError extends Error {
@@ -358,6 +363,7 @@ export class KdlcEngine {
       ],
     };
     await this.store.ensureDir(".kdlc/governed");
+    await atomicJson(resolve(this.root, "knowledge/primary/retrieval-catalog.json"), { version: "kdlc-retrieval-catalog-1", concepts: [] });
     await atomicJson(path, project);
     await atomicJson(this.path("principal-policy.json"), {
       api_version: "kdlc.dev/local-principal-policy/v1",
@@ -366,6 +372,7 @@ export class KdlcEngine {
           id: localOwnerActor(),
           actor: localOwnerActor(),
           principal_mode: "local",
+          ...localOwnerIdentity(),
           review_roles: ["trust-reviewer"],
           scopes: ["read", "mutate", "review", "publish"],
           clearance: "public",
@@ -381,6 +388,8 @@ export class KdlcEngine {
       key_id: `project-${id}`,
       key_base64: randomBytes(32).toString("base64"),
     });
+    const projectManifest = parseYamlArtifact(await readFile(resolve(this.root, "knowledge-project.yaml"), "utf8"));
+    await new FederationResolver({ projectRoot: this.root }).resolveProject(projectManifest);
     return { ...project, files };
   }
   async startJob(operation, input) {
@@ -739,7 +748,15 @@ export function parseCli(argv) {
     if (!input.question)
       throw inputError("query requires a non-empty question");
   }
-  if (operation === "trace") input.concept = positionals[0];
+  if (operation === "trace") input.uri = positionals[0];
+  if (operation === "review") {
+    [input.proposal_id, input.decision, input.receipt_id] = positionals;
+  }
+  if (operation === "publish") {
+    [input.proposal_id, input.receipt_id] = positionals;
+    if (positionals[2]) input.current = JSON.parse(positionals[2]);
+  }
+  if (["reconcile-edits", "migrate"].includes(operation) && positionals[0]) Object.assign(input, JSON.parse(positionals[0]));
   return { operation, input, output };
 }
 export function renderEnvelope(envelope, output = "text") {
@@ -753,6 +770,7 @@ export function createLocalProjectEngine(options = {}) {
   const root = resolve(options.root ?? process.cwd());
   const requestedPrincipal = options.principal ?? {
     actor: localOwnerActor(),
+    ...localOwnerIdentity(),
     scopes: [],
   };
   let policy = null,
@@ -763,9 +781,15 @@ export function createLocalProjectEngine(options = {}) {
     const record =
       candidate?.api_version === "kdlc.dev/local-principal-policy/v1" &&
       Array.isArray(candidate.principals)
-        ? candidate.principals.find(
-            ({ actor }) => actor === requestedPrincipal.actor,
-          )
+        ? candidate.principals.find((record) => {
+            const requestedMode = requestedPrincipal.principal_mode ?? (requestedPrincipal.actor === localOwnerActor() ? "local" : null);
+            if (record.actor !== requestedPrincipal.actor || record.principal_mode !== requestedMode) return false;
+            if (requestedMode === "local") {
+              const local = localOwnerIdentity();
+              return record.subject === local.subject && record.os_uid === local.os_uid && record.os_username === local.os_username;
+            }
+            return requestedMode === "served" && record.issuer === requestedPrincipal.issuer && record.subject === requestedPrincipal.subject;
+          })
         : null;
     if (
       record &&
@@ -780,8 +804,12 @@ export function createLocalProjectEngine(options = {}) {
       ["warn", "exclude", "fail"].includes(candidate.stale_behavior)
     ) {
       principal = {
-        ...requestedPrincipal,
         id: record.id ?? record.actor,
+        actor: record.actor,
+        principal_mode: record.principal_mode,
+        subject: record.subject,
+        ...(record.issuer ? { issuer: record.issuer } : {}),
+        ...(record.principal_mode === "local" ? { os_uid: record.os_uid, os_username: record.os_username } : {}),
         scopes: [...record.scopes],
         clearance: record.clearance,
         compartments: [...record.compartments],
@@ -937,18 +965,6 @@ export function createLocalProjectEngine(options = {}) {
         proposal_create: async ({ proposal }) => {
           const workflowId = proposal?.workflow_id;
           if (!portable(workflowId) || !["ingest", "adopt"].includes(proposal?.task)) throw inputError("proposal requires a portable workflow_id and recorded ingest/adopt task");
-          if (!policy.review_contexts.some((record) => record.workflow_id === workflowId) && !await indexStore.exists(contextPath(workflowId))) {
-            const normalized = proposal.normalized_evidence;
-            const context = {
-              evidence: (normalized?.units ?? []).map((unit) => ({ source_id: normalized.source_id, source_hash: normalized.source_hash, locator: unit.locator, excerpt: unit.text, authority: principal.actor, access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "deterministic", warnings: [] })),
-              sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: digest({ workflowId, normalized }) }],
-              impact: { links: [], dependents: [], freshness_change: null, unresolved_conflicts: [] },
-              resolved: { profile: { id: "kdlc-base", version: "0.2.0", hash: digest("kdlc-base/0.2.0") }, policies: [{ id: "team-policy", version: "1", hash: digest("local-owner-policy") }], dependencies: {} },
-              provenance: { models: [{ id: proposal.recording?.model?.model ?? "recorded" }], tools: [{ id: "kdlc-harness/0.2.0" }] },
-              budget: { model_tokens: 0, model_cost_usd: 0 },
-            };
-            await indexStore.writeJsonAtomic(contextPath(workflowId), { workflow_id: workflowId, context });
-          }
           const runtime = await harness(workflowId);
           const output = await runtime.runRecorded({ task: proposal.task, workflowId, recording: proposal.recording, normalizedEvidence: proposal.normalized_evidence });
           const assembled = [];
@@ -985,6 +1001,14 @@ export function createLocalProjectEngine(options = {}) {
           trustAuthority.activateReview({ workflowId: index.workflow_id, receipt, decision });
           return runtime.preparePublication({ workflowId: index.workflow_id, proposalId, receiptId, current });
         },
+        reconcile_edits: async ({ proposal_id: proposalId, reviewed_proposal_id: reviewedProposalId, target, reviewed_concept: reviewedConcept, current_concept: currentConcept, receipt_id: receiptId }) => {
+          const index = await proposalIndex(reviewedProposalId);
+          const runtime = await harness(index.workflow_id, true);
+          const receipt = await store.get(`workflow/runs/${index.workflow_id}/receipts/${receiptId}.json`);
+          const decision = await store.get(`workflow/runs/${index.workflow_id}/reviews/${reviewedProposalId}/decision.json`);
+          trustAuthority.activateReview({ workflowId: index.workflow_id, receipt, decision });
+          return runtime.reconcileEdit({ workflowId: index.workflow_id, proposalId, reviewedProposalId, target, reviewedConcept, currentConcept, receiptId });
+        },
       };
     }
   }
@@ -995,6 +1019,10 @@ export function createLocalProjectEngine(options = {}) {
         kb_fetch: fetchConcept,
         source_excerpt: sourceExcerpt,
         ...governed,
+        ...(governed.review_submit ? { review: governed.review_submit } : {}),
+        ...(governed.publish_request ? { publish: governed.publish_request } : {}),
+        ...(governed.reconcile_edits ? { "reconcile-edits": governed.reconcile_edits, reconcile_edits: governed.reconcile_edits } : {}),
+        migrate: async ({ migration, files }) => previewMigration({ migration, files, validator: await createExtensionValidator() }),
         trace: fetchConcept,
         kb_trace: fetchConcept,
         ingest,
@@ -1050,10 +1078,16 @@ export function createLocalProjectEngine(options = {}) {
         },
       }
     : {};
-  return new KdlcEngine({
+  const engine = new KdlcEngine({
     ...options,
     root,
     principal,
     handlers: { ...handlers, ...(options.handlers ?? {}) },
   });
+  const closeEngine = engine.close.bind(engine);
+  engine.close = async () => {
+    if (retrievalSnapshot) await retrievalSnapshot;
+    await closeEngine();
+  };
+  return engine;
 }
