@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -73,6 +73,8 @@ test("REQ-RELEASE-001 admin settings attestation rejects forgery, staleness, wro
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(record), { ...options, now: "2026-08-16T00:00:00.001Z" }).status, "stale");
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(record), { ...options, repository: "attacker/fork" }).status, "invalid");
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify({ ...record, manual_cross_check: { ...record.manual_cross_check, method: "caller-claim" } }), options).status, "invalid");
+  const hostileOrigin = structuredClone(record); hostileOrigin.capture.api_origin = "https://github.enterprise.invalid/api/v3";
+  assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(hostileOrigin), options).status, "invalid");
   const beforeCapture = attest({ repository: options.repository, capturedAt: "2026-08-15T00:05:00Z", confirmedAt: "2026-08-15T00:00:00Z", settings });
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(beforeCapture), options).status, "invalid");
   const futureConfirmation = attest({ repository: options.repository, confirmedAt: "2026-08-15T13:00:00Z", settings });
@@ -90,6 +92,12 @@ test("REQ-RELEASE-001 admin settings attestation rejects forgery, staleness, wro
   assert.equal(evaluateAdminSettingsAttestation(JSON.stringify(weakened), options).status, "weakened");
   assert.equal(evaluateAdminSettingsAttestation("", options).status, "unavailable");
   assert.equal(evaluateAdminSettingsAttestation("{", options).status, "invalid");
+});
+
+test("REQ-RELEASE-001 hostile GH_HOST cannot redirect owner capture or confirmation authority", async () => {
+  const utility = await readFile(resolve(root, "scripts/create-admin-settings-attestation.mjs"), "utf8");
+  assert.equal((utility.match(/\["api", "--hostname", "github\.com"/gu) ?? []).length, 2);
+  assert.doesNotMatch(utility, /process\.env\.GH_HOST/u);
 });
 
 test("REL-001 live ruleset derivation respects exact ref exclusions and composes split effective rules", () => {

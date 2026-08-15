@@ -12,7 +12,7 @@ const expectedSettings = (value) => value && !Array.isArray(value)
   && JSON.stringify(Object.keys(value).sort()) === JSON.stringify(["can_approve_pull_request_reviews", "default_workflow_permissions"].sort())
   && ["read", "write"].includes(value.default_workflow_permissions) && typeof value.can_approve_pull_request_reviews === "boolean";
 const writeExclusive = async (path, value) => { const handle = await open(resolve(path), "wx", 0o600); try { await handle.writeFile(`${JSON.stringify(value)}\n`); } finally { await handle.close(); } };
-const ghActor = async () => (await execute("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8", maxBuffer: 1024 * 1024 })).stdout.trim();
+const ghActor = async () => (await execute("gh", ["api", "--hostname", "github.com", "user", "--jq", ".login"], { encoding: "utf8", maxBuffer: 1024 * 1024 })).stdout.trim();
 
 if (process.env.GITHUB_ACTIONS === "true") throw new Error("admin settings capture and confirmation are prohibited in GitHub Actions");
 const [command, repositoryFlag, repository, outputFlag, output, confirmationFlag] = process.argv.slice(2);
@@ -21,7 +21,7 @@ if (!repositoryPattern.test(repository ?? "") || repositoryFlag !== "--repositor
 }
 const actor = await ghActor();
 if (command === "capture" && confirmationFlag === undefined) {
-  const { stdout } = await execute("gh", ["api", `repos/${repository}/actions/permissions/workflow`], { encoding: "buffer", maxBuffer: 1024 * 1024 });
+  const { stdout } = await execute("gh", ["api", "--hostname", "github.com", `repos/${repository}/actions/permissions/workflow`], { encoding: "buffer", maxBuffer: 1024 * 1024 });
   const bytes = Buffer.from(stdout); const settings = JSON.parse(bytes.toString("utf8"));
   if (!expectedSettings(settings)) throw new Error("live admin API response has an unexpected shape");
   await writeExclusive(output, createAdminSettingsCapture({ repository, capturedAt: new Date().toISOString(), actor, responseBytes: bytes }));

@@ -46,6 +46,7 @@ const ADMIN_ATTESTATION_VERSION = "kdlc.dev/admin-settings-attestation/v1alpha1"
 const ADMIN_CAPTURE_VERSION = "kdlc.dev/admin-settings-capture/v1alpha1";
 const ADMIN_CAPTURE_METHOD = "owner-live-admin-api-and-manual-ui";
 const ADMIN_API_METHOD = "authenticated-gh-admin-api";
+const ADMIN_API_ORIGIN = "https://api.github.com";
 const ADMIN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const ADMIN_MAX_CONFIRM_DELAY_MS = 60 * 60 * 1000;
 const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
@@ -56,7 +57,7 @@ export function createAdminSettingsCapture({ repository, capturedAt, actor, resp
   const bytes = Buffer.isBuffer(responseBytes) ? responseBytes : Buffer.from(responseBytes);
   const settings = JSON.parse(bytes.toString("utf8"));
   const payload = { api_version: ADMIN_CAPTURE_VERSION, repository, captured_at: capturedAt, actor,
-    capture: { method: ADMIN_API_METHOD, endpoint, response_sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}` },
+    capture: { method: ADMIN_API_METHOD, api_origin: ADMIN_API_ORIGIN, endpoint, response_sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}` },
     response_base64: bytes.toString("base64"), settings: structuredClone(settings) };
   return Object.freeze({ ...payload, canonical_sha256: digest(payload) });
 }
@@ -67,6 +68,7 @@ export function issueAdminSettingsAttestation({ capture, confirmedAt, actor }) {
     actor: capture.actor, capture: capture.capture, response_base64: capture.response_base64, settings: capture.settings };
   if (!exactKeys(capture, [...Object.keys(capturePayload), "canonical_sha256"]) || capture.api_version !== ADMIN_CAPTURE_VERSION
     || capture.canonical_sha256 !== digest(capturePayload) || capture.capture?.method !== ADMIN_API_METHOD
+    || capture.capture?.api_origin !== ADMIN_API_ORIGIN
     || capture.capture?.endpoint !== `/repos/${capture.repository}/actions/permissions/workflow`
     || capture.capture?.response_sha256 !== `sha256:${createHash("sha256").update(bytes).digest("hex")}`
     || JSON.stringify(JSON.parse(bytes.toString("utf8"))) !== JSON.stringify(capture.settings) || actor !== capture.actor) throw new Error("invalid or unauthorized admin settings capture");
@@ -83,14 +85,15 @@ export function evaluateAdminSettingsAttestation(serialized, { repository, now =
   const validShape = exactKeys(value, ["api_version", "repository", "captured_at", "capture", "settings", "manual_cross_check", "canonical_sha256"])
     && exactKeys(settings, ["default_workflow_permissions", "can_approve_pull_request_reviews"])
     && exactKeys(manual, ["confirmed", "confirmed_at", "method", "actor"])
-    && exactKeys(value?.capture, ["method", "endpoint", "response_sha256", "record_sha256", "actor"]);
+    && exactKeys(value?.capture, ["method", "api_origin", "endpoint", "response_sha256", "record_sha256", "actor"]);
   const payload = validShape ? { api_version: value.api_version, repository: value.repository, captured_at: value.captured_at,
     capture: value.capture, settings: value.settings, manual_cross_check: value.manual_cross_check } : null;
   const captured = Date.parse(value?.captured_at), confirmed = Date.parse(manual?.confirmed_at), current = Date.parse(now);
   const authentic = validShape && value.api_version === ADMIN_ATTESTATION_VERSION && value.repository === repository
     && isRfc3339Instant(value.captured_at) && isRfc3339Instant(manual.confirmed_at) && isRfc3339Instant(now)
     && manual.confirmed === true && manual.method === ADMIN_CAPTURE_METHOD && typeof manual.actor === "string" && manual.actor.length > 0
-    && value.capture.method === ADMIN_API_METHOD && value.capture.endpoint === `/repos/${repository}/actions/permissions/workflow`
+    && value.capture.method === ADMIN_API_METHOD && value.capture.api_origin === ADMIN_API_ORIGIN
+    && value.capture.endpoint === `/repos/${repository}/actions/permissions/workflow`
     && /^sha256:[0-9a-f]{64}$/u.test(value.capture.response_sha256) && /^sha256:[0-9a-f]{64}$/u.test(value.capture.record_sha256)
     && value.capture.actor === manual.actor
     && Number.isFinite(captured) && Number.isFinite(confirmed) && Number.isFinite(current)

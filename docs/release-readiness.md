@@ -114,7 +114,8 @@ API; it accepts no cached input and cannot run in Actions. It produces only a
 pending record and never asserts a manual confirmation. The separate confirm
 command re-authenticates the same owner, verifies the pending byte and canonical
 hashes, and records a later confirmation time. The attestation binds the
-repository, exact settings, API endpoint, response hash, capture and manual-check
+repository, exact settings, `https://api.github.com` origin, API endpoint,
+response hash, capture and manual-check
 times, actor, capture method, and canonical hash. Missing or stale evidence does
 not make an ordinary private prerelease PR inoperable, but a release candidate
 fails closed unless the record is authentic, policy-preserving, manually
