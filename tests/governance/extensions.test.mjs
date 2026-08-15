@@ -182,4 +182,26 @@ test("FEAT-007 migrations are previewable, semantic, immutable, and exact-confir
     { reason: "approved compatibility rollback", expiresAt: "2027-01-01T00:00:00.000Z" });
   expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver: { ...waiver }, now: "2026-08-14T00:00:00.000Z" }));
   assert.equal(applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver, now: "2026-08-14T00:00:00.000Z" }).report.security_weakening, true);
+
+  const beforeConfiguration = { minimum_trust: "human-reviewed", approval_gates: ["human-review", "policy-review"],
+    sensor: { blocking: true, severity: "error" }, security: { network: [], subprocess: false, credentials: [] } };
+  const afterConfiguration = { minimum_trust: "unverified", approval_gates: ["human-review"],
+    sensor: { blocking: false, severity: "warning" }, security: { network: ["https://outside.invalid"], subprocess: true, credentials: ["TOKEN"] } };
+  const nested = structuredClone(migration); nested.id = "acme-quality-nested-weaken"; nested.operations = [{ kind: "merge-json", path: "settings/nested.json", pointer: "/configuration",
+    before: beforeConfiguration, after: afterConfiguration, semantic_effect: { category: "none", description: "Incorrectly claims no effect." } }];
+  const nestedPreview = previewMigration({ migration: nested, files: { "settings/nested.json": JSON.stringify({ configuration: beforeConfiguration }) }, validator });
+  const changes = nestedPreview.semantic_effects[0].policy_changes;
+  assert.equal(nestedPreview.security_weakening, true);
+  assert.deepEqual(new Set(changes.filter(({ security_weakening }) => security_weakening).map(({ rule }) => rule)),
+    new Set(["minimum-trust", "mandatory-gates", "blocking", "sensor-severity", "permission-boundary"]));
+  assert.ok(changes.some(({ path }) => path === "/configuration/security/credentials"));
+  expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(nestedPreview, { confirmedPreviewHash: nestedPreview.preview_hash }));
+
+  const beforeProfiles = [{ metadata: { id: "regulated" }, security: { minimum_trust: "human-reviewed", approval_gates: ["human-review"] } }];
+  const afterProfiles = [{ metadata: { id: "regulated" }, security: { minimum_trust: "unverified", approval_gates: [] } }];
+  const parentArray = structuredClone(migration); parentArray.id = "acme-quality-parent-array"; parentArray.operations = [{ kind: "replace-json", path: "settings/profiles.json", pointer: "/profiles",
+    before: beforeProfiles, after: afterProfiles, semantic_effect: { category: "content", description: "Claims ordinary content." } }];
+  const arrayPreview = previewMigration({ migration: parentArray, files: { "settings/profiles.json": JSON.stringify({ profiles: beforeProfiles }) }, validator });
+  assert.equal(arrayPreview.security_weakening, true);
+  assert.ok(arrayPreview.semantic_effects[0].policy_changes.some(({ path }) => path === "/profiles/@regulated/security/minimum_trust"));
 });

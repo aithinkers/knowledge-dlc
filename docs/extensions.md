@@ -38,8 +38,9 @@ governed sensor runtime remain the execution boundary.
 
 Migrations are declarative. `previewMigration` operates on an explicit in-memory
 snapshot and returns changed-path hashes plus human-readable semantic effects.
-Those effects and downgrade flags are derived from the actual structured diff;
-the descriptor's self-reported category is not trusted. Applying a
+Those effects and downgrade flags are derived recursively from the actual
+structured diff, including parent-object replacements, deep merges, and keyed
+arrays; the descriptor's self-reported category is not trusted. Applying a
 security-weakening preview requires a separate live waiver from an authenticated
 governance reviewer.
 `applyMigrationPreview` accepts only the original issued preview object and its

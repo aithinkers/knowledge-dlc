@@ -8,28 +8,81 @@ function clone(value) { return JSON.parse(canonicalJson(value)); }
 function pointerParts(pointer) { return pointer.slice(1).split("/").map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~")); }
 const trustOrder = Object.freeze({ unverified: 0, "machine-confirmed": 1, "human-reviewed": 2 });
 const severityOrder = Object.freeze({ info: 0, warning: 1, error: 2 });
-function removedValues(before, after) { return Array.isArray(before) && Array.isArray(after) && before.some((value) => !after.includes(value)); }
+function equal(left, right) { return canonicalJson(left) === canonicalJson(right); }
+function object(value) { return value !== null && typeof value === "object" && !Array.isArray(value); }
+function deepMerge(base, patch) {
+  const result = clone(base);
+  for (const [key, value] of Object.entries(patch)) result[key] = object(value) && object(result[key]) ? deepMerge(result[key], value) : clone(value);
+  return result;
+}
+function includesAll(after, before) { return Array.isArray(after) && Array.isArray(before) && before.every((value) => after.some((candidate) => equal(candidate, value))); }
+function finding(path, rule, category, weakening) { return { path: `/${path.join("/")}`, rule, category, security_weakening: weakening }; }
+function arrayIdentity(value) { return object(value) ? value.id ?? value.name ?? value.metadata?.id : undefined; }
+function atomicArrayPath(path) {
+  const semanticPath = `/${path.join("/")}`.toLowerCase();
+  return ["gate", "approval", "network", "credential", "filesystem", "access", "rights", "permission"].some((term) => semanticPath.includes(term));
+}
+function evaluateLeaf(before, after, path) {
+  const key = String(path.at(-1) ?? "").toLowerCase(); const semanticPath = `/${path.join("/")}`.toLowerCase();
+  if (key.includes("trust")) {
+    const safe = after !== undefined && trustOrder[after] !== undefined && (before === undefined || (trustOrder[before] !== undefined && trustOrder[after] >= trustOrder[before]));
+    return finding(path, "minimum-trust", "trust", !safe);
+  }
+  if (key.includes("approval") || key.includes("mandatory_gate") || key === "gates" || key.endsWith("_gates")) {
+    const safe = after !== undefined && (before === undefined ? Array.isArray(after) : includesAll(after, before));
+    return finding(path, "mandatory-gates", "validation", !safe);
+  }
+  if (key === "blocking" || key === "deterministic") return finding(path, key, "validation", after !== true);
+  if (key === "severity") {
+    const safe = after !== undefined && severityOrder[after] !== undefined && (before === undefined ? after === "error" : severityOrder[before] !== undefined && severityOrder[after] >= severityOrder[before]);
+    return finding(path, "sensor-severity", "validation", !safe);
+  }
+  const permissionPath = ["network", "execute", "macro", "subprocess", "credential", "permission", "security", "filesystem", "access", "rights", "resource", "memory", "cpu", "output", "budget", "limit"].some((term) => semanticPath.includes(term));
+  if (permissionPath) {
+    let safe = false;
+    if (after === false) safe = true;
+    else if (typeof before === "boolean" && typeof after === "boolean") safe = before === after || (before && !after);
+    else if (Array.isArray(after)) safe = before === undefined ? after.length === 0 : Array.isArray(before) && includesAll(before, after);
+    else if (typeof before === "number" && typeof after === "number") safe = after <= before;
+    return finding(path, "permission-boundary", "permission", !safe);
+  }
+  if (["fresh", "stale", "retention", "policy", "waiver"].some((term) => semanticPath.includes(term))) {
+    const timestamps = typeof before === "string" && typeof after === "string" && Number.isFinite(Date.parse(before)) && Number.isFinite(Date.parse(after));
+    const safe = before === undefined ? after !== undefined : timestamps && Date.parse(after) <= Date.parse(before);
+    return finding(path, "policy-boundary", "trust", !safe);
+  }
+  if (["configuration", "profile", "scope", "sensor", "normalizer", "template"].some((term) => semanticPath.split("/").some((part) => part.includes(term)))) {
+    return finding(path, "unclassified-policy-surface", "validation", true);
+  }
+  return finding(path, "content", "content", false);
+}
+function recursivePolicyDiff(before, after, path) {
+  if (before !== undefined && after !== undefined && equal(before, after)) return [];
+  if (object(before) || object(after)) {
+    const keys = [...new Set([...Object.keys(object(before) ? before : {}), ...Object.keys(object(after) ? after : {})])].sort();
+    if (keys.length) return keys.flatMap((key) => recursivePolicyDiff(object(before) ? before[key] : undefined, object(after) ? after[key] : undefined, [...path, key]));
+  }
+  if ((Array.isArray(before) || Array.isArray(after)) && !atomicArrayPath(path)) {
+    const left = Array.isArray(before) ? before : []; const right = Array.isArray(after) ? after : [];
+    const leftIds = left.map(arrayIdentity); const rightIds = right.map(arrayIdentity); const keyed = [...leftIds, ...rightIds].every((id) => typeof id === "string")
+      && new Set(leftIds).size === leftIds.length && new Set(rightIds).size === rightIds.length;
+    if (keyed) {
+      const leftMap = new Map(left.map((value) => [arrayIdentity(value), value])); const rightMap = new Map(right.map((value) => [arrayIdentity(value), value]));
+      return [...new Set([...leftMap.keys(), ...rightMap.keys()])].sort().flatMap((id) => recursivePolicyDiff(leftMap.get(id), rightMap.get(id), [...path, `@${id}`]));
+    }
+    if ([...left, ...right].some(object)) return Array.from({ length: Math.max(left.length, right.length) }, (_, index) => recursivePolicyDiff(left[index], right[index], [...path, String(index)])).flat();
+  }
+  return [evaluateLeaf(before, after, path)];
+}
 function derivedEffect(operation) {
   if (operation.kind === "rename") return { operation: "rename", category: "routing", description: `Renames ${operation.from} to ${operation.to}.`, security_weakening: false,
     before_hash: artifactHash(operation.from), after_hash: artifactHash(operation.to) };
-  const key = pointerParts(operation.pointer).at(-1).toLowerCase(); const semanticPath = operation.pointer.toLowerCase(); let category = "content"; let security_weakening = false;
-  if (key.includes("trust")) { category = "trust"; security_weakening = trustOrder[operation.after] === undefined || trustOrder[operation.before] === undefined || trustOrder[operation.after] < trustOrder[operation.before]; }
-  else if (key.includes("approval") || key.includes("gate")) { category = "validation"; security_weakening = !Array.isArray(operation.before) || !Array.isArray(operation.after) || removedValues(operation.before, operation.after); }
-  else if (key === "blocking" || key === "deterministic") { category = "validation"; security_weakening = operation.before === true && operation.after !== true; }
-  else if (key === "severity") { category = "validation"; security_weakening = severityOrder[operation.after] === undefined || severityOrder[operation.before] === undefined || severityOrder[operation.after] < severityOrder[operation.before]; }
-  else if (["network", "execute", "macro", "subprocess", "credential", "permission", "security", "filesystem", "access", "rights", "resource", "memory", "cpu", "output", "budget", "limit"].some((term) => semanticPath.includes(term))) {
-    category = "permission";
-    if (operation.before === false) security_weakening = operation.after !== false;
-    else if (operation.before === true) security_weakening = ![true, false].includes(operation.after);
-    else if (Array.isArray(operation.before)) security_weakening = !Array.isArray(operation.after) || removedValues(operation.after, operation.before);
-    else if (typeof operation.before === "number" && typeof operation.after === "number") security_weakening = operation.after > operation.before;
-    else security_weakening = canonicalJson(operation.before) !== canonicalJson(operation.after);
-  } else if (["fresh", "stale", "retention", "policy", "waiver"].some((term) => semanticPath.includes(term))) {
-    category = "trust";
-    if (typeof operation.before === "string" && typeof operation.after === "string" && Number.isFinite(Date.parse(operation.before)) && Number.isFinite(Date.parse(operation.after))) security_weakening = Date.parse(operation.after) > Date.parse(operation.before);
-    else security_weakening = canonicalJson(operation.before) !== canonicalJson(operation.after);
-  } else if (key.includes("route") || key.includes("target") || key.includes("mount")) category = "routing";
-  return { operation: "replace-json", category, description: `Changes ${operation.path}${operation.pointer}.`, security_weakening,
+  const policy_changes = recursivePolicyDiff(operation.before, operation.after, pointerParts(operation.pointer));
+  const category = policy_changes.find(({ category: value }) => value === "permission")?.category
+    ?? policy_changes.find(({ category: value }) => value === "trust")?.category
+    ?? policy_changes.find(({ category: value }) => value === "validation")?.category ?? "content";
+  return { operation: operation.kind, category, description: `Changes ${operation.path}${operation.pointer}.`,
+    security_weakening: policy_changes.some((change) => change.security_weakening), policy_changes,
     before_hash: artifactHash(operation.before), after_hash: artifactHash(operation.after) };
 }
 function replaceAtPointer(document, pointer, before, after) {
@@ -51,14 +104,16 @@ export function previewMigration({ migration, files, validator }) {
   const output = new Map(Object.entries(files).map(([path, value]) => [path, typeof value === "string" ? value : canonicalJson(value)]));
   const before = new Map(output); const effects = [];
   for (const operation of migration.operations) {
-    effects.push(derivedEffect(operation));
     if (operation.kind === "rename") {
+      effects.push(derivedEffect(operation));
       if (!output.has(operation.from) || output.has(operation.to)) extensionFail("KDLC_MIGRATION_PRECONDITION", "Migration rename source or destination drifted");
       const value = output.get(operation.from); output.delete(operation.from); output.set(operation.to, value);
     } else {
       if (!output.has(operation.path)) extensionFail("KDLC_MIGRATION_PRECONDITION", `Migration file is missing: ${operation.path}`);
       let document; try { document = JSON.parse(output.get(operation.path)); } catch { extensionFail("KDLC_MIGRATION_INPUT_INVALID", `Migration JSON file is malformed: ${operation.path}`); }
-      replaceAtPointer(document, operation.pointer, operation.before, operation.after); output.set(operation.path, canonicalJson(document));
+      const after = operation.kind === "merge-json" ? deepMerge(operation.before, operation.after) : operation.after;
+      effects.push(derivedEffect({ ...operation, after }));
+      replaceAtPointer(document, operation.pointer, operation.before, after); output.set(operation.path, canonicalJson(document));
     }
   }
   const paths = [...new Set([...before.keys(), ...output.keys()])].sort();
