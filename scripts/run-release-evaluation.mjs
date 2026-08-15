@@ -41,7 +41,10 @@ for (const recorded of run.results) {
     if (pass !== releaseCase.executable_evidence.test_ids.length || skipped !== 0) throw new Error("zero, missing, or unrelated applicable tests");
   } catch (error) {
     status = "failed";
-    const detail = String(error?.stderr ?? error?.message ?? error).trim().split(/\r?\n/u).slice(-8).join(" | ");
+    const output = [error?.stdout, error?.stderr, error?.message].filter(Boolean).map(String).join("\n");
+    const lines = output.trim().split(/\r?\n/u);
+    const diagnostic = lines.filter((line) => /(?:not ok|error|failure|denied|permission)/iu.test(line)).slice(-12);
+    const detail = [...diagnostic, ...lines.slice(-8)].join(" | ");
     failures.push(`${recorded.case_id}: offline execution failed (${detail || "no diagnostic"})`);
   }
   try {
