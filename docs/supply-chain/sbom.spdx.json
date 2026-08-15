@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "knowledge-dlc-0.0.0-private",
-  "documentNamespace": "https://github.com/aithinkers/knowledge-dlc/sbom/c78303ec1bbe69daf3867d2901f345514cf8e2785b18c4a8e8bec71d4e7903a7",
+  "documentNamespace": "https://github.com/aithinkers/knowledge-dlc/sbom/39c5ddf336cf0a0b454068fcbf7e9befa1a584184469b08b553681d5d0091938",
   "creationInfo": {
     "created": "1970-01-01T00:00:00Z",
     "creators": [
@@ -25,17 +25,17 @@
       "copyrightText": "Copyright (c) 2026 AIThinkers"
     },
     {
-      "SPDXID": "SPDXRef-Package-a6b193ff0df9277b6807",
+      "SPDXID": "SPDXRef-Package-c7901d4af178944446ba",
       "name": "acorn",
-      "versionInfo": "8.15.0",
-      "downloadLocation": "https://registry.npmjs.org/acorn/-/acorn-8.15.0.tgz",
+      "versionInfo": "8.18.0",
+      "downloadLocation": "https://registry.npmjs.org/acorn/-/acorn-8.18.0.tgz",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "MIT",
       "checksums": [
         {
           "algorithm": "SHA512",
-          "checksumValue": "359c896ab05f2fb9d6c08abe1432fa669ff21c485e3cc3679c9d32dea7e2782ae636f61cb7cbafb62578d54be549ee9aa407e4d1f63515b5b1f8dc1f9a9bed4e"
+          "checksumValue": "946abef72af5fc6b8059a558207463befc921b9ff855f288bc2f045b14ad3dd70387f29aec51b7b703fabf8779064adabd48a584802c1b8423f37b74d8b5943d"
         }
       ],
       "primaryPackagePurpose": "LIBRARY",
@@ -44,12 +44,12 @@
         {
           "referenceCategory": "OTHER",
           "referenceType": "kdlc:installed-manifest-sha256",
-          "referenceLocator": "sha256:9e422c8225c9cc4c774e9a9392d0ecac7f766b46122ef2db99db0fc4bbedc247"
+          "referenceLocator": "sha256:5c1ed7259579a7899b303f514b0194adcb9fe474fc7d136a84c6a45f10eefc84"
         },
         {
           "referenceCategory": "OTHER",
           "referenceType": "kdlc:installed-tree-sha256",
-          "referenceLocator": "sha256:3173ae18cf080076d1348626dbb005661101e2d1b8c0667f8abf865f06210ee0"
+          "referenceLocator": "sha256:53f8832f4ab27c0bf40e47c7cd3e9101c5424ebe67cd9e91c78377eaab4318ce"
         },
         {
           "referenceCategory": "OTHER",
@@ -501,17 +501,17 @@
       ]
     },
     {
-      "SPDXID": "SPDXRef-Package-9820574a08f66349702b",
+      "SPDXID": "SPDXRef-Package-82a86616e50ded792532",
       "name": "semver",
-      "versionInfo": "7.7.2",
-      "downloadLocation": "https://registry.npmjs.org/semver/-/semver-7.7.2.tgz",
+      "versionInfo": "7.8.5",
+      "downloadLocation": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "ISC",
       "checksums": [
         {
           "algorithm": "SHA512",
-          "checksumValue": "445d05c3eacee4031ff4c0326915c8e005745258f994c1ea571c5d4a08956e2c52097a049a65ff8e4d02b89c38fb74aaae860ef55a1487e1dcb898afbed25e98"
+          "checksumValue": "63bfca0ec6fc2e3a28669c1aa86cae94ee8342592c8029dc7211c693eb19218e1206f52870c044147e54af57c8e1d57e26f974c3a723bee71a222e34a6e462a0"
         }
       ],
       "primaryPackagePurpose": "LIBRARY",
@@ -520,12 +520,12 @@
         {
           "referenceCategory": "OTHER",
           "referenceType": "kdlc:installed-manifest-sha256",
-          "referenceLocator": "sha256:bf2e091359d5870257cc8287a268e001bfb39abf19275f382276efe3c7785a4f"
+          "referenceLocator": "sha256:7c94cb7f2a53c27b20d76386ec144c062894dbcc909cfabd0f728c37874b1776"
         },
         {
           "referenceCategory": "OTHER",
           "referenceType": "kdlc:installed-tree-sha256",
-          "referenceLocator": "sha256:aa9c0894b635f1fb5da642b1871976becb3c67d08f09b736829b675efce12e21"
+          "referenceLocator": "sha256:d41db7e69f43c2f3b8ef277354787bd6adea6128b38d4741a9343ef4ecedadb5"
         },
         {
           "referenceCategory": "OTHER",
@@ -607,7 +607,7 @@
     {
       "spdxElementId": "SPDXRef-Root",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-a6b193ff0df9277b6807"
+      "relatedSpdxElement": "SPDXRef-Package-c7901d4af178944446ba"
     },
     {
       "spdxElementId": "SPDXRef-Root",
@@ -647,7 +647,7 @@
     {
       "spdxElementId": "SPDXRef-Root",
       "relationshipType": "DEPENDS_ON",
-      "relatedSpdxElement": "SPDXRef-Package-9820574a08f66349702b"
+      "relatedSpdxElement": "SPDXRef-Package-82a86616e50ded792532"
     },
     {
       "spdxElementId": "SPDXRef-Root",

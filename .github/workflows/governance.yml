@@ -19,7 +19,7 @@ jobs:
       statuses: write
     steps:
       - name: Check out trusted validator
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'push' && github.sha || github.event.pull_request.base.sha }}
           path: trusted
@@ -30,7 +30,7 @@ jobs:
       - run: npm ci --ignore-scripts --prefix trusted
       - name: Check out candidate as untrusted data
         if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate
@@ -70,7 +70,7 @@ jobs:
       statuses: write
     steps:
       - name: Check out trusted validator
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: trusted
@@ -80,7 +80,7 @@ jobs:
           node-version: 22
       - run: npm ci --ignore-scripts --prefix trusted
       - name: Check out candidate as untrusted data
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0

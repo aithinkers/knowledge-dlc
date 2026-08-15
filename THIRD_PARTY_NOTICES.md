@@ -2,11 +2,11 @@
 
 This inventory is generated after a clean integrity-checked `npm ci --ignore-scripts` from the required installed dependency graph. Platform-specific optional packages are excluded from this portable SBOM and remain pinned and audited through `package-lock.json`. K-DLC is licensed under MIT; dependencies remain under their respective licenses. Installed tree, manifest, and license-file hashes bind the listed evidence to the verified bytes. Where a package ships no license or notice file, the declared license is explicitly sourced from its installed `package.json` metadata.
 
-Inventory hash: `sha256:bdb38b151644e33c01fd49dd9516a13ef727440bf866d9f3b15e9c320ebab406`
+Inventory hash: `sha256:c5f6f75b5c6817e3483738e99fffd196017c6a6930ae5d423af29d35024cf185`
 
 | Package | Version | Scope | License | Installed tree | Installed manifest | Locked source |
 | --- | --- | --- | --- | --- | --- | --- |
-| `acorn` | `8.15.0` | `runtime` | `MIT` | `sha256:3173ae18cf080076d1348626dbb005661101e2d1b8c0667f8abf865f06210ee0` | `sha256:9e422c8225c9cc4c774e9a9392d0ecac7f766b46122ef2db99db0fc4bbedc247` | [npm tarball](https://registry.npmjs.org/acorn/-/acorn-8.15.0.tgz) |
+| `acorn` | `8.18.0` | `runtime` | `MIT` | `sha256:53f8832f4ab27c0bf40e47c7cd3e9101c5424ebe67cd9e91c78377eaab4318ce` | `sha256:5c1ed7259579a7899b303f514b0194adcb9fe474fc7d136a84c6a45f10eefc84` | [npm tarball](https://registry.npmjs.org/acorn/-/acorn-8.18.0.tgz) |
 | `ajv` | `8.20.0` | `runtime` | `MIT` | `sha256:e859ebf1b94be121a5bfaa154d15b34b32e0cf1badb3d32c8d2aec9ca1bca18d` | `sha256:1f9033ee5a6515e7d76938b7072941862d1ed228a6879cc7fe10cdeb75107989` | [npm tarball](https://registry.npmjs.org/ajv/-/ajv-8.20.0.tgz) |
 | `ajv-formats` | `3.0.1` | `runtime` | `MIT` | `sha256:cdf999e448d8ecd3d0caae0d90c751376349308c4b2a9fe1535de521cc578556` | `sha256:402fb4bcfa457f0226813f3976ac42839dd619907c075c108efba8600d7edb69` | [npm tarball](https://registry.npmjs.org/ajv-formats/-/ajv-formats-3.0.1.tgz) |
 | `canonicalize` | `4.0.0` | `runtime` | `Apache-2.0` | `sha256:a40fe8c99d8438142d7f02877361804fd1f9b9420ce42a2b45c0f34c6a9e2dca` | `sha256:b4fe69cd7668c761bc1f0a6c41fcd3d4e53bc3c2d280b5d789fe5e6a6c6505d0` | [npm tarball](https://registry.npmjs.org/canonicalize/-/canonicalize-4.0.0.tgz) |
@@ -20,6 +20,6 @@ Inventory hash: `sha256:bdb38b151644e33c01fd49dd9516a13ef727440bf866d9f3b15e9c32
 | `pdfjs-dist` | `6.2.108` | `runtime` | `Apache-2.0` | `sha256:a1269590ee95c9da6984d8f1492deaa0a98f634feb8a5a4c8a4be83586585bcd` | `sha256:d7918934bf0ef5b18beed1bd2d9b49a04447de445c171305a2de082ccee369ed` | [npm tarball](https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.2.108.tgz) |
 | `require-from-string` | `2.0.2` | `runtime` | `MIT` | `sha256:13c3624546c861ae673708442112b8dc2edddaace91e44ef65b2fc35932ed1ba` | `sha256:c0002f7d4c7d7e2a885cf0f97226344902417c3a0980f2beca41962d2bc1f6d8` | [npm tarball](https://registry.npmjs.org/require-from-string/-/require-from-string-2.0.2.tgz) |
 | `saxes` | `6.0.0` | `runtime` | `ISC` | `sha256:d6e427a18a7e78dbed1382d0df9379b8f5ac61116baef0287d5849b0b0eba2e1` | `sha256:32052572b41c2a890ed0854798c48454cc5991dcaafe5fb1718a4253046acfd3` | [npm tarball](https://registry.npmjs.org/saxes/-/saxes-6.0.0.tgz) |
-| `semver` | `7.7.2` | `runtime` | `ISC` | `sha256:aa9c0894b635f1fb5da642b1871976becb3c67d08f09b736829b675efce12e21` | `sha256:bf2e091359d5870257cc8287a268e001bfb39abf19275f382276efe3c7785a4f` | [npm tarball](https://registry.npmjs.org/semver/-/semver-7.7.2.tgz) |
+| `semver` | `7.8.5` | `runtime` | `ISC` | `sha256:d41db7e69f43c2f3b8ef277354787bd6adea6128b38d4741a9343ef4ecedadb5` | `sha256:7c94cb7f2a53c27b20d76386ec144c062894dbcc909cfabd0f728c37874b1776` | [npm tarball](https://registry.npmjs.org/semver/-/semver-7.8.5.tgz) |
 | `xmlchars` | `2.2.0` | `runtime` | `MIT` | `sha256:b6b7dd6cd0bd01094fb1da3b602b99763d3faf056cb42c7971c8eacc9f31bb44` | `sha256:a91c0b20003ff9399dde1de8c59681f1b6901c6fb1aac71780a3a876dc548583` | [npm tarball](https://registry.npmjs.org/xmlchars/-/xmlchars-2.2.0.tgz) |
 | `yaml` | `2.9.0` | `runtime` | `ISC` | `sha256:7bb54286b2425f5863376e81a083dce51c713bcbd776bdab39b769e34cc92a7f` | `sha256:20b8b197cbd10dad245d45e463dfe58e4c8c25a47e24bc4256ad9ab58bf35683` | [npm tarball](https://registry.npmjs.org/yaml/-/yaml-2.9.0.tgz) |

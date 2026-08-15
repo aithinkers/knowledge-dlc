@@ -89,6 +89,24 @@ test("FEAT-007 scanner derives signed inventory from bytes and rejects hidden im
   await expectCodeAsync("KDLC_EXTENSION_PERMISSION_UNDERREPORTED", () => scanner.scan(packageRoot("underreported")));
 });
 
+test("REQ-SUPPLY-001 upgraded parser and SemVer runtime fail closed on adversarial extension metadata", async () => {
+  const validator = await createExtensionValidator(root);
+  const scanner = new ExtensionPackageScanner({ validator, key: Buffer.alloc(32, 8) });
+  const malformedPackage = await mkdtemp(join(tmpdir(), "kdlc-extension-parser-"));
+  await cp(packageRoot("compatible"), malformedPackage, { recursive: true });
+  await writeFile(join(malformedPackage, "tools/normalizer.mjs"), "export const broken = ;\n");
+  await expectCodeAsync("KDLC_EXTENSION_SOURCE_INVALID", () => scanner.scan(malformedPackage));
+
+  const manifest = JSON.parse(await readFile(join(packageRoot("compatible"), ".kdlc-plugin/plugin.json"), "utf8"));
+  const malformedRange = structuredClone(manifest);
+  malformedRange.compatibility.framework = "1.x.2";
+  expectCode("KDLC_EXTENSION_RANGE_INVALID", () => validatePluginManifest(malformedRange, validator));
+
+  const nonCanonicalVersion = structuredClone(manifest);
+  nonCanonicalVersion.metadata.version = "01.4.0";
+  expectCode("KDLC_EXTENSION_VERSION_INVALID", () => validatePluginManifest(nonCanonicalVersion, validator));
+});
+
 test("FEAT-007 scanner detects post-open swaps without leaking descriptors", async () => {
   const validator = await createExtensionValidator(root); const packageCopy = await mkdtemp(join(tmpdir(), "kdlc-extension-race-"));
   await cp(packageRoot("compatible"), packageCopy, { recursive: true });

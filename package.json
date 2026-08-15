@@ -55,7 +55,7 @@
     "test": "npm run check:governance && npm run test:governance"
   },
   "dependencies": {
-    "acorn": "8.15.0",
+    "acorn": "8.18.0",
     "ajv-formats": "3.0.1",
     "canonicalize": "4.0.0",
     "csv-parse": "7.0.2",
@@ -63,7 +63,7 @@
     "gifuct-js": "2.1.2",
     "pdfjs-dist": "6.2.108",
     "saxes": "6.0.0",
-    "semver": "7.7.2",
+    "semver": "7.8.5",
     "yaml": "2.9.0"
   },
   "devDependencies": {
