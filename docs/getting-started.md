@@ -112,25 +112,29 @@ descriptors, not by prompt text.
 
 ## 6. Pick your harness
 
+Install any harness surface into your project with one command; the written
+files reference this installation by absolute path and work from any
+directory:
+
+```bash
+kdlc setup kiro ~/my-project        # or: claude-code | codex | kiro-ide | mcp (comma-separated for several)
+```
+
 | Harness | Setup | Invoke |
 |---|---|---|
-| Claude Code | `claude plugin install <repo>/distribution/claude-code` | `/kdlc:<operation>` commands, `kdlc:<role>` agents |
-| Codex CLI (≥ 0.145) | point Codex at this checkout; skills/agents in `distribution/codex/` | `$kdlc` skill (`SKILL.md`), `.codex/agents/<role>` |
-| Kiro CLI (≥ 2.6) | point Kiro at this checkout; skills/agents in `distribution/kiro/.kiro/` | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
-| Kiro IDE | point Kiro at this checkout; skills/agents in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
-| Any MCP client | `distribution/mcp/desktop.json` (stdio) or `custom-app.json` (HTTP) | `kb_search`, `kb_fetch`, `proposal_create`, … |
+| Claude Code | `kdlc setup claude-code .` prints the `claude plugin install …/distribution/claude-code` command | `/kdlc:<operation>` commands, `kdlc:<role>` agents |
+| Codex CLI (≥ 0.145) | `kdlc setup codex <project>` writes `.codex/` (skill + agents); source in `distribution/codex/` | `$kdlc` skill (`SKILL.md`), `.codex/agents/<role>` |
+| Kiro CLI (≥ 2.6) | `kdlc setup kiro <project>` writes `.kiro/` (skills + agents); source in `distribution/kiro/.kiro/` | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
+| Kiro IDE | `kdlc setup kiro-ide <project>`; source in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
+| Any MCP client | `kdlc setup mcp <project>` writes `kdlc.mcp.json` (stdio, absolute paths); HTTP packaging in `distribution/mcp/` | `kb_search`, `kb_fetch`, `proposal_create`, … |
 
 Every harness invokes the same governed CLI engine and returns the same
 versioned JSON envelope; adapters never change stage requirements, security
-policy, state transitions, or artifact contracts (§25).
-
-IMPORTANT: the Codex and Kiro skill files invoke
-`node distribution/<harness>/run.mjs`, whose imports resolve relative to this
-repository. Run those harnesses with this checkout as the working directory
-(your knowledge project can live anywhere; pass its path in the operation
-arguments), or use the Claude Code plugin / MCP server, which carry their own
-location. Do not copy `.kiro/` alone into another project — the runner will
-not resolve. A self-contained packaged runner is tracked as a follow-up.
+policy, state transitions, or artifact contracts (§25). Setup output is
+derived from the same authored definitions as the drift-checked
+`distribution/` trees, and the installed agent allowlists are rewritten to
+match the absolute runner path. Keep this installation in place (re-run
+`kdlc setup` after moving or upgrading it).
 
 ## 7. MCP server
 
@@ -146,6 +150,6 @@ unauthenticated project server.
 Argument-free: `init`, `status`, `doctor`, `lint`, `jobs`, `conflicts`,
 `gaps`, `refresh`, `reconcile-edits`. Require arguments: `adopt <source...>`,
 `ingest <source...>`, `query <question>`, `trace <kb://...>`,
-`review <proposal-id> <decision> <receipt-id>`,
+`setup <tool>[,...] <project-dir>`, `review <proposal-id> <decision> <receipt-id>`,
 `publish <proposal-id> <receipt-id>`, `proposal <json>`, `migrate <json>`.
 See `distribution/claude-code/COMMANDS.md` for the harness bindings.

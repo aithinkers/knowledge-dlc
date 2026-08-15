@@ -35,6 +35,7 @@ import { DurableArtifactStore, GovernedAgentWorkflows } from "../workflows/index
 
 export const CLI_COMMANDS = Object.freeze([
   "init",
+  "setup",
   "adopt",
   "ingest",
   "query",
@@ -64,6 +65,7 @@ export const EXIT = Object.freeze({
 const longOperations = new Set(["adopt", "ingest", "refresh"]);
 const operationScopes = Object.freeze({
   init: "mutate",
+  setup: "mutate",
   project_init: "mutate",
   adopt: "mutate",
   ingest: "mutate",
@@ -227,7 +229,7 @@ export class KdlcEngine {
   }
   async execute(operation, input = {}) {
     await this.resumeJobs();
-    if (this.principal.bootstrap_init_only && !["init", "project_init"].includes(operation)) throw new EngineError("KDLC_POLICY_DENIED", "Bootstrap principal is restricted to project initialization", EXIT.policy);
+    if (this.principal.bootstrap_init_only && !["init", "project_init", "setup"].includes(operation)) throw new EngineError("KDLC_POLICY_DENIED", "Bootstrap principal is restricted to project initialization", EXIT.policy);
     if (
       !CLI_COMMANDS.includes(operation) &&
       ![
@@ -264,6 +266,11 @@ export class KdlcEngine {
       this.validateRemoteSources(input.sources);
     if (operation === "init" || operation === "project_init")
       return this.init(input);
+    if (operation === "setup") {
+      const { runSetup } = await import("./setup.mjs");
+      try { return await runSetup(input); }
+      catch (error) { throw new EngineError("KDLC_INPUT_INVALID", error.message, EXIT.input); }
+    }
     if (longOperations.has(operation)) return this.startJob(operation, input);
     if (operation === "ingest_start") return this.startJob("ingest", input);
     if (this.handlers[operation])
@@ -752,6 +759,10 @@ export function parseCli(argv) {
     input.question = positionals.join(" ").trim();
     if (!input.question)
       throw inputError("query requires a non-empty question");
+  }
+  if (operation === "setup") {
+    [input.tool, input.project] = positionals;
+    if (!input.tool || !input.project) throw inputError("setup requires: kdlc setup <claude-code|codex|kiro|kiro-ide|mcp>[,...] <project-directory>");
   }
   if (operation === "trace") {
     if (!positionals[0]) throw inputError("trace requires a concept reference, for example: kdlc trace kb://<knowledge-base-id>/<concept-id>");

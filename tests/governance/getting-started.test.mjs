@@ -68,6 +68,27 @@ test("FEAT-011 the getting-started walkthrough works exactly as documented", asy
     assert.equal(failed.envelope.error.code, "KDLC_INPUT_INVALID", `${bare[0]} must return KDLC_INPUT_INVALID`);
   }
 
+  // FEAT-016: setup installs a working Kiro surface with absolute runner paths.
+  const installTarget = await mkdtemp(resolve(tmpdir(), "kdlc-setup-target-"));
+  t.after(() => rm(installTarget, { recursive: true, force: true }));
+  const setup = await run(root, "setup", "kiro,mcp", installTarget);
+  assert.equal(setup.envelope.ok, true);
+  assert.ok(setup.envelope.result.files.includes(".kiro/skills/kdlc-init/SKILL.md"));
+  const skill = await readFile(resolve(installTarget, ".kiro/skills/kdlc-status/SKILL.md"), "utf8");
+  const runner = /"node", "([^"]+run\.mjs)"/u.exec(skill)?.[1];
+  assert.ok(runner && runner.startsWith("/"), "installed skill must reference an absolute runner path");
+  const conductor = JSON.parse(await readFile(resolve(installTarget, ".kiro/agents/conductor.json"), "utf8"));
+  assert.match(conductor.toolsSettings.execute_bash.allowedCommands[0], /run\\\.mjs/u);
+  // Invoke the installed absolute runner from an unrelated cwd.
+  {
+    const child = spawn(process.execPath, [runner, "status", "--output", "json"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
+    let out = ""; child.stdout.on("data", (chunk) => { out += chunk; }); child.stderr.on("data", (chunk) => { out += chunk; });
+    await once(child, "exit");
+    assert.equal(JSON.parse(out).operation, "status");
+  }
+  const badTool = await run(root, "setup", "unknown-tool", installTarget);
+  assert.equal(badTool.envelope.error.code, "KDLC_INPUT_INVALID");
+
   // Documented command surface stays honest.
   const guide = await readFile(resolve(repository, "docs/getting-started.md"), "utf8");
   const { CLI_COMMANDS } = await import(`file://${resolve(repository, "packages/cli/index.mjs")}`);
