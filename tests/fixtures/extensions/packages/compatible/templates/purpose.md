@@ -1,0 +1,3 @@
+# Purpose
+
+Compatibility fixture template.

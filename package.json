@@ -20,6 +20,7 @@
     "test": "npm run check:governance && npm run test:governance"
   },
   "dependencies": {
+    "acorn": "8.15.0",
     "ajv-formats": "3.0.1",
     "canonicalize": "4.0.0",
     "csv-parse": "7.0.2",

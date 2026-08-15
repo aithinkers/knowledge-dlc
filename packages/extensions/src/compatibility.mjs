@@ -1,11 +1,11 @@
 import semver from "semver";
 
 import { artifactHash, canonicalJson } from "../../core/index.mjs";
+import { issueInstallReport, resolveTrustedExtensionHost, verifyInstallReport } from "./authority.mjs";
 import { extensionFail } from "./errors.mjs";
 
 const TRUST_ORDER = Object.freeze({ unverified: 0, "machine-confirmed": 1, "human-reviewed": 2 });
-const PERMISSION_KEYS = Object.freeze(["filesystem", "network", "credentials", "subprocess", "macros", "resources"]);
-const installReports = new WeakMap();
+const BOUNDARIES = Object.freeze(["filesystem", "network", "credentials", "subprocess", "macros", "memory", "cpu", "output"]);
 
 function validRange(value, label) {
   if (typeof value !== "string" || semver.validRange(value, { includePrerelease: true }) === null) extensionFail("KDLC_EXTENSION_RANGE_INVALID", `${label} is not a valid semantic-version range`);
@@ -18,9 +18,11 @@ function unique(values, label) {
   const ids = values.map(({ id, name, metadata }) => id ?? name ?? metadata?.id);
   if (ids.some((id) => typeof id !== "string") || new Set(ids).size !== ids.length) extensionFail("KDLC_EXTENSION_DUPLICATE", `Plugin contains duplicate or invalid ${label}`);
 }
-function permissionRequests(permissions) {
-  return { filesystem: permissions.filesystem.length > 0, network: permissions.network.length > 0, credentials: permissions.credentials.length > 0,
-    subprocess: permissions.subprocess, macros: permissions.macros, resources: true };
+function exactIdentity(locked, report) {
+  return Boolean(locked && locked.version === report.version && locked.manifest_hash === report.manifest_hash && locked.package_hash === report.package_hash);
+}
+function verifyScan(report, scanner) {
+  if (!report || !scanner?.verifyReport(report)) extensionFail("KDLC_EXTENSION_SCAN_UNTRUSTED", "Compatibility requires an authentic package scan over actual package bytes");
 }
 
 export function validatePluginManifest(manifest, validator) {
@@ -42,57 +44,96 @@ export function validatePluginManifest(manifest, validator) {
   return structuredClone(manifest);
 }
 
-export function enforceCompatibility({ manifest, lock, frameworkVersion, frameworkHash, okfVersion = "0.2.0", packageHash, validator }) {
-  validatePluginManifest(manifest, validator); requireValid(validator, "extensionLock", lock);
-  if (!semver.valid(frameworkVersion) || frameworkVersion !== lock.framework.version || frameworkHash !== lock.framework.hash
-    || !semver.satisfies(frameworkVersion, manifest.compatibility.framework, { includePrerelease: true })) extensionFail("KDLC_EXTENSION_FRAMEWORK_INCOMPATIBLE", "Plugin framework range or framework lock does not match");
-  if (manifest.compatibility.okf !== undefined && (!semver.valid(okfVersion) || !semver.satisfies(okfVersion, manifest.compatibility.okf, { includePrerelease: true }))) extensionFail("KDLC_EXTENSION_OKF_INCOMPATIBLE", "Plugin OKF compatibility range does not match");
-  const locked = lock.plugins[manifest.metadata.name];
-  if (!locked || locked.version !== manifest.metadata.version || locked.manifest_hash !== artifactHash(manifest) || locked.package_hash !== packageHash) extensionFail("KDLC_EXTENSION_LOCK_MISMATCH", "Plugin identity, manifest, or package bytes do not match the dependency lock");
-  const declarations = new Map(manifest.dependencies.map((dependency) => [dependency.name, dependency]));
-  if (Object.keys(locked.dependencies).some((name) => !declarations.has(name))) extensionFail("KDLC_EXTENSION_LOCK_MISMATCH", "Plugin lock contains an undeclared dependency");
-  for (const dependency of manifest.dependencies) {
-    validRange(dependency.range, `Dependency ${dependency.name}`); const resolved = locked.dependencies[dependency.name];
-    if (!resolved) { if (!dependency.optional) extensionFail("KDLC_EXTENSION_DEPENDENCY_MISSING", `Required plugin dependency is not locked: ${dependency.name}`); continue; }
-    const installed = lock.plugins[dependency.name];
-    if (!installed || installed.version !== resolved.version || installed.manifest_hash !== resolved.manifest_hash || !semver.satisfies(resolved.version, dependency.range, { includePrerelease: true })) {
-      extensionFail("KDLC_EXTENSION_DEPENDENCY_INCOMPATIBLE", `Locked dependency is incompatible: ${dependency.name}`);
+export function enforceCompatibility({ packageReport, installedPackages, lock, validator, scanner, authority }) {
+  requireValid(validator, "extensionLock", lock); verifyScan(packageReport, scanner);
+  const host = resolveTrustedExtensionHost(authority); const manifest = validatePluginManifest(packageReport.manifest, validator);
+  if (!semver.valid(host.framework.version) || host.framework.version !== lock.framework.version || host.framework.hash !== lock.framework.hash
+    || !semver.satisfies(host.framework.version, manifest.compatibility.framework, { includePrerelease: true })) extensionFail("KDLC_EXTENSION_FRAMEWORK_INCOMPATIBLE", "Plugin framework range or trusted framework lock does not match");
+  if (!semver.valid(host.okf.version) || canonicalJson(host.okf) !== canonicalJson(lock.okf)
+    || (manifest.compatibility.okf !== undefined && !semver.satisfies(host.okf.version, manifest.compatibility.okf, { includePrerelease: true }))) extensionFail("KDLC_EXTENSION_OKF_INCOMPATIBLE", "Plugin OKF range, revision, or hash does not match the trusted runtime");
+
+  if (!Array.isArray(installedPackages)) extensionFail("KDLC_EXTENSION_GRAPH_INVALID", "Trusted scans for the complete installed plugin graph are required");
+  const reports = new Map();
+  for (const report of installedPackages) {
+    verifyScan(report, scanner); validatePluginManifest(report.manifest, validator);
+    if (reports.has(report.plugin)) extensionFail("KDLC_EXTENSION_GRAPH_INVALID", `Duplicate installed plugin scan: ${report.plugin}`);
+    reports.set(report.plugin, report);
+  }
+  if (reports.get(packageReport.plugin)?.package_hash !== packageReport.package_hash || reports.size !== Object.keys(lock.plugins).length
+    || [...reports.keys()].some((name) => !Object.hasOwn(lock.plugins, name))) extensionFail("KDLC_EXTENSION_GRAPH_INVALID", "Installed package scans do not exactly cover the dependency lock");
+
+  for (const [name, locked] of Object.entries(lock.plugins)) {
+    const report = reports.get(name);
+    if (!report || !exactIdentity(locked, report)) extensionFail("KDLC_EXTENSION_LOCK_MISMATCH", `Locked plugin bytes or manifest drifted: ${name}`);
+    if (!semver.satisfies(host.framework.version, report.manifest.compatibility.framework, { includePrerelease: true })
+      || (report.manifest.compatibility.okf !== undefined && !semver.satisfies(host.okf.version, report.manifest.compatibility.okf, { includePrerelease: true }))) {
+      extensionFail("KDLC_EXTENSION_DEPENDENCY_INCOMPATIBLE", `Installed plugin is incompatible with the trusted framework or OKF: ${name}`);
+    }
+    const declarations = new Map(report.manifest.dependencies.map((dependency) => [dependency.name, dependency]));
+    if (Object.keys(locked.dependencies).some((dependency) => !declarations.has(dependency))) extensionFail("KDLC_EXTENSION_LOCK_MISMATCH", `Plugin lock contains an undeclared dependency: ${name}`);
+    for (const dependency of report.manifest.dependencies) {
+      validRange(dependency.range, `Dependency ${dependency.name}`); const resolved = locked.dependencies[dependency.name];
+      if (!resolved) {
+        if (!dependency.optional) extensionFail("KDLC_EXTENSION_DEPENDENCY_MISSING", `Required plugin dependency is not locked: ${dependency.name}`);
+        if (reports.has(dependency.name)) extensionFail("KDLC_EXTENSION_LOCK_MISMATCH", `Installed optional dependency is not bound by its dependent: ${name} -> ${dependency.name}`);
+        continue;
+      }
+      const installed = reports.get(dependency.name);
+      if (!installed || !exactIdentity(resolved, installed) || !semver.satisfies(installed.version, dependency.range, { includePrerelease: true })) {
+        extensionFail("KDLC_EXTENSION_DEPENDENCY_INCOMPATIBLE", `Locked dependency bytes are incompatible: ${name} -> ${dependency.name}`);
+      }
     }
   }
-  return Object.freeze({ plugin: manifest.metadata.name, version: manifest.metadata.version, manifest_hash: artifactHash(manifest), package_hash: packageHash });
+  const graph = installedPackages.map(({ plugin, version, manifest_hash, package_hash }) => ({ plugin, version, manifest_hash, package_hash })).sort((a, b) => a.plugin.localeCompare(b.plugin));
+  return Object.freeze({ plugin: manifest.metadata.name, version: manifest.metadata.version, manifest_hash: packageReport.manifest_hash,
+    package_hash: packageReport.package_hash, lock_hash: artifactHash(lock), graph_hash: artifactHash(graph),
+    host_context_hash: artifactHash({ framework: host.framework, okf: host.okf }) });
 }
 
-export function createInstallReport({ manifest, lock, frameworkVersion, frameworkHash, okfVersion = "0.2.0", packageHash, packageInventory, validator, mode = "local", hostCapabilities = {}, policyFloor = { minimum_trust: "unverified", approval_gates: [] } }) {
-  if (!['local', 'controlled'].includes(mode)) extensionFail("KDLC_EXTENSION_MODE_INVALID", "Extension installation mode is invalid");
-  const compatibility = enforceCompatibility({ manifest, lock, frameworkVersion, frameworkHash, okfVersion, packageHash, validator });
-  if (!packageInventory || packageInventory.package_hash !== packageHash || !Array.isArray(packageInventory.executables)) extensionFail("KDLC_EXTENSION_INVENTORY_INVALID", "Trusted package inventory is required");
-  const declaredInventory = manifest.executables.map(({ id, type, entrypoint, isolation, permissions }) => ({ id, type, entrypoint, isolation, permissions })).sort((a, b) => a.id.localeCompare(b.id));
-  const observedInventory = structuredClone(packageInventory.executables).sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  if (canonicalJson(declaredInventory) !== canonicalJson(observedInventory)) extensionFail("KDLC_EXTENSION_PERMISSION_UNDERREPORTED", "Executable inventory or permissions differ from the plugin declaration");
+function coversAccess(granted, requested) { return granted.root === requested.root && (granted.access === "write" || granted.access === requested.access); }
+function sandboxGaps(executable, sandbox) {
+  if (executable.isolation !== "sandboxed") return ["isolation"];
+  if (!sandbox.effective) return ["effective-sandbox"];
+  const gaps = BOUNDARIES.filter((boundary) => sandbox.enforcement[boundary] !== true);
+  if (executable.permissions.filesystem.some((request) => !sandbox.filesystem.some((grant) => coversAccess(grant, request)))) gaps.push("filesystem-scope");
+  if (executable.permissions.network.some((destination) => !sandbox.network.includes(destination))) gaps.push("network-scope");
+  if (executable.permissions.credentials.some((credential) => !sandbox.credentials.includes(credential))) gaps.push("credential-scope");
+  if (executable.permissions.subprocess && sandbox.subprocess !== true) gaps.push("subprocess-scope");
+  if (executable.permissions.macros && sandbox.macros !== true) gaps.push("macro-scope");
+  if (executable.permissions.resources.memory_bytes > sandbox.resources.memory_bytes) gaps.push("memory-ceiling");
+  if (executable.permissions.resources.cpu_ms > sandbox.resources.cpu_ms) gaps.push("cpu-ceiling");
+  if (executable.permissions.resources.output_bytes > sandbox.resources.output_bytes) gaps.push("output-ceiling");
+  return [...new Set(gaps)].sort();
+}
+
+export function createInstallReport({ packageReport, installedPackages, lock, scanner, validator, authority, mode = "local", policyFloor = { minimum_trust: "unverified", approval_gates: [] } }) {
+  if (!["local", "controlled"].includes(mode)) extensionFail("KDLC_EXTENSION_MODE_INVALID", "Extension installation mode is invalid");
+  const compatibility = enforceCompatibility({ packageReport, installedPackages, lock, validator, scanner, authority });
+  const manifest = packageReport.manifest; const host = resolveTrustedExtensionHost(authority);
   const requiredGates = new Set(policyFloor.approval_gates ?? []); const minimum = TRUST_ORDER[policyFloor.minimum_trust];
   if (minimum === undefined) extensionFail("KDLC_EXTENSION_POLICY_INVALID", "Extension policy floor is invalid");
-  for (const profile of manifest.contributions.profiles) if (TRUST_ORDER[profile.security.minimum_trust] < minimum || [...requiredGates].some((gate) => !profile.security.approval_gates.includes(gate))) {
-    extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Profile ${profile.metadata.id} weakens the installation policy floor`);
+  for (const installed of installedPackages) for (const profile of installed.manifest.contributions.profiles) {
+    if (TRUST_ORDER[profile.security.minimum_trust] < minimum || [...requiredGates].some((gate) => !profile.security.approval_gates.includes(gate))) {
+      extensionFail("KDLC_EXTENSION_POLICY_DOWNGRADE", `Profile ${installed.plugin}:${profile.metadata.id} weakens the installation policy floor`);
+    }
   }
-  const executables = manifest.executables.map((entry) => {
-    const requested = permissionRequests(entry.permissions); const limitations = PERMISSION_KEYS.filter((name) => requested[name] && hostCapabilities[name] !== true);
-    return { id: entry.id, type: entry.type, entrypoint: entry.entrypoint, isolation: entry.isolation, permissions: structuredClone(entry.permissions), enforcement_limitations: limitations };
-  }).sort((a, b) => a.id.localeCompare(b.id));
-  const report = { api_version: "kdlc.dev/plugin-install-report/v1alpha1", plugin: compatibility.plugin, version: compatibility.version,
-    manifest_hash: compatibility.manifest_hash, package_hash: packageHash, mode, requires_explicit_trust: executables.length > 0,
-    executable_permissions: executables, unsandboxed_executables: executables.filter(({ isolation }) => isolation === "unsandboxed").map(({ id }) => id),
-    permission_hash: artifactHash(executables) };
-  const issued = Object.freeze(structuredClone(report));
-  installReports.set(issued, structuredClone(report));
-  return issued;
+  const executables = installedPackages.flatMap((installed) => installed.manifest.executables.map((entry) => ({ plugin: installed.plugin, id: `${installed.plugin}:${entry.id}`,
+    executable_id: entry.id, type: entry.type, entrypoint: entry.entrypoint, isolation: entry.isolation,
+    permissions: structuredClone(entry.permissions), sandbox_gaps: sandboxGaps(entry, host.sandbox) }))).sort((a, b) => a.id.localeCompare(b.id));
+  const payload = { api_version: "kdlc.dev/plugin-install-report/v1alpha1", plugin: compatibility.plugin, version: compatibility.version,
+    manifest_hash: compatibility.manifest_hash, package_hash: compatibility.package_hash, package_scan_hash: artifactHash(packageReport), lock_hash: compatibility.lock_hash,
+    installed_graph_hash: compatibility.graph_hash, host_context_hash: compatibility.host_context_hash, sandbox_attestation_id: host.sandbox.attestation_id, mode,
+    requires_explicit_trust: executables.length > 0, executable_permissions: executables,
+    waiver_required_executables: mode === "controlled" ? executables.filter(({ sandbox_gaps }) => sandbox_gaps.length).map(({ id }) => id) : [],
+    permission_hash: artifactHash(executables), execution_status: "not-executed" };
+  return issueInstallReport(authority, payload);
 }
 
 export function authorizeInstallation({ manifest, report, trustAuthorization, waiver, authority, now = new Date().toISOString() }) {
-  const issued = installReports.get(report);
-  if (!issued || canonicalJson(issued) !== canonicalJson(report)) extensionFail("KDLC_EXTENSION_REPORT_UNTRUSTED", "Installation authorization requires the exact issued permission report");
+  if (!verifyInstallReport(authority, report)) extensionFail("KDLC_EXTENSION_REPORT_UNTRUSTED", "Installation authorization requires an authentic runtime-signed report");
   if (report.manifest_hash !== artifactHash(manifest) || report.plugin !== manifest.metadata.name || report.permission_hash !== artifactHash(report.executable_permissions)) extensionFail("KDLC_EXTENSION_REPORT_DRIFT", "Installation report no longer binds the exact plugin and permissions");
-  if (report.requires_explicit_trust && !authority?.verifyTrust(trustAuthorization, report)) extensionFail("KDLC_EXTENSION_TRUST_REQUIRED", "Executable plugin installation requires explicit authenticated trust");
-  if (report.mode === "controlled" && report.unsandboxed_executables.length && !authority?.verifyWaiver(waiver, report, report.unsandboxed_executables, now)) extensionFail("KDLC_EXTENSION_UNSANDBOXED_DENIED", "Controlled mode rejects unsandboxed execution without an exact active waiver");
-  return Object.freeze({ status: "authorized", plugin: report.plugin, version: report.version, manifest_hash: report.manifest_hash, package_hash: report.package_hash,
-    trust_actor: trustAuthorization?.actor ?? null, waiver_actor: waiver?.actor ?? null, permission_hash: report.permission_hash });
+  if (report.requires_explicit_trust && !authority.verifyTrust(trustAuthorization, report)) extensionFail("KDLC_EXTENSION_TRUST_REQUIRED", "Executable plugin installation requires explicit authenticated trust");
+  if (report.mode === "controlled" && report.waiver_required_executables.length && !authority.verifyWaiver(waiver, report, report.waiver_required_executables, now)) extensionFail("KDLC_EXTENSION_SANDBOX_DENIED", "Controlled mode requires effective sandbox coverage or an exact active waiver");
+  return Object.freeze({ status: "installation-authorized", execution_status: "not-executed", plugin: report.plugin, version: report.version, manifest_hash: report.manifest_hash,
+    package_hash: report.package_hash, trust_actor: trustAuthorization?.actor ?? null, waiver_actor: waiver?.actor ?? null, permission_hash: report.permission_hash });
 }

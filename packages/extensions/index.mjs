@@ -4,6 +4,7 @@ export { ExtensionAuthority } from "./src/authority.mjs";
 export { authorizeInstallation, createInstallReport, enforceCompatibility, validatePluginManifest } from "./src/compatibility.mjs";
 export { ExtensionError } from "./src/errors.mjs";
 export { applyMigrationPreview, previewMigration } from "./src/migrations.mjs";
+export { ExtensionPackageScanner } from "./src/scanner.mjs";
 
 export const EXTENSION_SCHEMA_PATHS = Object.freeze({
   extensionTemplate: "core/schemas/extensions/template.schema.json",

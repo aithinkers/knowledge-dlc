@@ -9,17 +9,27 @@ permissions.
 Installation is a gated sequence:
 
 1. Validate the strict `v1alpha1` schemas and canonical semantic versions.
-2. Verify framework and OKF compatibility against the exact dependency lock,
-   manifest hash, package hash, and transitive plugin identities.
-3. Compare the manifest to a trusted package inventory and preview the complete
-   permission report and host enforcement limitations.
-4. Obtain explicit trust from an authenticated `plugin-trust` principal for any
+2. Scan the actual package root without executing it. The bounded scanner
+   rejects symlinks, parses every executable's transitive imports, detects
+   undeclared sensitive capabilities and credentials, hashes every file, and
+   signs its report with runtime-held key material.
+3. Verify the trusted framework identity and exact OKF version, revision, and
+   hash against the dependency lock. Every plugin in the installed graph and
+   every direct or transitive edge binds version, manifest hash, and package
+   hash.
+4. Preview a runtime-signed permission report for every executable in the
+   installed graph. In controlled mode the host's trusted sandbox attestation
+   must demonstrate effective enforcement and sufficient scopes and ceilings
+   for filesystem, network, credential, subprocess, macro, memory, CPU, and
+   output boundaries.
+5. Obtain explicit trust from an authenticated `plugin-trust` principal for any
    executable plugin.
-5. In controlled mode, reject every unsandboxed executable unless an
-   authenticated governance reviewer grants a live waiver scoped to the exact
-   report, manifest, and executable IDs.
+6. If controlled-mode sandbox evidence is absent or insufficient, reject the
+   executable unless an authenticated governance reviewer grants a live waiver
+   scoped to the exact signed report and fully-qualified executable IDs.
 
-The SDK does not execute plugin code. Normalizer and sensor contributions bind
+Authorization reports explicitly state `execution_status: not-executed`; the
+SDK does not execute plugin code. Normalizer and sensor contributions bind
 to declared executable IDs so the existing bounded normalizer worker and
 governed sensor runtime remain the execution boundary.
 
