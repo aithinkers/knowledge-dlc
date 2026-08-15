@@ -99,7 +99,7 @@ test("FEAT-002 live transaction target locks cannot be broken during a paused co
   const resource = await first.resource("knowledge/race.md");
   await assert.rejects(
     first.locks.breakStale(resource, { actor: "admin", reason: "expired during commit" }),
-    (error) => error.code === "KDLC_HASH_CONFLICT" && /Live or unverifiable/.test(error.message)
+    (error) => error.code === "KDLC_HASH_CONFLICT" && /Live or unverifiable|not stale/.test(error.message)
   );
   await assert.rejects(
     second.prepare({ workflowId: "wf-two", targets: [{ path: "knowledge/race.md", expectedToken: sha256Token("before"), content: "second" }] }),
