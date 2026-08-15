@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, opendir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { artifactHash } from "../../packages/core/index.mjs";
+import { artifactHash, byteHash } from "../../packages/core/index.mjs";
 import { createContractValidator } from "../../packages/contracts/index.mjs";
+import { createLocalProjectEngine, KdlcEngine } from "../../packages/cli/index.mjs";
 import {
   RetentionDecisionAuthority,
   RevocationEngine,
@@ -22,6 +23,20 @@ const source = {
 };
 const now = "2026-08-14T15:00:00.000Z";
 const clock = { now: () => now, millis: () => Date.parse(now) };
+
+async function removeTree(root) {
+  const writable = async (path) => {
+    let metadata;
+    try { metadata = await lstat(path); } catch { return; }
+    if (metadata.isDirectory()) {
+      await chmod(path, 0o700);
+      const directory = await opendir(path);
+      for await (const entry of directory) await writable(join(path, entry.name));
+    } else if (!metadata.isSymbolicLink()) await chmod(path, 0o600);
+  };
+  await writable(root);
+  await rm(root, { recursive: true, force: true });
+}
 
 class Ids {
   constructor() { this.value = 0; }
@@ -127,6 +142,36 @@ test("FEAT-009 erasure barriers retrieval, treats every local copy, minimizes au
   const audit = await store.readText("workflow/runs/wf_erase/audit.jsonl");
   assert.equal(audit.includes("SECRET-123"), false);
   assert.equal(audit.includes(source.id), false);
+});
+
+test("FEAT-009 the shipped project engine enforces a newly installed barrier without restart", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-erasure-cli-"));
+  context.after(() => removeTree(root));
+  await new KdlcEngine({ root, clock }).execute("init", { project_id: "revocation.project" });
+  const concept = `---\ntype: Policy\ntitle: Private Control\nstatus: stable\naccess: { classification: public }\nsources:\n  - id: ${source.id}\n    resource: file:sources/private.md\n    source_hash: ${source.hash}\n    access: { classification: public }\n    rights: { license: Apache-2.0, redistribution: allowed, derivative_use: allowed, commercial_use: allowed }\n---\nThe secret control remains active.\n`;
+  await writeFile(join(root, "knowledge/primary/private.md"), concept);
+  await writeFile(join(root, "knowledge/primary/index.md"), "# Knowledge\n\n* [Private Control](private.md)\n");
+  await writeFile(join(root, "knowledge/primary/retrieval-catalog.json"), `${JSON.stringify({ version: "kdlc-retrieval-catalog-1", concepts: [{ id: "private", path: "private.md", byte_hash: byteHash(Buffer.from(concept)), access: { classification: "public" } }] })}\n`);
+  const projectStore = new NodeFileStore(root);
+  const principalPolicy = await projectStore.readJson(".kdlc/principal-policy.json");
+  principalPolicy.principals[0].clearance = "internal";
+  await projectStore.writeJsonAtomic(".kdlc/principal-policy.json", principalPolicy);
+  const engine = createLocalProjectEngine({ root });
+  assert.equal((await engine.execute("query", { question: "secret control" })).status, "ok");
+  const store = new NodeFileStore(root);
+  const guard = new RevocationGuard({ store });
+  await store.writeJsonAtomic(guard.path(source.id), {
+    api_version: "kdlc.dev/revocation-barrier/v1alpha1",
+    source,
+    state: "revoked",
+    workflow_id: "wf_erase",
+    job_id: "job_erase",
+    impact_hash: artifactHash("impact"),
+    decision_hash: artifactHash("decision"),
+    activated_at: now,
+  });
+  assert.equal((await engine.execute("query", { question: "secret control" })).status, "not_found");
+  await engine.close();
 });
 
 test("FEAT-009 legal hold and unexpired retention fail closed with authenticated audited blocked jobs", async (context) => {

@@ -169,7 +169,8 @@
           "packages/erasure/src/authority.mjs",
           "packages/erasure/src/engine.mjs",
           "packages/erasure/src/guard.mjs",
-          "packages/erasure/src/inventory.mjs"
+          "packages/erasure/src/inventory.mjs",
+          "packages/cli/index.mjs"
         ],
         "tests": [
           "tests/governance/core-contracts.test.mjs",
