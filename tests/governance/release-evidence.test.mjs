@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { artifactHash, byteHash, canonicalJson, generateHierarchicalIndexes, parseMarkdownConcept } from "../../packages/core/index.mjs";
 import { FederationResolver } from "../../packages/federation/index.mjs";
@@ -122,7 +123,7 @@ test("REL-001 replay boundary scrubs credentials and observes caught network or 
   const report = resolve(directory, "report.json"); const probe = resolve(root, "tests/fixtures/release/offline-probe.mjs");
   const environment = scrubbedReleaseEnvironment(report, { root, allowNormalizer: true });
   for (const secret of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AWS_SECRET_ACCESS_KEY", "HTTP_PROXY", "HTTPS_PROXY"]) assert.equal(environment[secret], undefined);
-  await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, `--allow-fs-read=${process.platform === "darwin" ? "/var" : tmpdir()}`, `--allow-fs-write=${directory}`, "--import", resolve(root, "scripts/release-offline-guard.mjs"), probe], { cwd: root, env: { ...environment, OPENAI_API_KEY: undefined } });
+  await execute(process.execPath, ["--permission", "--allow-child-process", `--allow-fs-read=${root}`, `--allow-fs-read=${process.platform === "darwin" ? "/var" : tmpdir()}`, `--allow-fs-write=${directory}`, "--import", pathToFileURL(resolve(root, "scripts/release-offline-guard.mjs")).href, probe], { cwd: root, env: { ...environment, OPENAI_API_KEY: undefined } });
   assert.deepEqual(await readJson(directory, "report.json"), { external_network_calls: 6, live_model_calls: 6, blocked_process_calls: 6 });
 });
 

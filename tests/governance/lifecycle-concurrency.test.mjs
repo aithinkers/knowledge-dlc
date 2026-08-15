@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import test from "node:test";
 
 import { AuditWriter, JobRegistry, LeaseLockManager, NodeFileStore, TransactionManager, sha256Token } from "../../packages/lifecycle/src/index.mjs";
@@ -228,7 +228,7 @@ test("FEAT-002 a live owner cannot be overtaken after its final fence assertion"
   let paused; const atPause = new Promise((resolve) => { paused = resolve; });
   let resume; const gate = new Promise((resolve) => { resume = resolve; });
   f.store.replaceAtomic = async (source, target) => {
-    if (target.endsWith("state/value")) { paused(); await gate; }
+    if (target.endsWith(`state${sep}value`)) { paused(); await gate; }
     return originalReplace(source, target);
   };
   const owner = f.store.withMutex("workflow/final-assert", { owner: "owner", clock: f.clock, leaseMs: 20, timeoutMs: 100 }, () =>

@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
 import { validateReleaseEvidence } from "./release-evidence-validation.mjs";
 import { scrubbedReleaseEnvironment } from "./release-evaluation-boundary.mjs";
@@ -31,7 +32,7 @@ for (const recorded of run.results) {
   const boundaryReport = resolve(boundaryRoot, "observations.json");
   try {
     const pattern = `^(?:${releaseCase.executable_evidence.test_ids.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`;
-    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", resolve(root, "scripts/release-offline-guard.mjs"), "--test", testIsolationArgument, "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
+    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", pathToFileURL(resolve(root, "scripts/release-offline-guard.mjs")).href, "--test", testIsolationArgument, "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
       cwd: root,
       env: scrubbedReleaseEnvironment(boundaryReport, { root, allowNormalizer }),
       maxBuffer: 32 * 1024 * 1024,

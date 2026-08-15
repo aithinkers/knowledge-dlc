@@ -53,7 +53,7 @@
       "category": "retrieval",
       "requirement_ids": ["FEAT-005", "FEAT-008"],
       "fixtures": [{"path": "tests/governance/federation-retrieval.test.mjs", "sha256": "sha256:93fc47f5b611034d888fcf1bdb2c1ea4b8001c1b307660adb841f2dfbc27fd0f"}],
-      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:11653c4a019ebe0582a4fbbdebddc3c48b2c41cd21f1a9c6a41a1119dd09411c", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
       "expected": ["unauthorized and absent responses are externally equivalent", "cache and mount drift fail closed", "qualified conflicts remain deterministic"],
       "security": true
     },
@@ -61,8 +61,8 @@
       "id": "durable-concurrency",
       "category": "concurrency",
       "requirement_ids": ["FEAT-002"],
-      "fixtures": [{"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:1d6e30e89a1d9903a3f868316a0a7048974efc8df4b4b2663aa9f273fb8cf984"}],
-      "executable_evidence": {"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:1d6e30e89a1d9903a3f868316a0a7048974efc8df4b4b2663aa9f273fb8cf984", "test_ids": ["FEAT-002 finalizing publication recovers forward after audit without rollback", "FEAT-002 finalizing crash recovery reacquires dead target leases durably"]},
+      "fixtures": [{"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:d9adeb8e92b65ac4065b9582a6f8ef89a6745bb7e73a53749e918c7e408e11af"}],
+      "executable_evidence": {"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:d9adeb8e92b65ac4065b9582a6f8ef89a6745bb7e73a53749e918c7e408e11af", "test_ids": ["FEAT-002 finalizing publication recovers forward after audit without rollback", "FEAT-002 finalizing crash recovery reacquires dead target leases durably"]},
       "expected": ["cross-instance mutations are serialized", "crash recovery does not create partial canonical state"],
       "security": true
     },
@@ -70,8 +70,8 @@
       "id": "transport-equivalence",
       "category": "distribution",
       "requirement_ids": ["FEAT-006"],
-      "fixtures": [{"path": "tests/governance/distribution.test.mjs", "sha256": "sha256:57695c75b9191897bc65bfaa6b2c47750026f5db87c8de4d8c80a667545251dd"}],
-      "executable_evidence": {"path": "tests/governance/distribution.test.mjs", "sha256": "sha256:57695c75b9191897bc65bfaa6b2c47750026f5db87c8de4d8c80a667545251dd", "test_ids": ["FEAT-006 one engine produces equivalent direct, MCP, and generated-adapter outcomes"]},
+      "fixtures": [{"path": "tests/governance/distribution.test.mjs", "sha256": "sha256:4e84aefd0804df3da6ee94d93319d9455cba1b429548365c2707b9384bc025a7"}],
+      "executable_evidence": {"path": "tests/governance/distribution.test.mjs", "sha256": "sha256:4e84aefd0804df3da6ee94d93319d9455cba1b429548365c2707b9384bc025a7", "test_ids": ["FEAT-006 one engine produces equivalent direct, MCP, and generated-adapter outcomes"]},
       "expected": ["direct, adapters, stdio, and HTTP produce equivalent governed outcomes", "advertised tools equal callable tools"],
       "security": true
     },
@@ -86,7 +86,7 @@
         {"path": "tests/fixtures/federation/base-primary/references/index.md", "sha256": "sha256:877cc3f4b741e1af3d061dc90e8541939fb51736178e4bc1b2a0dd743f5e1e19"},
         {"path": "tests/fixtures/federation/base-primary/references/sources/index.md", "sha256": "sha256:b3dacbade91ef79e8f5aa9154831b1d9d5b96be3afb14fa3fadd8f1fb8ff795a"}
       ],
-      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:11653c4a019ebe0582a4fbbdebddc3c48b2c41cd21f1a9c6a41a1119dd09411c", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
       "expected": ["indexes rebuild byte-identically", "resolved retrieval records remain equivalent"],
       "security": false
     },

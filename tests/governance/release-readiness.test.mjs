@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -107,9 +107,11 @@ test("REL-001 package evidence reads are descriptor-pinned, no-follow, ancestry-
     await rename(resolve(directory, "package"), resolve(directory, "package.old"));
     await mkdir(resolve(directory, "package"));
     await writeFile(resolve(directory, "package/metadata.json"), "substituted");
-  } }), /identity changed|parent identity changed/);
-  await rm(resolve(directory, "package"), { recursive: true, force: true });
-  await rename(resolve(directory, "package.old"), resolve(directory, "package"));
+  } }), process.platform === "win32" ? /EPERM|EACCES/ : /identity changed|parent identity changed/);
+  if (await lstat(resolve(directory, "package.old")).then(() => true, () => false)) {
+    await rm(resolve(directory, "package"), { recursive: true, force: true });
+    await rename(resolve(directory, "package.old"), resolve(directory, "package"));
+  }
 
   if (process.platform === "win32") {
     for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
