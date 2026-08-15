@@ -111,8 +111,8 @@
       "title": "CLI, harness adapters, and MCP distribution",
       "issue": 8,
       "specification_sections": ["9", "25", "32.6", "34", "35"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "implemented",
+      "evidence": {"implementation": ["packages/cli/index.mjs", "packages/mcp/index.mjs", "packages/adapters/index.mjs", "distribution/conformance.json"], "tests": ["tests/governance/distribution.test.mjs"]}
     },
     {
       "id": "FEAT-007",

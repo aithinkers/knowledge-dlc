@@ -6,8 +6,12 @@
   "type": "module",
   "exports": {
     "./normalizers": "./packages/normalizers/index.mjs",
-    "./extensions": "./packages/extensions/index.mjs"
+    "./extensions": "./packages/extensions/index.mjs",
+    "./cli": "./packages/cli/index.mjs",
+    "./mcp": "./packages/mcp/index.mjs",
+    "./adapters": "./packages/adapters/index.mjs"
   },
+  "bin": {"kdlc": "./packages/cli/bin.mjs"},
   "packageManager": "npm@11.5.1",
   "engines": {
     "node": ">=22.23.2 <25",
@@ -17,6 +21,8 @@
     "check:governance": "node scripts/verify-governance.mjs",
     "test:extensions": "node --test tests/governance/extensions.test.mjs",
     "test:governance": "node --test tests/governance/*.test.mjs",
+    "generate:distribution": "node packages/adapters/generate.mjs",
+    "check:distribution": "node packages/adapters/generate.mjs --check",
     "test": "npm run check:governance && npm run test:governance"
   },
   "dependencies": {

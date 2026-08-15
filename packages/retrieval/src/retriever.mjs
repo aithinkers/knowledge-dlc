@@ -144,6 +144,43 @@ export class FederatedRetriever {
     return snapshot;
   }
 
+  #authorizedMode(authorization, principal, mode) {
+    const authorizationState = authorizationStates.get(authorization); let principalHash;
+    try { principalHash = artifactHash(immutableJson(principal ?? null)); }
+    catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
+    const authorizedMode = authorizationState?.modes.get(mode);
+    if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt <= this.authorizationMonotonic()
+      || authorizationState.principalHash !== principalHash || !authorizedMode) retrievalFail("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED", "Retrieval requires a matching current precomputed authorization snapshot");
+    return authorizedMode;
+  }
+
+  async fetch({ authorization, principal, uri, mode = "audit" }) {
+    const started = this.monotonic();
+    try {
+      if (!MODES.has(mode)) retrievalFail("KDLC_QUERY_MODE", "Unsupported retrieval query mode");
+      const authorizedMode = this.#authorizedMode(authorization, principal, mode);
+      const match = /^kb:\/\/([^/@]+)(?:@([^/]+))?\/(.+)$/.exec(uri ?? "");
+      if (!match) return noDisclosure();
+      const [, mountId, revision, conceptId] = match;
+      const preparedMount = authorizedMode.mounts.find(({ mount }) => mount.id === mountId && (!revision || mount.resolved_ref === revision));
+      const prepared = preparedMount?.concepts.find(({ concept }) => concept.id === conceptId);
+      if (!prepared) return noDisclosure();
+      await verifyMountIdentity(preparedMount.mount);
+      const conceptPath = `${preparedMount.mount.root}/${prepared.metadata.path}`;
+      let bytes;
+      try {
+        if (canonicalJson(fileIdentity(await lstat(conceptPath))) !== canonicalJson(prepared.fileIdentity)) throw new Error("identity mismatch");
+        bytes = await this.readConcept(conceptPath);
+        if (byteHash(bytes) !== prepared.metadata.byte_hash) throw new Error("byte mismatch");
+      } catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
+      const qualified = `kb://${mountId}@${preparedMount.mount.resolved_ref}/${conceptId}`;
+      return immutableJson({ status: "ok", uri: qualified, body: bytes.toString("utf8"), content_hash: byteHash(bytes), citations: [{ concept: qualified, knowledge_base_id: mountId, revision: preparedMount.mount.resolved_ref, tree_hash: preparedMount.mount.tree_hash }], source_citations: prepared.sourceCitations, timing_class: "bounded-floor" });
+    } finally {
+      const remaining = this.minimumDurationMs - (this.monotonic() - started);
+      if (remaining > 0) await this.wait(remaining);
+    }
+  }
+
   async search({ authorization, principal, query, mode = "wiki-only", minimumTrust = "unverified", staleBehavior = "warn", limit = 20, includeSources = false }) {
     const started = this.monotonic(); let auditEvent = null;
     try {
@@ -151,11 +188,8 @@ export class FederatedRetriever {
       if (!(minimumTrust in TRUST)) retrievalFail("KDLC_TRUST_TIER", "Unsupported minimum trust tier");
       if (!["warn", "exclude", "fail"].includes(staleBehavior)) retrievalFail("KDLC_FRESHNESS_POLICY", "Unsupported stale behavior");
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) retrievalFail("KDLC_RETRIEVAL_LIMIT", "Retrieval limit must be between 1 and 100");
-      const authorizationState = authorizationStates.get(authorization); let principalHash, principalSnapshot;
-      try { principalSnapshot = immutableJson(principal ?? null); principalHash = artifactHash(principalSnapshot); } catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
-      const authorizedMode = authorizationState?.modes.get(mode);
-      if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt <= this.authorizationMonotonic()
-        || authorizationState.principalHash !== principalHash || !authorizedMode) retrievalFail("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED", "Retrieval requires a matching current precomputed authorization snapshot");
+      let principalSnapshot; try { principalSnapshot = immutableJson(principal ?? null); } catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
+      const authorizedMode = this.#authorizedMode(authorization, principal, mode);
       const queryTerms = terms(query); if (!queryTerms.length) return noDisclosure();
       const current = this.now(); const today = current.toISOString().slice(0, 10); const eligible = []; const { internallyDenied } = authorizedMode;
       for (const { mount, concepts } of authorizedMode.mounts) {

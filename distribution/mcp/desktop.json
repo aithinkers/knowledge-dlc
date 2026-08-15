@@ -1,0 +1,1 @@
+{"name":"kdlc","requested_roots":["project"],"transport":{"args":["packages/mcp/stdio.mjs"],"command":"node","type":"stdio"},"version":"0.2.0"}
