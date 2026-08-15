@@ -210,9 +210,10 @@
       "title": "Refresh dependency and GitHub Action runtimes before release",
       "issue": 36,
       "specification_sections": ["32", "35", "36"],
-      "status": "in-progress",
+      "status": "implemented",
       "evidence": {
         "implementation": [
+          ".github/workflows/candidate-tests.yml",
           ".github/workflows/codeql.yml",
           ".github/workflows/dependency-review.yml",
           ".github/workflows/governance.yml",
