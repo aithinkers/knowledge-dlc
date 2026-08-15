@@ -50,9 +50,34 @@ export class LeaseLockManager {
   async reacquire(resource, { owner, priorLeaseId, process, leaseMs, recovery = {}, actor, reason, workflowId }) {
     return this.coordinated(resource, "recover", async () => {
       const lockPath = this.path(resource); const recordPath = this.recordPath(resource);
+      const recoveryLeaseId = `recovery-${this.store.token(JSON.stringify([resource, owner, priorLeaseId, recovery.workflow_id, recovery.transaction_id]))}`;
+      const auditRecovery = async () => {
+        if (this.audit && workflowId) await this.audit.append(workflowId, {
+          actor, action: "lock.broken", subject: resource, result: "stale", reason, prior_owner: owner,
+          idempotency_key: `lock-recovery:${recoveryLeaseId}`
+        });
+      };
       let prior = null;
       if (await this.store.exists(recordPath)) {
         const firstToken = await this.store.tokenOf(recordPath); prior = await this.store.readJson(recordPath);
+        const isRecoveryHandoff = prior.owner === owner
+          && prior.lease_id === recoveryLeaseId
+          && prior.recovery?.workflow_id === recovery.workflow_id
+          && prior.recovery?.transaction_id === recovery.transaction_id;
+        if (isRecoveryHandoff) {
+          const alive = this.store.processIsAlive(prior.process_id);
+          if (alive !== true) {
+            if (alive !== false || Date.parse(prior.expires_at) > this.clock.millis()) {
+              throw conflict("Recovery handoff is live or unverifiable", { resource, owner: prior.owner });
+            }
+            const processId = Number(process);
+            if (!Number.isSafeInteger(processId) || processId <= 0) throw conflict("Lock requires a valid local process ID", { resource });
+            prior.process_id = processId; prior.acquired_at = this.clock.now(); prior.heartbeat_at = prior.acquired_at;
+            prior.expires_at = new Date(this.clock.millis() + leaseMs).toISOString(); prior.lease_ms = leaseMs;
+            await this.store.writeJsonAtomic(recordPath, prior);
+          }
+          await auditRecovery(); return prior;
+        }
         const belongsToRecovery = prior.owner === owner
           && prior.lease_id === priorLeaseId
           && prior.recovery?.workflow_id === recovery.workflow_id
@@ -75,14 +100,12 @@ export class LeaseLockManager {
       const acquired = this.clock.now();
       const record = {
         resource, owner, process_id: processId,
-        lease_id: this.ids?.next?.("lease") ?? `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        lease_id: recoveryLeaseId,
         acquired_at: acquired, heartbeat_at: acquired, expires_at: new Date(this.clock.millis() + leaseMs).toISOString(), lease_ms: leaseMs, recovery
       };
       try { await this.store.writeJsonAtomic(recordPath, record); }
       catch (error) { await this.store.removeDirectory(lockPath).catch(() => {}); throw error; }
-      if (prior && this.audit && workflowId) await this.audit.append(workflowId, {
-        actor, action: "lock.broken", subject: resource, result: "stale", reason, prior_owner: prior.owner
-      });
+      if (prior) await auditRecovery();
       return record;
     });
   }

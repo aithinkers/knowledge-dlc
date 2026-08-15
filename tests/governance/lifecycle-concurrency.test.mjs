@@ -161,9 +161,10 @@ test("FEAT-002 finalizing publication recovers forward after audit without rollb
 
 test("FEAT-002 finalizing crash recovery reacquires dead target leases durably", async (context) => {
   const f = await fixture(context); await f.store.writeTextAtomic("knowledge/crash.md", "before");
-  const auditWriter = new AuditWriter({ ...f, ids: new IDs("recovery-audit") }); let failPublication = true;
+  const auditWriter = new AuditWriter({ ...f, ids: new IDs("recovery-audit") }); let failPublication = true; let failLockRecovery = true;
   const audit = { append: async (workflowId, event) => {
     if (failPublication && event.action === "publication.committed") { failPublication = false; throw new Error("audit crashed"); }
+    if (failLockRecovery && event.action === "lock.broken") { failLockRecovery = false; throw new Error("lock audit unavailable"); }
     return auditWriter.append(workflowId, event);
   } };
   const original = new TransactionManager({ ...f, audit, ids: new IDs("recovery-old"), token: sha256Token, transactionLeaseMs: 100 });
@@ -176,8 +177,22 @@ test("FEAT-002 finalizing crash recovery reacquires dead target leases durably",
   await f.store.writeJsonAtomic(recordPath, dead);
 
   const recovery = new TransactionManager({ ...f, audit, ids: new IDs("recovery-new"), token: sha256Token, transactionLeaseMs: 100 });
-  await recovery.locks.breakStale(resource, { actor: "process:kdlc-engine", reason: "confirmed dead publication owner", workflowId: "wf" });
-  assert.equal(await f.store.exists(recordPath), false);
+  await assert.rejects(recovery.recover("wf", prepared.transaction_id), /lock audit unavailable/);
+  const replacement = await f.store.readJson(recordPath);
+  assert.notEqual(replacement.lease_id, oldLeaseId);
+  assert.equal((await f.store.readJson(recovery.path("wf", prepared.transaction_id))).targets[0].lock_lease_id, oldLeaseId);
+  replacement.process_id = 2_147_483_647; replacement.expires_at = new Date(f.clock.millis() - 1).toISOString();
+  await f.store.writeJsonAtomic(recordPath, replacement);
+
+  const originalWrite = f.store.writeJsonAtomic.bind(f.store); let failJournalHandoff = true;
+  f.store.writeJsonAtomic = async (path, value) => {
+    if (failJournalHandoff && path === recovery.path("wf", prepared.transaction_id) && value.targets[0].lock_lease_id !== oldLeaseId) {
+      failJournalHandoff = false; throw new Error("journal handoff crashed");
+    }
+    return originalWrite(path, value);
+  };
+  await assert.rejects(recovery.recover("wf", prepared.transaction_id), /journal handoff crashed/);
+  assert.equal((await f.store.exists(recordPath)), false);
   const committed = await recovery.recover("wf", prepared.transaction_id);
   assert.equal(committed.state, "committed"); assert.equal(await f.store.readText("knowledge/crash.md"), "canonical");
   assert.notEqual((await f.store.readJson(recovery.path("wf", prepared.transaction_id))).targets[0].lock_lease_id, oldLeaseId);
