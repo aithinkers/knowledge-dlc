@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import {
   mkdir,
@@ -12,6 +12,7 @@ import {
 import { basename, dirname, resolve } from "node:path";
 
 import {
+  artifactHash,
   canonicalJson,
   materializeScaffold,
   scaffoldProject,
@@ -21,9 +22,11 @@ import {
   parseYamlArtifact,
 } from "../contracts/index.mjs";
 import { FederationResolver } from "../federation/index.mjs";
+import { PrincipalAuthority, ReviewContextAuthority, RuntimeTrustAuthority } from "../agents/index.mjs";
 import { NodeFileStore } from "../lifecycle/src/index.mjs";
 import { normalize } from "../normalizers/index.mjs";
 import { FederatedRetriever } from "../retrieval/index.mjs";
+import { DurableArtifactStore, GovernedAgentWorkflows } from "../workflows/index.mjs";
 
 export const CLI_COMMANDS = Object.freeze([
   "init",
@@ -360,6 +363,11 @@ export class KdlcEngine {
       ],
       minimum_trust: "unverified",
       stale_behavior: "warn",
+    });
+    await atomicJson(this.path("governance-authority.json"), {
+      api_version: "kdlc.dev/runtime-authority/v1",
+      key_id: `project-${id}`,
+      key_base64: randomBytes(32).toString("base64"),
     });
     return { ...project, files };
   }
@@ -761,9 +769,11 @@ export function createLocalProjectEngine(options = {}) {
     ) {
       principal = {
         ...requestedPrincipal,
+        id: record.id ?? record.actor,
         scopes: [...record.scopes],
         clearance: record.clearance,
         compartments: [...record.compartments],
+        review_roles: Array.isArray(record.review_roles) ? [...record.review_roles] : [],
       };
       policy = candidate;
     }
@@ -866,12 +876,84 @@ export function createLocalProjectEngine(options = {}) {
     }
     throw missing("Requested source excerpt is unavailable");
   };
+  const authorityPath = resolve(root, ".kdlc/governance-authority.json");
+  let governed = {};
+  if (policy && existsSync(authorityPath) && Array.isArray(policy.review_contexts)) {
+    const authorityRecord = JSON.parse(readFileSync(authorityPath, "utf8"));
+    const key = Buffer.from(authorityRecord.key_base64 ?? "", "base64");
+    if (authorityRecord.api_version === "kdlc.dev/runtime-authority/v1" && key.byteLength >= 32 && portable(authorityRecord.key_id)) {
+      const store = new DurableArtifactStore(resolve(root, ".kdlc/governed"));
+      const trustAuthority = new RuntimeTrustAuthority({ key, keyId: authorityRecord.key_id });
+      const principalAuthority = new PrincipalAuthority(policy.principals.map((record) => ({
+        id: record.id ?? record.actor,
+        actor: record.actor,
+        principal_mode: record.principal_mode ?? "local",
+        ...(record.issuer ? { issuer: record.issuer } : {}),
+        review_roles: Array.isArray(record.review_roles) ? record.review_roles : [],
+      })));
+      const contextAuthority = new ReviewContextAuthority(policy.review_contexts);
+      const indexStore = new NodeFileStore(root);
+      const indexPath = (proposalId) => `.kdlc/governed/proposal-index/${proposalId}.json`;
+      const proposalIndex = async (proposalId) => {
+        if (!portable(proposalId) || !await indexStore.exists(indexPath(proposalId))) throw missing("Requested proposal is unavailable");
+        return indexStore.readJson(indexPath(proposalId));
+      };
+      const harness = async (workflowId, review = false) => GovernedAgentWorkflows.create({
+        store,
+        trustAuthority,
+        reviewContextSession: contextAuthority.establish(workflowId),
+        ...(review ? { session: principalAuthority.establishReviewSession(principal.id, principal.review_roles[0]) } : {}),
+      });
+      governed = {
+        proposal_create: async ({ proposal }) => {
+          const workflowId = proposal?.workflow_id;
+          if (!portable(workflowId) || !["ingest", "adopt"].includes(proposal?.task)) throw inputError("proposal requires a portable workflow_id and recorded ingest/adopt task");
+          const runtime = await harness(workflowId);
+          const output = await runtime.runRecorded({ task: proposal.task, workflowId, recording: proposal.recording, normalizedEvidence: proposal.normalized_evidence });
+          const assembled = [];
+          for (const item of output.proposals) {
+            const packet = await runtime.assembleReview({ workflowId, proposalId: item.id });
+            const path = indexPath(item.id);
+            const value = { workflow_id: workflowId, proposal_id: item.id, packet_hash: packet.packet_hash };
+            await indexStore.withMutex(`${path}.lock`, { owner: `proposal-index:${process.pid}`, clock: { now: () => new Date().toISOString(), millis: () => Date.now() } }, async () => {
+              if (await indexStore.exists(path)) {
+                if (canonicalJson(await indexStore.readJson(path)) !== canonicalJson(value)) throw new EngineError("KDLC_STATE_CONFLICT", "Proposal index conflicts", EXIT.conflict);
+              } else await indexStore.writeJsonAtomic(path, value);
+            });
+            assembled.push({ proposal: item, packet: packet.packet, packet_hash: packet.packet_hash });
+          }
+          return { workflow_id: workflowId, proposals: assembled, model: output.model };
+        },
+        review_packet: async ({ proposal_id: proposalId }) => {
+          if (!principal.review_roles.length) throw missing("Requested proposal is unavailable");
+          const index = await proposalIndex(proposalId);
+          const packet = await store.get(`workflow/runs/${index.workflow_id}/reviews/${proposalId}/packet.json`);
+          if (artifactHash(packet) !== index.packet_hash) throw new EngineError("KDLC_HASH_CONFLICT", "Review packet drifted", EXIT.conflict);
+          return { proposal_id: proposalId, workflow_id: index.workflow_id, packet_hash: index.packet_hash, packet };
+        },
+        review_submit: async ({ proposal_id: proposalId, decision, receipt_id: receiptId }) => {
+          const index = await proposalIndex(proposalId);
+          const runtime = await harness(index.workflow_id, true);
+          return runtime.decide({ workflowId: index.workflow_id, proposalId, decision, receiptId });
+        },
+        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current }) => {
+          const index = await proposalIndex(proposalId);
+          const runtime = await harness(index.workflow_id, true);
+          const receipt = await store.get(`workflow/runs/${index.workflow_id}/receipts/${receiptId}.json`);
+          const decision = await store.get(`workflow/runs/${index.workflow_id}/reviews/${proposalId}/decision.json`);
+          trustAuthority.activateReview({ workflowId: index.workflow_id, receipt, decision });
+          return runtime.preparePublication({ workflowId: index.workflow_id, proposalId, receiptId, current });
+        },
+      };
+    }
+  }
   const handlers = policy
     ? {
         query: search,
         kb_search: search,
         kb_fetch: fetchConcept,
         source_excerpt: sourceExcerpt,
+        ...governed,
         trace: fetchConcept,
         kb_trace: fetchConcept,
         ingest,
