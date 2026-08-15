@@ -179,7 +179,7 @@ before issue #44 is complete.
 PR #52, linked to issue #41, may establish a one-time protected statistical-
 evaluation transition contract for implementation PR #42. It supersedes closed
 PR #43 and applies only to PR #42 head
-`f9f7dd760236d1da5ba0c7e59e185c7a6dfb3f63`, based on
+`5bb07d1ae225c2de94875c280289cdc3fc735eb8`, based on
 `488eb7a28ad4dbc84e6df97e99a4f8386f9f21e5`, and only to these protected
 before/after SHA-256 byte transitions (`absent` means a newly protected file):
 
@@ -214,9 +214,9 @@ before/after SHA-256 byte transitions (`absent` means a newly protected file):
   `9a2d13e7a6724b74c7cd4690c940b0231e21a90d2d3547365c5d82b021fac9ec`.
 - `scripts/statistical-evidence-validation.mjs`:
   `4c77651cbb0c9c68162540c6443f9cf91f4334fdb9a2c8b2cfdbadbe177e28c1` to
-  `7acaf25edb396a66d7ca9dba0f4d33615a8cdd8da38f40f0958ecb0b277722b6`.
+  `ad882eca65c7e1975dc48fa4ad2d47996ad4d915917ab318f9b2d06d27952b50`.
 
-PR #42 must contain exactly 18 changed paths and 468 additions/142 deletions.
+PR #42 must contain exactly 18 changed paths and 488 additions/142 deletions.
 Besides the protected transitions above, its only permitted paths are
 `distribution/release/conformance-statement.json`,
 `distribution/release/statistical/profile.json`, `docs/release-readiness.md`,
