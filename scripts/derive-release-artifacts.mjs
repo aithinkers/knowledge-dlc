@@ -27,10 +27,13 @@ await withReleaseCleanup(async () => {
   if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("trusted double-package derivation is not reproducible");
   const consumer = resolve(temporary, "consumer"); await mkdir(consumer); await writeFile(resolve(consumer, "package.json"), '{"name":"kdlc-trusted-release-smoke","private":true,"type":"module"}\n');
   await execute(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", resolve(destinations[0], builds[0].filename)], { cwd: consumer, env: safeEnvironment, maxBuffer: 32 * 1024 * 1024, ...npmOptions });
-  const canonicalConsumer = await realpath(consumer); const doctor = resolve(temporary, "doctor"); await mkdir(doctor); const canonicalDoctor = await realpath(doctor);
+  const canonicalConsumer = await realpath(consumer);
   const bin = resolve(canonicalConsumer, "node_modules", "knowledge-dlc", "packages", "cli", "bin.mjs"); const readable = [`--allow-fs-read=${canonicalConsumer}`, `--allow-fs-read=${consumer}`];
-  await execute(process.execPath, ["--permission", ...readable, `--allow-fs-write=${canonicalConsumer}`, `--allow-fs-write=${consumer}`, bin, "init", "--output", "json"], { cwd: canonicalConsumer, env: safeEnvironment, maxBuffer: 16 * 1024 * 1024 });
-  await execute(process.execPath, ["--permission", ...readable, `--allow-fs-read=${canonicalDoctor}`, `--allow-fs-read=${doctor}`, `--allow-fs-write=${canonicalDoctor}`, `--allow-fs-write=${doctor}`, bin, "doctor", "--output", "json"], { cwd: canonicalDoctor, env: safeEnvironment, maxBuffer: 16 * 1024 * 1024 });
+  const writable = [`--allow-fs-write=${canonicalConsumer}`, `--allow-fs-write=${consumer}`];
+  const initialized = JSON.parse((await execute(process.execPath, ["--permission", ...readable, ...writable, bin, "init", "--output", "json"], { cwd: canonicalConsumer, env: safeEnvironment, maxBuffer: 16 * 1024 * 1024 })).stdout);
+  if (initialized.ok !== true) throw new Error("installed CLI init did not establish a governed project");
+  const diagnosed = JSON.parse((await execute(process.execPath, ["--permission", ...readable, ...writable, bin, "doctor", "--output", "json"], { cwd: canonicalConsumer, env: safeEnvironment, maxBuffer: 16 * 1024 * 1024 })).stdout);
+  if (diagnosed.ok !== true || diagnosed.data?.healthy !== true || !diagnosed.data.diagnostics?.some(({ id, status }) => id === "project.manifest" && status === "pass")) throw new Error("installed CLI doctor did not verify the initialized governed project");
   await execute(process.execPath, ["--permission", ...readable, "--input-type=module", "--eval", "await import('knowledge-dlc/cli'); await import('knowledge-dlc/adapters');"], { cwd: canonicalConsumer, env: { ...safeEnvironment, NODE_PATH: resolve(canonicalConsumer, "node_modules").split(delimiter).join(delimiter) }, maxBuffer: 16 * 1024 * 1024 });
   const policy = JSON.parse(await readFile(resolve(candidate, "security/supply-chain-policy.json"), "utf8")); const head = process.env.KDLC_HEAD_SHA;
   if (!/^[0-9a-f]{40}$/u.test(head ?? "")) throw new Error("trusted candidate head is unavailable");

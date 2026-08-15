@@ -20,11 +20,13 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.deepEqual(new Set(releaseMatrixCells.map(({ os }) => os)), new Set(["linux", "win32", "darwin"]));
   assert.deepEqual(releaseMatrixCommandIds, ["full", "offline", "release", "statistical", "clean-rebuild", "supply-chain", "pack", "cli", "import"]);
   const workflow = await readFile(resolve(root, ".github/workflows/release-matrix.yml"), "utf8");
+  const derivationSource = await readFile(resolve(root, "scripts/derive-release-artifacts.mjs"), "utf8");
   const attributes = await readFile(resolve(root, ".gitattributes"), "utf8");
   const parsedWorkflow = parseYamlArtifact(workflow);
   assert.match(attributes, /^\* text=auto eol=lf$/m);
   assert.match(workflow, /release-matrix:\r?\n    name: Release matrix/); assert.match(workflow, /npm install --global npm@11\.5\.1/); assert.match(workflow, /needs\.matrix\.result != 'success'/);
   assert.match(workflow, /name: Bind exact installed npm CLI/); assert.match(workflow, /test "\$\(node "\$npm_cli" --version\)" = 11\.5\.1/); assert.match(workflow, /KDLC_NPM_CLI/);
+  assert.match(derivationSource, /bin, "doctor"[\s\S]+cwd: canonicalConsumer/); assert.match(derivationSource, /id === "project\.manifest" && status === "pass"/); assert.doesNotMatch(derivationSource, /canonicalDoctor/);
   const aggregatorSteps = parsedWorkflow.jobs["release-matrix"].steps;
   const trustedCheckout = aggregatorSteps.find((step) => step.name === "Check out trusted release verifier");
   assert.equal(trustedCheckout.with.ref, "${{ github.event.pull_request.base.sha || github.sha }}");
