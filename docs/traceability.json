@@ -11,84 +11,201 @@
       "id": "REQ-GOV-001",
       "title": "Enforce issue-to-release traceability and agent development workflow",
       "issue": 1,
-      "specification_sections": ["5.2", "28", "29", "35"],
+      "specification_sections": [
+        "5.2",
+        "28",
+        "29",
+        "35"
+      ],
       "status": "verified",
       "evidence": {
-        "implementation": ["AGENTS.md", ".github/CODEOWNERS", ".github/workflows/governance.yml", "development/agent-workflow.json", "scripts/verify-governance.mjs"],
-        "tests": ["tests/governance/governance.test.mjs"]
+        "implementation": [
+          "AGENTS.md",
+          ".github/CODEOWNERS",
+          ".github/workflows/governance.yml",
+          "development/agent-workflow.json",
+          "scripts/verify-governance.mjs"
+        ],
+        "tests": [
+          "tests/governance/governance.test.mjs"
+        ]
       }
     },
     {
       "id": "REQ-GOV-002",
       "title": "Enforce relationship-aware development traceability",
       "issue": 14,
-      "specification_sections": ["5.2", "28", "29", "35"],
+      "specification_sections": [
+        "5.2",
+        "28",
+        "29",
+        "35"
+      ],
       "status": "verified",
       "evidence": {
-        "implementation": ["AGENTS.md", ".github/workflows/candidate-tests.yml", ".github/workflows/governance.yml", "scripts/governance-validation.mjs", "scripts/verify-governance.mjs", "scripts/verify-pr-traceability.mjs"],
-        "tests": ["tests/governance/governance.test.mjs"]
+        "implementation": [
+          "AGENTS.md",
+          ".github/workflows/candidate-tests.yml",
+          ".github/workflows/governance.yml",
+          "scripts/governance-validation.mjs",
+          "scripts/verify-governance.mjs",
+          "scripts/verify-pr-traceability.mjs"
+        ],
+        "tests": [
+          "tests/governance/governance.test.mjs"
+        ]
       }
     },
     {
       "id": "ADR-001",
       "title": "Resolve foundational implementation choices",
       "issue": 2,
-      "specification_sections": ["32.6", "37", "38"],
+      "specification_sections": [
+        "32.6",
+        "37",
+        "38"
+      ],
       "status": "implemented",
       "evidence": {
-        "implementation": [".nvmrc", ".npmrc", "docs/decisions/0001-foundational-architecture.md", "package.json"],
-        "tests": ["tests/governance/governance.test.mjs"]
+        "implementation": [
+          ".nvmrc",
+          ".npmrc",
+          "docs/decisions/0001-foundational-architecture.md",
+          "package.json"
+        ],
+        "tests": [
+          "tests/governance/governance.test.mjs"
+        ]
       }
     },
     {
       "id": "ADR-002",
       "title": "Record repository layout mapping and amend specification section 9.1",
       "issue": 54,
-      "specification_sections": ["9.1", "34"],
+      "specification_sections": [
+        "9.1",
+        "34"
+      ],
       "status": "implemented",
       "evidence": {
-        "implementation": ["docs/decisions/0002-repository-layout-mapping.md", "docs/knowledge-development-lifecycle-specification.md", "docs/specification-baseline.md"],
-        "tests": ["tests/governance/layout-mapping.test.mjs"]
+        "implementation": [
+          "docs/decisions/0002-repository-layout-mapping.md",
+          "docs/knowledge-development-lifecycle-specification.md",
+          "docs/specification-baseline.md"
+        ],
+        "tests": [
+          "tests/governance/layout-mapping.test.mjs"
+        ]
       }
     },
     {
       "id": "FEAT-001",
       "title": "Portable artifacts and deterministic indexes",
       "issue": 3,
-      "specification_sections": ["2.1", "9", "10", "11", "12", "13", "14", "26", "34", "35"],
+      "specification_sections": [
+        "2.1",
+        "9",
+        "10",
+        "11",
+        "12",
+        "13",
+        "14",
+        "26",
+        "34",
+        "35"
+      ],
       "status": "implemented",
       "evidence": {
-        "implementation": ["core/profiles/kdlc-base/profile.json", "core/schemas/okf-0.2/reference.json", "packages/contracts/index.mjs", "packages/core/index.mjs", "scripts/verify-okf-reference.mjs"],
-        "tests": ["tests/governance/core-contracts.test.mjs", "tests/governance/core-runtime.test.mjs"]
+        "implementation": [
+          "core/profiles/kdlc-base/profile.json",
+          "core/schemas/okf-0.2/reference.json",
+          "packages/contracts/index.mjs",
+          "packages/core/index.mjs",
+          "scripts/verify-okf-reference.mjs"
+        ],
+        "tests": [
+          "tests/governance/core-contracts.test.mjs",
+          "tests/governance/core-runtime.test.mjs"
+        ]
       }
     },
     {
       "id": "FEAT-002",
       "title": "Deterministic lifecycle engine",
       "issue": 4,
-      "specification_sections": ["15", "16", "17", "28", "29", "30", "34", "35"],
+      "specification_sections": [
+        "15",
+        "16",
+        "17",
+        "28",
+        "29",
+        "30",
+        "34",
+        "35"
+      ],
       "status": "implemented",
       "evidence": {
-        "implementation": ["core/schemas/lifecycle/stage.schema.json", "core/schemas/lifecycle/transaction.schema.json", "packages/lifecycle/src/index.mjs", "packages/lifecycle/src/store.mjs", "packages/lifecycle/src/workflows.mjs", "packages/lifecycle/src/transactions.mjs"],
-        "tests": ["tests/governance/lifecycle.test.mjs", "tests/governance/lifecycle-concurrency.test.mjs", "tests/governance/lifecycle-policy.test.mjs"]
+        "implementation": [
+          "core/schemas/lifecycle/stage.schema.json",
+          "core/schemas/lifecycle/transaction.schema.json",
+          "packages/lifecycle/src/index.mjs",
+          "packages/lifecycle/src/store.mjs",
+          "packages/lifecycle/src/workflows.mjs",
+          "packages/lifecycle/src/transactions.mjs"
+        ],
+        "tests": [
+          "tests/governance/lifecycle.test.mjs",
+          "tests/governance/lifecycle-concurrency.test.mjs",
+          "tests/governance/lifecycle-policy.test.mjs"
+        ]
       }
     },
     {
       "id": "FEAT-003",
       "title": "Bounded document normalization",
       "issue": 5,
-      "specification_sections": ["12", "27.1", "27.2", "34", "35"],
+      "specification_sections": [
+        "12",
+        "27.1",
+        "27.2",
+        "34",
+        "35"
+      ],
       "status": "implemented",
       "evidence": {
-        "implementation": ["core/schemas/normalization/normalizer-descriptor.schema.json", "core/schemas/normalization/normalization-manifest.schema.json", "core/schemas/normalization/normalized-unit.schema.json", "packages/normalizers/index.mjs", "packages/normalizers/src/descriptors.mjs", "packages/normalizers/src/normalize.mjs", "packages/normalizers/src/worker-client.mjs", "workers/normalizer/worker.mjs", "workers/normalizer/protocol.schema.json"],
-        "tests": ["tests/governance/normalization.test.mjs", "fixtures/normalization/README.md"]
+        "implementation": [
+          "core/schemas/normalization/normalizer-descriptor.schema.json",
+          "core/schemas/normalization/normalization-manifest.schema.json",
+          "core/schemas/normalization/normalized-unit.schema.json",
+          "packages/normalizers/index.mjs",
+          "packages/normalizers/src/descriptors.mjs",
+          "packages/normalizers/src/normalize.mjs",
+          "packages/normalizers/src/worker-client.mjs",
+          "workers/normalizer/worker.mjs",
+          "workers/normalizer/protocol.schema.json"
+        ],
+        "tests": [
+          "tests/governance/normalization.test.mjs",
+          "fixtures/normalization/README.md"
+        ]
       }
     },
     {
       "id": "FEAT-004",
       "title": "Governed agent workflows",
       "issue": 6,
-      "specification_sections": ["13", "14", "15", "16", "17", "21", "22", "23", "34", "35"],
+      "specification_sections": [
+        "13",
+        "14",
+        "15",
+        "16",
+        "17",
+        "21",
+        "22",
+        "23",
+        "34",
+        "35"
+      ],
       "status": "verified",
       "evidence": {
         "implementation": [
@@ -104,33 +221,75 @@
           "packages/workflows/stages/review-proposal.json",
           "packages/workflows/stages/prepare-publication.json"
         ],
-        "tests": ["tests/governance/agent-workflows.test.mjs", "tests/governance/freshness-contract.test.mjs"]
+        "tests": [
+          "tests/governance/agent-workflows.test.mjs",
+          "tests/governance/freshness-contract.test.mjs"
+        ]
       }
     },
     {
       "id": "FEAT-005",
       "title": "Federation and lexical retrieval",
       "issue": 7,
-      "specification_sections": ["18", "19", "20", "21", "27.3", "34", "35.8", "35.9"],
+      "specification_sections": [
+        "18",
+        "19",
+        "20",
+        "21",
+        "27.3",
+        "34",
+        "35.8",
+        "35.9"
+      ],
       "status": "implemented",
       "evidence": {
-        "implementation": ["core/schemas/federation/mount-resolution.schema.json", "core/schemas/retrieval/response.schema.json", "packages/federation/index.mjs", "packages/retrieval/index.mjs", "packages/core/src/temporal.mjs"],
-        "tests": ["tests/governance/federation-retrieval.test.mjs", "tests/governance/freshness-contract.test.mjs"]
+        "implementation": [
+          "core/schemas/federation/mount-resolution.schema.json",
+          "core/schemas/retrieval/response.schema.json",
+          "packages/federation/index.mjs",
+          "packages/retrieval/index.mjs",
+          "packages/core/src/temporal.mjs"
+        ],
+        "tests": [
+          "tests/governance/federation-retrieval.test.mjs",
+          "tests/governance/freshness-contract.test.mjs"
+        ]
       }
     },
     {
       "id": "FEAT-006",
       "title": "CLI, harness adapters, and MCP distribution",
       "issue": 8,
-      "specification_sections": ["9", "25", "32.6", "34", "35"],
+      "specification_sections": [
+        "9",
+        "25",
+        "32.6",
+        "34",
+        "35"
+      ],
       "status": "implemented",
-      "evidence": {"implementation": ["packages/cli/index.mjs", "packages/mcp/index.mjs", "packages/adapters/index.mjs", "distribution/conformance.json"], "tests": ["tests/governance/distribution.test.mjs"]}
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/mcp/index.mjs",
+          "packages/adapters/index.mjs",
+          "distribution/conformance.json"
+        ],
+        "tests": [
+          "tests/governance/distribution.test.mjs"
+        ]
+      }
     },
     {
       "id": "FEAT-007",
       "title": "Extension SDK and compatibility tooling",
       "issue": 9,
-      "specification_sections": ["23", "24", "31", "34"],
+      "specification_sections": [
+        "23",
+        "24",
+        "31",
+        "34"
+      ],
       "status": "implemented",
       "evidence": {
         "implementation": [
@@ -157,18 +316,48 @@
       "id": "FEAT-008",
       "title": "Built-in governance sensors and policy enforcement",
       "issue": 23,
-      "specification_sections": ["26", "27.1", "27.2", "27.3", "27.4", "27.5", "27.6", "27.7", "35.10", "35.11"],
+      "specification_sections": [
+        "26",
+        "27.1",
+        "27.2",
+        "27.3",
+        "27.4",
+        "27.5",
+        "27.6",
+        "27.7",
+        "35.10",
+        "35.11"
+      ],
       "status": "verified",
       "evidence": {
-        "implementation": ["packages/governance/src/controls.mjs", "packages/workflows/index.mjs", "core/schemas/governance/sensor-descriptor.schema.json", "core/schemas/governance/control-report.schema.json", "core/schemas/artifacts/claim.schema.json", "core/schemas/retrieval/response.schema.json", "packages/retrieval/src/retriever.mjs"],
-        "tests": ["tests/governance/governed-controls.test.mjs", "tests/governance/agent-workflows.test.mjs", "tests/fixtures/governance/adversarial.json"]
+        "implementation": [
+          "packages/governance/src/controls.mjs",
+          "packages/workflows/index.mjs",
+          "core/schemas/governance/sensor-descriptor.schema.json",
+          "core/schemas/governance/control-report.schema.json",
+          "core/schemas/artifacts/claim.schema.json",
+          "core/schemas/retrieval/response.schema.json",
+          "packages/retrieval/src/retriever.mjs"
+        ],
+        "tests": [
+          "tests/governance/governed-controls.test.mjs",
+          "tests/governance/agent-workflows.test.mjs",
+          "tests/fixtures/governance/adversarial.json"
+        ]
       }
     },
     {
       "id": "FEAT-009",
       "title": "Governed revocation, impact analysis, and verified erasure",
       "issue": 24,
-      "specification_sections": ["12.6", "20.6", "27.6", "27.7", "35.11", "36"],
+      "specification_sections": [
+        "12.6",
+        "20.6",
+        "27.6",
+        "27.7",
+        "35.11",
+        "36"
+      ],
       "status": "implemented",
       "evidence": {
         "implementation": [
@@ -193,10 +382,34 @@
       }
     },
     {
+      "id": "FEAT-010",
+      "title": "Complete the agent layer with all specification roles and harness agent definitions",
+      "issue": 55,
+      "specification_sections": [
+        "9.4",
+        "22",
+        "25",
+        "27.1"
+      ],
+      "status": "in-progress",
+      "evidence": {
+        "implementation": [
+          "AGENTS.md"
+        ],
+        "tests": [
+          "tests/governance/agent-workflows.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
-      "specification_sections": ["33", "35", "36"],
+      "specification_sections": [
+        "33",
+        "35",
+        "36"
+      ],
       "status": "in-progress",
       "evidence": {
         "implementation": [
@@ -244,7 +457,10 @@
       "id": "REQ-RELEASE-001",
       "title": "Bind administration-only release settings through owner attestation",
       "issue": 44,
-      "specification_sections": ["35", "36"],
+      "specification_sections": [
+        "35",
+        "36"
+      ],
       "status": "implemented",
       "evidence": {
         "implementation": [
@@ -264,7 +480,9 @@
       "id": "REQ-EVAL-001",
       "title": "Keep evaluator-only statistical gold out of provider requests",
       "issue": 41,
-      "specification_sections": ["36"],
+      "specification_sections": [
+        "36"
+      ],
       "status": "in-progress",
       "evidence": {
         "implementation": [
@@ -289,7 +507,11 @@
       "id": "REQ-SUPPLY-001",
       "title": "Refresh dependency and GitHub Action runtimes before release",
       "issue": 36,
-      "specification_sections": ["32", "35", "36"],
+      "specification_sections": [
+        "32",
+        "35",
+        "36"
+      ],
       "status": "implemented",
       "evidence": {
         "implementation": [
@@ -305,7 +527,10 @@
           "docs/supply-chain/sbom.spdx.json",
           "security/npm-package-files.json"
         ],
-        "tests": ["tests/governance/extensions.test.mjs", "tests/governance/release-readiness.test.mjs"]
+        "tests": [
+          "tests/governance/extensions.test.mjs",
+          "tests/governance/release-readiness.test.mjs"
+        ]
       }
     }
   ]
