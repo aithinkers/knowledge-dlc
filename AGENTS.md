@@ -179,7 +179,7 @@ before issue #44 is complete.
 PR #52, linked to issue #41, may establish a one-time protected statistical-
 evaluation transition contract for implementation PR #42. It supersedes closed
 PR #43 and applies only to PR #42 head
-`5bb07d1ae225c2de94875c280289cdc3fc735eb8`, based on
+`3ef7c53fe9dd9fd2a9d515a3d0fd86dac9d55788`, based on
 `488eb7a28ad4dbc84e6df97e99a4f8386f9f21e5`, and only to these protected
 before/after SHA-256 byte transitions (`absent` means a newly protected file):
 
@@ -190,7 +190,7 @@ before/after SHA-256 byte transitions (`absent` means a newly protected file):
   `c8bf55d47a048aedb1cf0fdcc46a770180b569679aa175f93cad2fa513155897` to
   `4488d88c6b97fcc9d63d25ac7938abb0cdc1d89c5ba0494bef68560c22be0e97`.
 - `core/schemas/release/statistical-gold.schema.json`: `absent` to
-  `83acffc36d7d1a3432edc64065726cd111d3454519268f181002b5f3e3155d9e`.
+  `e7d3444aa338fcc6603955f6ac51e4c5c28b950c47e20635a1caa4c96e63fac4`.
 - `core/schemas/release/statistical-profile.schema.json`:
   `f635bc1bb3653ef3de93361234a66cbc29c826ca346a719bc5209c58f5004a6b` to
   `b0f3cb5836149b4845fbecd0d72b36742eb8a00b32fc68affcc63773195f5be4`.
@@ -205,7 +205,7 @@ before/after SHA-256 byte transitions (`absent` means a newly protected file):
   `8cc7c6cf561e062bae2df5d5dfa019a2d4cb4d6696fdd3928386b57c50c12f44` to
   `4a365c3be2c23706de04d7ae94b9c0797873e1c4e461a9ce0242160d43c904a0`.
 - `distribution/release/statistical/gold.json`: `absent` to
-  `7c517dc09eb73f6e7801eba17977f1978c1f102c5d1515f48df8cd0ed4541c1e`.
+  `b8a0b21f3ade1dae3fcc60a67f9ae052f8bd364cafaab4ee6fcabd72dbf6b540`.
 - `distribution/release/statistical/prompt-manifest.json`:
   `e3335cc871f02582efdbd469afbd14fc38326ff9271422efe3c601f47710ca3f` to
   `26f4342f693f7ae15068008286e54be0853ac3558887de90b7739b23f7198bef`.
@@ -214,9 +214,9 @@ before/after SHA-256 byte transitions (`absent` means a newly protected file):
   `9a2d13e7a6724b74c7cd4690c940b0231e21a90d2d3547365c5d82b021fac9ec`.
 - `scripts/statistical-evidence-validation.mjs`:
   `4c77651cbb0c9c68162540c6443f9cf91f4334fdb9a2c8b2cfdbadbe177e28c1` to
-  `ad882eca65c7e1975dc48fa4ad2d47996ad4d915917ab318f9b2d06d27952b50`.
+  `e681e5264e59db1eee219c84883a1b71c8af748f127f08cde19e4ac28162a650`.
 
-PR #42 must contain exactly 18 changed paths and 488 additions/142 deletions.
+PR #42 must contain exactly 18 changed paths and 473 additions/142 deletions.
 Besides the protected transitions above, its only permitted paths are
 `distribution/release/conformance-statement.json`,
 `distribution/release/statistical/profile.json`, `docs/release-readiness.md`,
