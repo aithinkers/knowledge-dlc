@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { canonicalJson } from "../core/index.mjs";
 import { distributionDefinition as definition } from "./definitions.mjs";
-import { AGENT_DEFINITIONS, renderAgentMarkdown } from "../agents/definitions/index.mjs";
+import { AGENT_DEFINITIONS, renderAgentMarkdown, renderCodexAgentMarkdown, renderCodexAgentToml } from "../agents/definitions/index.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const commandLines = definition.cli_commands
@@ -67,8 +67,11 @@ for (const command of definition.cli_commands)
     `distribution/claude-code/commands/kdlc-${command}.md`,
     `---\ndescription: Run the governed K-DLC ${command} operation\nargument-hint: JSON string array\n---\n\nThe native Claude Code binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
   );
-for (const agent of AGENT_DEFINITIONS)
+for (const agent of AGENT_DEFINITIONS) {
   generated.set(`distribution/claude-code/agents/${agent.role}.md`, renderAgentMarkdown(agent));
+  generated.set(`distribution/codex/.codex/agents/${agent.role}.md`, renderCodexAgentMarkdown(agent));
+  generated.set(`distribution/codex/.codex/agents/${agent.role}.toml`, renderCodexAgentToml(agent));
+}
 let drift = false;
 for (const [relative, content] of generated) {
   const path = resolve(root, relative);

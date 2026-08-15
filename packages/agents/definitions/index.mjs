@@ -106,6 +106,21 @@ ${REVIEW_ONLY}`,
   },
 ]);
 
-export function renderAgentMarkdown({ role, description, writes, prompt }) {
-  return `---\nname: ${role}\ndescription: ${description}\n---\n\n# kdlc:${role}\n\nYou are the K-DLC ${role} agent (producer actor \`kdlc-${role}/0.2.0\`).\nCanonical write access: ${writes}. The deterministic runtime enforces your\nread/write paths from \`packages/agents/roles/${role}.json\`; prompt text never\nextends them.\n\n${prompt}\n\n## Security\n\n${SECURITY}\n`;
+function agentBody({ role, writes, prompt }) {
+  return `# kdlc:${role}\n\nYou are the K-DLC ${role} agent (producer actor \`kdlc-${role}/0.2.0\`).\nCanonical write access: ${writes}. The deterministic runtime enforces your\nread/write paths from \`packages/agents/roles/${role}.json\`; prompt text never\nextends them.\n\n${prompt}\n\n## Security\n\n${SECURITY}`;
+}
+
+export function renderCodexAgentMarkdown(definition) {
+  const { role, description } = definition;
+  return `---\nname: ${role}\ndescription: ${description}\n---\n\n${agentBody(definition)}\n`;
+}
+
+export function renderCodexAgentToml(definition) {
+  const { role, description } = definition;
+  return `name = "${role}"\ndescription = "${description}"\ndeveloper_instructions = """\n${agentBody(definition)}\n"""\n`;
+}
+
+export function renderAgentMarkdown(definition) {
+  const { role, description } = definition;
+  return `---\nname: ${role}\ndescription: ${description}\n---\n\n${agentBody(definition)}\n`;
 }
