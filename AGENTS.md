@@ -176,6 +176,67 @@ changes. It is consumed and expires immediately when PR #49 merges. A later
 ordinary PR must demonstrate green `Trusted release state` and `Release matrix`
 before issue #44 is complete.
 
+PR #52, linked to issue #41, may establish a one-time protected statistical-
+evaluation transition contract for implementation PR #42. It supersedes closed
+PR #43 and applies only to PR #42 head
+`efa9590aa4102a53ffb3cb2273f3b5ccadc431b5`, based on
+`488eb7a28ad4dbc84e6df97e99a4f8386f9f21e5`, and only to these protected
+before/after SHA-256 byte transitions (`absent` means a newly protected file):
+
+- `core/schemas/release/statistical-capture.schema.json`:
+  `f881a21b2659437fd4047fcd0ec660837d014dc77250d155d673bf88e60122bb` to
+  `a62fd1c9d4b7027491bde8c6166226f2a64cb758dd1b85f3f1cc1cc65d09dc45`.
+- `core/schemas/release/statistical-corpus.schema.json`:
+  `c8bf55d47a048aedb1cf0fdcc46a770180b569679aa175f93cad2fa513155897` to
+  `4488d88c6b97fcc9d63d25ac7938abb0cdc1d89c5ba0494bef68560c22be0e97`.
+- `core/schemas/release/statistical-gold.schema.json`: `absent` to
+  `e905a695ab0a5c1c41fe97e09b005bf110eee624acb37e6957eaa9128907f845`.
+- `core/schemas/release/statistical-profile.schema.json`:
+  `f635bc1bb3653ef3de93361234a66cbc29c826ca346a719bc5209c58f5004a6b` to
+  `b0f3cb5836149b4845fbecd0d72b36742eb8a00b32fc68affcc63773195f5be4`.
+- `core/schemas/release/statistical-provider-request.schema.json`: `absent` to
+  `be70ddad6b44da946f05a352fb113d55911d94aa33356e80f1f87c900dcca1b2`.
+- `core/schemas/release/statistical-report.schema.json`:
+  `84eb37936aaf355b25777edf056def3b49beacc01b5a98d6f6c84be125c62dff` to
+  `6dee99ad861c2bacb34dc877d0183c838916d1b8fc3a91c67df3151acada9ba2`.
+- `core/schemas/release/statistical-response.schema.json`: `absent` to
+  `951e5f7b9c314a0010083f705e24e16bbe0e28d94b0f5530c3f046c0991d66f7`.
+- `distribution/release/statistical/corpus.json`:
+  `8cc7c6cf561e062bae2df5d5dfa019a2d4cb4d6696fdd3928386b57c50c12f44` to
+  `4a365c3be2c23706de04d7ae94b9c0797873e1c4e461a9ce0242160d43c904a0`.
+- `distribution/release/statistical/gold.json`: `absent` to
+  `b8a0b21f3ade1dae3fcc60a67f9ae052f8bd364cafaab4ee6fcabd72dbf6b540`.
+- `distribution/release/statistical/prompt-manifest.json`:
+  `e3335cc871f02582efdbd469afbd14fc38326ff9271422efe3c601f47710ca3f` to
+  `26f4342f693f7ae15068008286e54be0853ac3558887de90b7739b23f7198bef`.
+- `scripts/governance-validation.mjs`:
+  `56822bc96cfd3dd3cd9ba4f5ba45af2b204a9009f79bff1c89aac8195bf11ea0` to
+  `9a2d13e7a6724b74c7cd4690c940b0231e21a90d2d3547365c5d82b021fac9ec`.
+- `scripts/statistical-evidence-validation.mjs`:
+  `4c77651cbb0c9c68162540c6443f9cf91f4334fdb9a2c8b2cfdbadbe177e28c1` to
+  `e681e5264e59db1eee219c84883a1b71c8af748f127f08cde19e4ac28162a650`.
+
+PR #42 must contain exactly 18 changed paths and 474 additions/142 deletions.
+Besides the protected transitions above, its only permitted paths are
+`distribution/release/conformance-statement.json`,
+`distribution/release/statistical/profile.json`, `docs/release-readiness.md`,
+`docs/traceability.json`, `security/npm-package-files.json`, and
+`tests/governance/statistical-release.test.mjs`. Candidate tests and every
+required or security check other than the protected `Repository policy` and
+trusted `Release matrix` self-differences must pass. Those self-differences may
+arise only because the trusted base rejects the exact protected bytes and
+preregistration profile above; `Trusted release state`, all six platform cells,
+and every unrelated release check must pass. The exact head must pass the full
+Node 24 suite, focused statistical tests, recorded evaluation, statistical,
+release, supply-chain, distribution, audit, and diff checks locally, and an
+independent read-only agent must approve that exact head with no unresolved
+critical or high finding. Capture must remain at 0/30 and no provider or network
+call may occur. Any rebase, amendment, different byte hash, extra path,
+unrelated failed check, live capture, or missing exact-head review is
+unauthorized. This authority is usable only after PR #52 merges, is consumed
+and expires immediately when PR #42 merges, and authorizes no later statistical
+corpus, gold, prompt, schema, scorer, verifier, or protected-list change.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
