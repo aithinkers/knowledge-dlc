@@ -543,6 +543,24 @@
       }
     },
     {
+      "id": "REQ-TRACE-001",
+      "title": "Correct FEAT-008 section 26 scope and disclose the sensor-definition gap",
+      "issue": 74,
+      "specification_sections": [
+        "26"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "docs/release-readiness.md",
+          "docs/traceability.json"
+        ],
+        "tests": [
+          "tests/governance/governance.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
