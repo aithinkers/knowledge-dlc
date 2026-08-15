@@ -37,7 +37,7 @@ const temporary = async (t) => {
     const writable = async (path) => {
       let metadata; try { metadata = await lstat(path); } catch { return; }
       if (metadata.isDirectory()) {
-        await chmod(path, 0o700);
+        try { await chmod(path, 0o700); } catch (error) { if (error.code === "ENOENT") return; throw error; }
         let directory; try { directory = await opendir(path); } catch (error) { if (error.code === "ENOENT") return; throw error; }
         for await (const entry of directory) await writable(resolve(path, entry.name));
       }
@@ -867,6 +867,61 @@ test("FEAT-006 governed packet, decision, and publication survive engine restart
   const publication = await restarted.execute("publish_request", { proposal_id: proposal.proposal.id, receipt_id: "rr_restart", current });
   assert.equal(publication.intent.receipt_id, "rr_restart");
   await restarted.close();
+});
+
+test("FEAT-006 governed recorded workflow has equivalent semantics across shipped transports", async (t) => {
+  const recording = JSON.parse(await readFile(resolve(repository, "tests/fixtures/models/ingest-recording.json"), "utf8"));
+  const normalized_evidence = JSON.parse(await readFile(resolve(repository, "tests/fixtures/workflows/ingest-normalized.json"), "utf8"));
+  const configure = async (root, served = false) => {
+    await new KdlcEngine({ root, clock }).execute("init", { project_id: "semantic.project" });
+    const path = resolve(root, ".kdlc/principal-policy.json"), policy = JSON.parse(await readFile(path, "utf8"));
+    const context = { evidence: normalized_evidence.units.map((unit) => ({ source_id: normalized_evidence.source_id, source_hash: normalized_evidence.source_hash, locator: unit.locator, excerpt: unit.text, authority: "trusted:test", access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "deterministic", warnings: [] })), sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: artifactHash("sensor") }], impact: { links: [], dependents: [], freshness_change: null, unresolved_conflicts: [] }, resolved: { profile: { id: "kdlc-base", version: "0.2.0", hash: artifactHash("profile") }, policies: [{ id: "team-policy", version: "1", hash: artifactHash("policy") }], dependencies: {} }, provenance: { models: [{ id: "fixture-model-1" }], tools: [{ id: "kdlc-harness/0.2.0" }] }, budget: { model_tokens: 0, model_cost_usd: 0 } };
+    policy.review_contexts.push({ workflow_id: "wf_ingest", context });
+    if (served) policy.principals.push({ id: "served-reviewer", actor: "human:served-reviewer", principal_mode: "served", issuer: "https://id.example", subject: "served-reviewer", review_roles: ["trust-reviewer"], scopes: ["read", "mutate", "review", "publish"], clearance: "public", compartments: [] });
+    await writeFile(path, `${JSON.stringify(policy)}\n`, { mode: 0o600 });
+    return context;
+  };
+  const proposalInput = { proposal: { workflow_id: "wf_ingest", task: "ingest", recording, normalized_evidence } };
+  const semantics = async (call, context, receiptId) => {
+    const created = (await call("proposal_create", proposalInput)).result;
+    const proposal = created.proposals[0];
+    const reviewed = (await call("review_submit", { proposal_id: proposal.proposal.id, decision: "approved", receipt_id: receiptId })).result;
+    const current = { concept: proposal.proposal.concept.after, target_revision: proposal.proposal.target.revision, source_hashes: [normalized_evidence.source_hash], resolved_dependencies: context.resolved.dependencies, profile: context.resolved.profile, policies: context.resolved.policies };
+    const published = (await call("publish_request", { proposal_id: proposal.proposal.id, receipt_id: receiptId, current })).result;
+    return { packet_hash: proposal.packet_hash, proposal_hash: artifactHash(proposal.proposal), decision: reviewed.receipt.decision, receipt_packet_hash: reviewed.receipt.packet_hash, publication_packet_hash: published.intent.packet_hash, publication_subject: published.intent.subject };
+  };
+  const outcomes = [];
+  for (const [name, executable] of [["cli", resolve(repository, "packages/cli/bin.mjs")], ["claude", resolve(repository, "distribution/claude-code/run.mjs")], ["codex", resolve(repository, "distribution/codex/run.mjs")]]) {
+    const root = await temporary(t), context = await configure(root);
+    const call = async (operation, input) => {
+      const command = operation === "proposal_create" ? "proposal" : operation === "review_submit" ? "review" : "publish";
+      const args = operation === "proposal_create" ? [JSON.stringify(input)] : operation === "review_submit" ? [input.proposal_id, input.decision, input.receipt_id] : [input.proposal_id, input.receipt_id, JSON.stringify(input.current)];
+      const childArgs = executable.includes("/cli/") ? [executable, command, ...args, "--output", "json"] : [executable, command, "--output", "json", "--host-args-json", JSON.stringify(args)];
+      const child = spawn(process.execPath, childArgs, { cwd: root, stdio: ["ignore", "pipe", "pipe"] }); let output = ""; child.stdout.on("data", (chunk) => { output += chunk; }); const [code] = await once(child, "exit"); assert.equal(code, 0, name); return JSON.parse(output);
+    };
+    outcomes.push(await semantics(call, context, `rr_${name}`));
+  }
+  {
+    const root = await temporary(t), context = await configure(root), server = new McpProjectServer({ root, projectId: "semantic.project" });
+    const call = async (operation, input) => {
+      const names = { proposal_create: "proposal_create", review_submit: "review_submit", publish_request: "publish_request" };
+      const source = new PassThrough(), output = new PassThrough(); let text = ""; output.setEncoding("utf8"); output.on("data", (chunk) => { text += chunk; });
+      const serving = serveStdio(server, { input: source, output }); source.end(`${JSON.stringify({ jsonrpc: "2.0", id: 80, method: "tools/call", params: { name: names[operation], arguments: input } })}\n`); await serving;
+      return JSON.parse(text).result.structuredContent;
+    };
+    outcomes.push(await semantics(call, context, "rr_stdio")); await server.close();
+  }
+  {
+    const root = await temporary(t), context = await configure(root, true), server = new McpProjectServer({ root, projectId: "semantic.project", principal: { actor: "human:served-reviewer", principal_mode: "served", issuer: "https://id.example", subject: "served-reviewer", scopes: ["read", "mutate", "review", "publish"] } });
+    const mapper = new ServedPrincipalMapper([{ token: "semantic-token", actor: "human:served-reviewer", issuer: "https://id.example", subject: "served-reviewer", scopes: ["read", "mutate", "review", "publish"] }]);
+    const http = await createStreamableHttpServer({ server, principalMapper: mapper }), endpoint = `http://127.0.0.1:${http.address().port}/mcp`;
+    const call = async (operation, input) => {
+      const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer semantic-token", "content-type": "application/json", accept: "application/json", "mcp-protocol-version": "2025-06-18" }, body: JSON.stringify({ jsonrpc: "2.0", id: 81, method: "tools/call", params: { name: operation, arguments: input } }) });
+      return (await response.json()).result.structuredContent;
+    };
+    outcomes.push(await semantics(call, context, "rr_http")); await new Promise((resolveClose) => http.close(resolveClose)); await server.close();
+  }
+  for (const outcome of outcomes.slice(1)) assert.deepEqual(outcome, outcomes[0]);
 });
 
 test("FEAT-006 durable coordination fails bounded when its configured root is absent", async (t) => {

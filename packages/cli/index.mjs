@@ -35,6 +35,7 @@ export const CLI_COMMANDS = Object.freeze([
   "adopt",
   "ingest",
   "query",
+  "proposal",
   "review",
   "publish",
   "status",
@@ -71,6 +72,7 @@ const operationScopes = Object.freeze({
   migrate: "mutate",
   review: "review",
   proposal_create: "mutate",
+  proposal: "mutate",
   review_submit: "review",
   review_packet: "review",
   publish: "publish",
@@ -756,7 +758,7 @@ export function parseCli(argv) {
     [input.proposal_id, input.receipt_id] = positionals;
     if (positionals[2]) input.current = JSON.parse(positionals[2]);
   }
-  if (["reconcile-edits", "migrate"].includes(operation) && positionals[0]) Object.assign(input, JSON.parse(positionals[0]));
+  if (["proposal", "reconcile-edits", "migrate"].includes(operation) && positionals[0]) Object.assign(input, JSON.parse(positionals[0]));
   return { operation, input, output };
 }
 export function renderEnvelope(envelope, output = "text") {
@@ -1019,6 +1021,7 @@ export function createLocalProjectEngine(options = {}) {
         kb_fetch: fetchConcept,
         source_excerpt: sourceExcerpt,
         ...governed,
+        ...(governed.proposal_create ? { proposal: governed.proposal_create } : {}),
         ...(governed.review_submit ? { review: governed.review_submit } : {}),
         ...(governed.publish_request ? { publish: governed.publish_request } : {}),
         ...(governed.reconcile_edits ? { "reconcile-edits": governed.reconcile_edits, reconcile_edits: governed.reconcile_edits } : {}),

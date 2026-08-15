@@ -7,6 +7,7 @@ All commands invoke the same governed CLI engine.
 - /kdlc:adopt → `kdlc adopt --output json`
 - /kdlc:ingest → `kdlc ingest --output json`
 - /kdlc:query → `kdlc query --output json`
+- /kdlc:proposal → `kdlc proposal --output json`
 - /kdlc:review → `kdlc review --output json`
 - /kdlc:publish → `kdlc publish --output json`
 - /kdlc:status → `kdlc status --output json`
