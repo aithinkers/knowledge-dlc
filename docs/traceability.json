@@ -99,9 +99,12 @@
       "id": "FEAT-005",
       "title": "Federation and lexical retrieval",
       "issue": 7,
-      "specification_sections": ["18", "19", "20", "21", "27.3", "34", "35"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "specification_sections": ["18", "19", "20", "21", "27.3", "34", "35.8", "35.9"],
+      "status": "implemented",
+      "evidence": {
+        "implementation": ["core/schemas/federation/mount-resolution.schema.json", "core/schemas/retrieval/response.schema.json", "packages/federation/index.mjs", "packages/retrieval/index.mjs"],
+        "tests": ["tests/governance/federation-retrieval.test.mjs"]
+      }
     },
     {
       "id": "FEAT-006",

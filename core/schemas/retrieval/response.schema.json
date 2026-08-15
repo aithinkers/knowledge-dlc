@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/retrieval/response.schema.json",
+  "title": "K-DLC federated retrieval response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "results", "citations", "conflicts", "warnings", "timing_class"],
+  "properties": {
+    "status": {"enum": ["ok", "not_found"]},
+    "timing_class": {"const": "bounded-floor"},
+    "results": {"type": "array", "items": {"$ref": "#/$defs/result"}},
+    "citations": {"type": "array", "items": {"$ref": "#/$defs/citation"}},
+    "conflicts": {"type": "array", "items": {"$ref": "#/$defs/conflict"}},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/warning"}},
+    "retrieved_at": {"$ref": "../common.schema.json#/$defs/dateTime"},
+    "resolved_bases": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false, "required": ["revision", "tree_hash"],
+        "properties": {"revision": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}, "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"}}
+      }
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "not_found"}}}, "then": {"properties": {"results": {"type": "array", "maxItems": 0}, "citations": {"type": "array", "maxItems": 0}, "conflicts": {"type": "array", "maxItems": 0}, "warnings": {"type": "array", "maxItems": 0}}}},
+    {"if": {"properties": {"status": {"const": "ok"}}}, "then": {"properties": {"results": {"type": "array", "minItems": 1}}}}
+  ],
+  "$defs": {
+    "result": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "title", "description", "score", "trust", "freshness", "citation", "source_citations", "applicability"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^kb://"},
+        "title": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "description": {"type": ["string", "null"]},
+        "score": {"type": "number", "minimum": 0},
+        "trust": {"enum": ["unverified", "machine-confirmed", "human-reviewed"]},
+        "freshness": {"enum": ["current", "stale"]},
+        "citation": {"$ref": "#/$defs/citation"},
+        "source_citations": {"type": "array", "items": {"$ref": "#/$defs/sourceCitation"}},
+        "applicability": true
+      }
+    },
+    "sourceCitation": {
+      "type": "object", "additionalProperties": false, "required": ["id", "resource"],
+      "properties": {"id": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}, "resource": {"$ref": "../common.schema.json#/$defs/resource"}, "source_hash": {"$ref": "../common.schema.json#/$defs/digest"}}
+    },
+    "conflict": {
+      "type": "object", "additionalProperties": false, "required": ["subject", "target", "relationship", "applicability"],
+      "properties": {"subject": {"type": "string", "pattern": "^kb://"}, "target": {"type": "string", "pattern": "^kb://"}, "relationship": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}, "applicability": true}
+    },
+    "warning": {
+      "type": "object", "additionalProperties": false, "required": ["code", "subject"],
+      "properties": {"code": {"const": "KDLC_STALE"}, "subject": {"type": "string", "pattern": "^kb://"}}
+    },
+    "citation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["concept", "knowledge_base_id", "revision", "tree_hash"],
+      "properties": {
+        "concept": {"type": "string", "pattern": "^kb://"},
+        "knowledge_base_id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
+        "revision": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+        "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+      }
+    }
+  }
+}

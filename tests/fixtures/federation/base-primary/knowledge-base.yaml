@@ -1,0 +1,8 @@
+api_version: kdlc.dev/v1alpha1
+kind: KnowledgeBase
+metadata: { id: acme.primary, name: primary, title: Primary Knowledge, version: 1.0.0 }
+format: { type: okf, version: "0.2" }
+profile: base@1
+ownership: { owner: "team:primary", maintainers: ["team:primary"] }
+access: { classification: internal }
+publication: { stable_requires: { human_verifiers: 1 }, default_stale_after: 180d }

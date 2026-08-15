@@ -26,7 +26,9 @@ export const CONTRACT_SCHEMA_PATHS = Object.freeze({
   lifecycleTransaction: "core/schemas/lifecycle/transaction.schema.json",
   lifecycleAuditEvent: "core/schemas/lifecycle/audit-event.schema.json",
   lifecycleLeaseLock: "core/schemas/lifecycle/lease-lock.schema.json",
-  lifecycleSensorResult: "core/schemas/lifecycle/sensor-result.schema.json"
+  lifecycleSensorResult: "core/schemas/lifecycle/sensor-result.schema.json",
+  federationMountResolution: "core/schemas/federation/mount-resolution.schema.json",
+  retrievalResponse: "core/schemas/retrieval/response.schema.json"
 });
 
 export async function loadContractSchemas(root = moduleRoot, additionalPaths = {}) {

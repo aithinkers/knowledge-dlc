@@ -1,0 +1,8 @@
+api_version: kdlc.dev/v1alpha1
+kind: KnowledgeBase
+metadata: { id: acme.legacy, name: legacy, title: Legacy Knowledge, version: 2.0.0 }
+format: { type: okf, version: "0.2" }
+profile: base@1
+ownership: { owner: "team:legacy", maintainers: ["team:legacy"] }
+access: { classification: internal }
+publication: { stable_requires: { human_verifiers: 0 }, default_stale_after: 180d }
