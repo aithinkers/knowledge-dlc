@@ -4,6 +4,7 @@
 All commands invoke the same governed CLI engine.
 
 - /kdlc:init → `kdlc init --output json`
+- /kdlc:setup → `kdlc setup --output json`
 - /kdlc:adopt → `kdlc adopt --output json`
 - /kdlc:ingest → `kdlc ingest --output json`
 - /kdlc:query → `kdlc query --output json`

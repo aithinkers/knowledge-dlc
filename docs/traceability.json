@@ -712,6 +712,27 @@
           "tests/governance/statistical-release.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-016",
+      "title": "kdlc setup installer for harness surfaces and per-harness quick starts",
+      "issue": 82,
+      "specification_sections": [
+        "9.2",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/setup.mjs",
+          "packages/cli/index.mjs",
+          "docs/getting-started.md",
+          "README.md"
+        ],
+        "tests": [
+          "tests/governance/getting-started.test.mjs"
+        ]
+      }
     }
   ]
 }

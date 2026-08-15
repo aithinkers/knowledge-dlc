@@ -61,18 +61,54 @@ projections — plain files remain the durable contract.
 
 ## Pick your harness
 
-| Harness | Install | Invoke |
+One setup command installs any harness surface into your project, with runner
+paths resolved against this installation — the installed files work from any
+directory:
+
+```bash
+kdlc setup <claude-code|codex|kiro|kiro-ide|mcp>[,...] <project-directory>
+```
+
+| Harness | Setup | Invoke |
 | --- | --- | --- |
-| **Claude Code** | `claude plugin install <repo>/distribution/claude-code` | `/kdlc:<operation>`, `kdlc:<role>` agents |
-| **Codex CLI** (≥ 0.145) | run Codex from this checkout; surface in `distribution/codex/` | `$kdlc` skill, `.codex/agents/<role>` |
-| **Kiro CLI** (≥ 2.6) | run Kiro from this checkout; surface in `distribution/kiro/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
-| **Kiro IDE** | run Kiro from this checkout; surface in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
-| **Any MCP client** | `distribution/mcp/desktop.json` (stdio) / `custom-app.json` (HTTP) | `kb_search`, `kb_fetch`, `proposal_create`, … |
+| **Claude Code** | `kdlc setup claude-code .` prints the `claude plugin install …/distribution/claude-code` command | `/kdlc:<operation>`, `kdlc:<role>` agents |
+| **Codex CLI** (≥ 0.145) | `kdlc setup codex <project>` writes `.codex/` (skill + agents) into your project; surface source in `distribution/codex/` | `$kdlc` skill, `.codex/agents/<role>` |
+| **Kiro CLI** (≥ 2.6) | `kdlc setup kiro <project>` writes `.kiro/` (17 skills + 9 agents) into your project; surface source in `distribution/kiro/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Kiro IDE** | `kdlc setup kiro-ide <project>`; surface source in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Any MCP client** | `kdlc setup mcp <project>` writes a stdio config; HTTP packaging in `distribution/mcp/` | `kb_search`, `kb_fetch`, `proposal_create`, … |
+
+### Quick start per harness
+
+**Claude Code**
+```bash
+claude plugin install <this-checkout>/distribution/claude-code
+# then, inside any project:
+/kdlc:init  →  /kdlc:ingest ["notes.md"]  →  /kdlc:query ["what do we know?"]
+```
+
+**Kiro CLI / Kiro IDE**
+```bash
+kdlc setup kiro ~/my-project        # or kiro-ide
+# in Kiro, from ~/my-project:
+/kdlc-init  →  /kdlc-ingest  →  /kdlc-query
+# the kdlc:<role> agents appear under .kiro/agents/
+```
+
+**Codex CLI**
+```bash
+kdlc setup codex ~/my-project
+# in Codex: $kdlc with a JSON argument vector, e.g. ["init"]
+```
+
+**MCP (Claude Desktop or any client)**
+```bash
+kdlc setup mcp ~/my-project         # writes kdlc.mcp.json with absolute stdio paths
+```
 
 Adapters differ only in packaging: stage requirements, security policy, state
 transitions, and artifact contracts are identical everywhere (spec §25), and
 every distribution tree is generated from the authored core — CI fails on
-drift.
+drift. Setup output is derived from those same authored definitions.
 
 ## Quick start
 
