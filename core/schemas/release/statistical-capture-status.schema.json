@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/release/statistical-capture-status-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "status", "reason", "required_trials", "required_full_corpus_cases_per_trial", "captured_trials", "exclusions_allowed"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/statistical-capture-status/v1alpha1"},
+    "status": {"enum": ["blocked", "qualified"]},
+    "reason": {"type": "string", "minLength": 1},
+    "required_trials": {"const": 30},
+    "required_full_corpus_cases_per_trial": {"const": 12},
+    "captured_trials": {"enum": [0, 30]},
+    "exclusions_allowed": {"const": false},
+    "captures_path": {"const": "distribution/release/statistical/captures"},
+    "report_path": {"const": "distribution/release/statistical/report.json"},
+    "report_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "blocked"}}}, "then": {"properties": {"captured_trials": {"const": 0}, "captures_path": false, "report_path": false, "report_hash": false}}},
+    {"if": {"properties": {"status": {"const": "qualified"}}}, "then": {"required": ["captures_path", "report_path", "report_hash"], "properties": {"captured_trials": {"const": 30}}}}
+  ]
+}

@@ -14,6 +14,7 @@ const schemaPaths = Object.freeze({
   common: "core/schemas/common.schema.json", corpus: "core/schemas/release/statistical-corpus.schema.json",
   profile: "core/schemas/release/statistical-profile.schema.json", manifest: "core/schemas/release/statistical-manifest.schema.json",
   capture: "core/schemas/release/statistical-capture.schema.json", report: "core/schemas/release/statistical-report.schema.json",
+  status: "core/schemas/release/statistical-capture-status.schema.json",
 });
 const scorerIdentity = Object.freeze({ id: "kdlc-offline-statistical-scorer", version: 1, path: "scripts/statistical-evidence-validation.mjs" });
 export const sha256 = (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -118,5 +119,18 @@ export async function validatePendingStatisticalEvidence(root) {
     if (state.documents.model.status !== "awaiting-provider-inputs" || status.status !== "blocked" || status.captured_trials !== 0 || status.required_trials !== 30 || status.required_full_corpus_cases_per_trial !== state.caseIds.length || status.exclusions_allowed !== false) return ["statistical capture blocker is not exact and fail-closed"];
     return [];
   } catch (error) { return [`statistical preregistration is unavailable or invalid: ${error.message}`]; }
+}
+export async function validateStatisticalEvidence(root) {
+  try {
+    const state = await loadPreregistration(root); const status = await readJson(root, paths.status);
+    const validateStatus = state.ajv.getSchema("https://kdlc.dev/schemas/release/statistical-capture-status-1.json");
+    if (!validateStatus(status)) return { phase: "invalid", failures: [`capture status contract: ${state.ajv.errorsText(validateStatus.errors)}`] };
+    if (status.status === "blocked") return { phase: "pending", failures: await validatePendingStatisticalEvidence(root) };
+    if (state.documents.model.status !== "frozen") return { phase: "invalid", failures: ["qualified statistical evidence requires a frozen model manifest"] };
+    const captures = await loadCaptures(resolve(root, status.captures_path)); const derived = await scoreCaptures(root, captures);
+    const reportBytes = await readBytes(root, status.report_path); const report = JSON.parse(reportBytes);
+    if (sha256(reportBytes) !== status.report_hash || !same(report, derived) || derived.gate !== "passed") return { phase: "invalid", failures: ["qualified statistical report is not exact, hash-bound, and passing"] };
+    return { phase: "qualified", failures: [] };
+  } catch (error) { return { phase: "invalid", failures: [`statistical evidence is unavailable or invalid: ${error.message}`] }; }
 }
 export { paths as statisticalEvidenceFiles, schemaPaths as statisticalEvidenceSchemas };

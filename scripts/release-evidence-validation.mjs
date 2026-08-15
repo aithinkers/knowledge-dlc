@@ -8,6 +8,7 @@ import { descriptors } from "../packages/normalizers/index.mjs";
 import { artifactHash } from "../packages/core/index.mjs";
 import { readTrustedFile } from "./supply-chain-validation.mjs";
 import { conformanceModules, mandatoryProfileRequirements, mandatoryReleaseCases } from "./release-evidence-definition.mjs";
+import { validateStatisticalEvidence } from "./statistical-evidence-validation.mjs";
 
 const files = Object.freeze({
   conformance: "distribution/release/conformance-statement.json",
@@ -31,8 +32,18 @@ function same(left, right) { return JSON.stringify(left) === JSON.stringify(righ
 async function bytes(root, path) { return readTrustedFile(root, path); }
 async function json(root, path) { return JSON.parse((await bytes(root, path)).toString("utf8")); }
 
+export function validateReleaseLifecycle({ manifest, conformance, rel, statisticalPhase }) {
+  const failures = [];
+  const prerelease = manifest?.private === true && manifest?.version === "0.0.0-private" && conformance?.release_status === "not-ready" && rel?.status === "in-progress" && conformance?.pending_requirements?.some(({ id }) => id === "REL-001") && statisticalPhase === "pending";
+  const candidate = manifest?.private === false && /^[1-9][0-9]*\.[0-9]+\.[0-9]+$/u.test(manifest?.version ?? "") && conformance?.implementation?.version === manifest.version && conformance?.implementation?.private === false && conformance?.release_status === "release-candidate" && rel?.status === "verified" && !conformance?.pending_requirements?.some(({ id }) => id === "REL-001") && statisticalPhase === "qualified";
+  if (!prerelease && !candidate) failures.push("release lifecycle phase is inconsistent or attempts an unsupported publication/released state");
+  if (prerelease && (conformance.implementation?.version !== manifest.version || conformance.implementation?.private !== manifest.private)) failures.push("prerelease conformance does not exact-bind package metadata");
+  return failures;
+}
+
 export async function validateReleaseEvidence(root = resolve(import.meta.dirname, "..")) {
   const failures = [];
+  const statistical = await validateStatisticalEvidence(root); failures.push(...statistical.failures);
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   addFormats(ajv);
   const loadedSchemas = {};
@@ -117,15 +128,15 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
     const advertised = await json(root, "distribution/conformance.json");
     if (!same(advertised.tools, conformance.tools) || !same(advertised.transports, conformance.transports) || !same(advertised.modules, moduleNames) || !same(advertised.formats, conformance.format_profiles)) failures.push("release statement differs from exact generated distribution conformance");
   } catch (error) { failures.push(`generated distribution conformance is unavailable: ${error.message}`); }
-  try {
-    const manifest = await json(root, "package.json");
-    if (manifest.private !== true || manifest.version !== "0.0.0-private") failures.push("release evidence must preserve private non-final package state");
-  } catch (error) { failures.push(`package metadata is unavailable: ${error.message}`); }
+  let manifest;
+  try { manifest = await json(root, "package.json"); }
+  catch (error) { failures.push(`package metadata is unavailable: ${error.message}`); }
   try {
     const traceability = await json(root, "docs/traceability.json");
     const rel = traceability.requirements?.find(({ id }) => id === "REL-001");
     const erasure = traceability.requirements?.find(({ id }) => id === "FEAT-009");
-    if (rel?.issue !== 10 || rel.status !== "in-progress") failures.push("REL-001 traceability must remain in-progress on issue #10");
+    if (rel?.issue !== 10) failures.push("REL-001 traceability must remain bound to issue #10");
+    failures.push(...validateReleaseLifecycle({ manifest, conformance, rel, statisticalPhase: statistical.phase }));
     if (erasure?.issue !== 24 || !["implemented", "verified", "released"].includes(erasure.status) || !erasure.evidence?.tests?.includes("tests/governance/revocation-erasure.test.mjs")) failures.push("Governed conformance requires traceable merged FEAT-009 erasure evidence");
     for (const module of conformance.modules) for (const id of module.requirement_ids) {
       const traced = traceability.requirements?.find((entry) => entry.id === id);

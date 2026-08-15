@@ -4,7 +4,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["api_version", "release_status", "run_hash", "summary", "statistical_suite", "pending_release_evidence"],
   "properties": {
-    "api_version": {"const": "kdlc.dev/release-evaluation-report/v1alpha1"}, "release_status": {"const": "not-ready"},
+    "api_version": {"const": "kdlc.dev/release-evaluation-report/v1alpha1"}, "release_status": {"enum": ["not-ready", "release-candidate"]},
     "run_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"},
     "summary": {"type": "object", "additionalProperties": false, "required": ["total", "passed", "failed", "security_failures", "structural_gate"], "properties": {"total": {"type": "integer", "minimum": 1}, "passed": {"type": "integer", "minimum": 0}, "failed": {"type": "integer", "minimum": 0}, "security_failures": {"type": "integer", "minimum": 0}, "structural_gate": {"enum": ["passed", "failed"]}}},
     "statistical_suite": {"type": "object", "additionalProperties": false, "required": ["status", "release_blocking"], "properties": {"status": {"const": "pending"}, "release_blocking": {"const": true}}},

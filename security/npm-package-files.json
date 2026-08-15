@@ -64,6 +64,7 @@
     "core/schemas/release/recorded-run.schema.json",
     "core/schemas/release/release-matrix-result.schema.json",
     "core/schemas/release/statistical-capture.schema.json",
+    "core/schemas/release/statistical-capture-status.schema.json",
     "core/schemas/release/statistical-corpus.schema.json",
     "core/schemas/release/statistical-manifest.schema.json",
     "core/schemas/release/statistical-profile.schema.json",

@@ -11,7 +11,7 @@ import { artifactHash, byteHash, canonicalJson, generateHierarchicalIndexes, par
 import { FederationResolver } from "../../packages/federation/index.mjs";
 import { GovernanceControlAuthority, GovernanceControlEngine } from "../../packages/governance/index.mjs";
 import { FederatedRetriever } from "../../packages/retrieval/index.mjs";
-import { validateReleaseEvidence, releaseEvidenceFiles, releaseEvidenceSchemas } from "../../scripts/release-evidence-validation.mjs";
+import { validateReleaseEvidence, validateReleaseLifecycle, releaseEvidenceFiles, releaseEvidenceSchemas } from "../../scripts/release-evidence-validation.mjs";
 import { scrubbedReleaseEnvironment } from "../../scripts/release-evaluation-boundary.mjs";
 import { cleanRebuildIndexes } from "../../scripts/release-evidence-definition.mjs";
 import { readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
@@ -253,4 +253,18 @@ test("REL-001 Governed conformance literally binds merged FEAT-009 erasure evide
   assert.equal(trace.issue, 24);
   assert(["implemented", "verified", "released"].includes(trace.status));
   assert(trace.evidence.tests.includes("tests/governance/revocation-erasure.test.mjs"));
+});
+
+test("REL-001 release lifecycle accepts only coherent prerelease and qualified final-candidate phases", () => {
+  const pending = { id: "REL-001", status: "in-progress" }; const verified = { id: "REL-001", status: "verified" };
+  const prerelease = { release_status: "not-ready", implementation: { version: "0.0.0-private", private: true }, pending_requirements: [{ id: "REL-001" }] };
+  const candidate = { release_status: "release-candidate", implementation: { version: "1.0.0", private: false }, pending_requirements: [] };
+  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "0.0.0-private", private: true }, conformance: prerelease, rel: pending, statisticalPhase: "pending" }), []);
+  assert.deepEqual(validateReleaseLifecycle({ manifest: { version: "1.0.0", private: false }, conformance: candidate, rel: verified, statisticalPhase: "qualified" }), []);
+  for (const mutation of [
+    { manifest: { version: "1.0.0", private: false }, conformance: candidate, rel: verified, statisticalPhase: "pending" },
+    { manifest: { version: "1.0.0", private: false }, conformance: { ...candidate, implementation: { version: "2.0.0", private: false } }, rel: verified, statisticalPhase: "qualified" },
+    { manifest: { version: "1.0.0", private: false }, conformance: candidate, rel: { ...verified, status: "released" }, statisticalPhase: "qualified" },
+    { manifest: { version: "0.0.0-private", private: true }, conformance: { ...prerelease, pending_requirements: [] }, rel: pending, statisticalPhase: "pending" }
+  ]) assert.ok(validateReleaseLifecycle(mutation).length > 0);
 });

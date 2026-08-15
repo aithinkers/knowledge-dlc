@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateScorerBinding, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
+import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateScorerBinding, validateStatisticalEvidence, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
-async function perfectCapture(index) {
-  const state = await loadPreregistration(root);
+async function perfectCapture(index, evidenceRoot = root) {
+  const state = await loadPreregistration(evidenceRoot);
   const trial_id = `trial-${String(index).padStart(3, "0")}`;
   const results = state.documents.corpus.cases.map((entry, item) => {
     const response = { decision: entry.expected.decision, answer: entry.expected.required_terms.join(" ") }; const raw_output = JSON.stringify(response);
@@ -60,6 +60,22 @@ test("REL-001 trusted profile comparison rejects threshold, seed, trial, exclusi
     await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
     await assert.rejects(validateCandidatePreregistration(root, candidate), undefined, mutation);
   }
+});
+
+test("REL-001 qualified lifecycle accepts 30 exact trials and rejects missing captured evidence", async (context) => {
+  const candidate = await mkdtemp(resolve(tmpdir(), "kdlc-qualified-")); context.after(() => rm(candidate, { recursive: true, force: true }));
+  await cp(resolve(root, "core"), resolve(candidate, "core"), { recursive: true }); await cp(resolve(root, "distribution/release/statistical"), resolve(candidate, "distribution/release/statistical"), { recursive: true });
+  await mkdir(resolve(candidate, "scripts")); await cp(resolve(root, "scripts/statistical-evidence-validation.mjs"), resolve(candidate, "scripts/statistical-evidence-validation.mjs"));
+  const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json"); const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
+  const model = JSON.parse(await readFile(modelPath, "utf8")); Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
+  const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes); const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+  const capturesPath = resolve(candidate, "distribution/release/statistical/captures"); await mkdir(capturesPath);
+  const captures = []; for (let index = 1; index <= 30; index += 1) { const capture = await perfectCapture(index, candidate); captures.push(capture); await writeFile(resolve(capturesPath, `${capture.trial_id}.json`), `${JSON.stringify(capture)}\n`); }
+  const report = await scoreCaptures(candidate, captures); const reportBytes = `${JSON.stringify(report)}\n`; await writeFile(resolve(candidate, "distribution/release/statistical/report.json"), reportBytes);
+  const status = { api_version: "kdlc.dev/statistical-capture-status/v1alpha1", status: "qualified", reason: "Thirty complete provider trials passed the preregistered gate.", required_trials: 30, required_full_corpus_cases_per_trial: 12, captured_trials: 30, exclusions_allowed: false, captures_path: "distribution/release/statistical/captures", report_path: "distribution/release/statistical/report.json", report_hash: sha256(reportBytes) };
+  await writeFile(resolve(candidate, "distribution/release/statistical/capture-status.json"), `${JSON.stringify(status, null, 2)}\n`);
+  assert.deepEqual(await validateStatisticalEvidence(candidate), { phase: "qualified", failures: [] });
+  await rm(resolve(capturesPath, "trial-030.json")); assert.equal((await validateStatisticalEvidence(candidate)).phase, "invalid");
 });
 
 test("REL-001 offline scorer derives declared Wilson bounds from all 30 complete trials", async () => {
