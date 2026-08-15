@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 
-import { byteHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
+import { artifactHash, byteHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
 import { parseYamlArtifact } from "../../contracts/index.mjs";
 import { traverseHierarchicalIndex } from "./index-traversal.mjs";
 import { retrievalFail } from "./errors.mjs";
@@ -9,6 +9,7 @@ import { retrievalFail } from "./errors.mjs";
 const MODES = new Set(["wiki-only", "sources-only", "trusted-only", "fresh-only", "exploratory", "audit", "refresh"]);
 const TRUST = Object.freeze({ unverified: 0, "machine-confirmed": 1, "human-reviewed": 2 });
 const CONFLICT_TYPES = new Set(["contradicting", "conflict", "unresolved"]);
+const authorizationStates = new WeakMap();
 
 function terms(value) { return [...new Set(String(value).normalize("NFKC").toLocaleLowerCase("en").match(/[\p{L}\p{N}_-]+/gu) ?? [])]; }
 function trustTier(frontmatter) {
@@ -39,32 +40,67 @@ async function verifySnapshot(mount) {
   } catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
 }
 
+async function verifyMountIdentity(mount) {
+  try {
+    const manifestBytes = await readFile(`${mount.root}/knowledge-base.yaml`); const manifest = parseYamlArtifact(manifestBytes.toString("utf8"));
+    if (byteHash(manifestBytes) !== mount.manifest_hash || manifest?.metadata?.id !== mount.id) throw new Error("identity mismatch");
+  } catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
+}
+
 export class FederatedRetriever {
-  constructor({ mounts, policy, now = () => new Date(), minimumDurationMs = 25, monotonic = () => performance.now(), wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), readConcept = readFile, audit }) {
+  constructor({ mounts, policy, now = () => new Date(), minimumDurationMs = 25, monotonic = () => performance.now(), wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    authorizationTtlMs = 60_000, authorizationMonotonic = () => performance.now(), readConcept = readFile, audit }) {
     if (!policy?.authorizeMount || !policy?.authorizeConcept) retrievalFail("KDLC_POLICY_REQUIRED", "Retrieval requires trusted mount and concept authorization functions");
-    this.mounts = [...mounts]; this.policy = policy; this.now = now; this.minimumDurationMs = minimumDurationMs; this.monotonic = monotonic; this.wait = wait; this.readConcept = readConcept; this.audit = audit;
+    if (!Number.isSafeInteger(authorizationTtlMs) || authorizationTtlMs < 1 || authorizationTtlMs > 300_000) retrievalFail("KDLC_AUTHORIZATION_TTL", "Authorization snapshot lifetime must be between 1 and 300000 milliseconds");
+    this.mounts = [...mounts]; this.policy = policy; this.now = now; this.minimumDurationMs = minimumDurationMs; this.monotonic = monotonic; this.wait = wait;
+    this.authorizationTtlMs = authorizationTtlMs; this.authorizationMonotonic = authorizationMonotonic; this.readConcept = readConcept; this.audit = audit;
   }
 
-  async search({ principal, query, mode = "wiki-only", minimumTrust = "unverified", staleBehavior = "warn", limit = 20, includeSources = false }) {
+  async prepareAuthorization({ principal, queryModes = [...MODES] }) {
+    if (!Array.isArray(queryModes) || !queryModes.length || queryModes.some((mode) => !MODES.has(mode))) retrievalFail("KDLC_QUERY_MODE", "Authorization snapshot requires supported query modes");
+    let principalHash; try { principalHash = artifactHash(principal ?? null); }
+    catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
+    const modes = new Map();
+    const orderedMounts = [...this.mounts].sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const queryMode of [...new Set(queryModes)]) {
+      let internallyDenied = false;
+      const decisions = await Promise.all(orderedMounts.map(async (mount) => {
+        const mountAllowed = await this.policy.authorizeMount({ principal, mount, queryMode, capability: "read" }) === true;
+        if (!mountAllowed) { internallyDenied = true; return null; }
+        await verifySnapshot(mount);
+        const paths = await traverseHierarchicalIndex(mount.root); const catalogPaths = mount.retrieval_catalog.map(({ path }) => path).sort();
+        if (canonicalJson([...paths].sort()) !== canonicalJson(catalogPaths)) retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
+        const allowed = await Promise.all(mount.retrieval_catalog.map((metadata) => this.policy.authorizeConcept({
+          principal, mount, concept: { id: metadata.id, access: metadata.access }, queryMode, capability: "read"
+        })));
+        if (allowed.some((value) => value !== true)) internallyDenied = true;
+        return Object.freeze({ mount, concepts: Object.freeze(mount.retrieval_catalog.filter((_, index) => allowed[index] === true)) });
+      }));
+      modes.set(queryMode, Object.freeze({ internallyDenied, mounts: Object.freeze(decisions.filter(Boolean)) }));
+    }
+    const snapshot = Object.freeze({ kind: "kdlc-retrieval-authorization-1" });
+    authorizationStates.set(snapshot, Object.freeze({ retriever: this, principalHash, modes, expiresAt: this.authorizationMonotonic() + this.authorizationTtlMs }));
+    return snapshot;
+  }
+
+  async search({ authorization, principal, query, mode = "wiki-only", minimumTrust = "unverified", staleBehavior = "warn", limit = 20, includeSources = false }) {
     const started = this.monotonic();
     try {
       if (!MODES.has(mode)) retrievalFail("KDLC_QUERY_MODE", "Unsupported retrieval query mode");
       if (!(minimumTrust in TRUST)) retrievalFail("KDLC_TRUST_TIER", "Unsupported minimum trust tier");
       if (!["warn", "exclude", "fail"].includes(staleBehavior)) retrievalFail("KDLC_FRESHNESS_POLICY", "Unsupported stale behavior");
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) retrievalFail("KDLC_RETRIEVAL_LIMIT", "Retrieval limit must be between 1 and 100");
+      const authorizationState = authorizationStates.get(authorization); let principalHash;
+      try { principalHash = artifactHash(principal ?? null); } catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
+      const authorizedMode = authorizationState?.modes.get(mode);
+      if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt < this.authorizationMonotonic()
+        || authorizationState.principalHash !== principalHash || !authorizedMode) retrievalFail("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED", "Retrieval requires a matching current precomputed authorization snapshot");
       const queryTerms = terms(query); if (!queryTerms.length) return noDisclosure();
-      const today = this.now().toISOString().slice(0, 10); const eligible = []; let internallyDenied = false;
-      for (const mount of [...this.mounts].sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
-        const mountAllowed = await this.policy.authorizeMount({ principal, mount, queryMode: mode, capability: "read" }) === true;
-        if (!mountAllowed) { internallyDenied = true; continue; }
-        await verifySnapshot(mount);
-        const paths = await traverseHierarchicalIndex(mount.root);
-        const catalogPaths = mount.retrieval_catalog.map(({ path }) => path).sort();
-        if (canonicalJson([...paths].sort()) !== canonicalJson(catalogPaths)) retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
-        for (const metadata of mount.retrieval_catalog) {
+      const today = this.now().toISOString().slice(0, 10); const eligible = []; const { internallyDenied } = authorizedMode;
+      for (const { mount, concepts } of authorizedMode.mounts) {
+        await verifyMountIdentity(mount);
+        for (const metadata of concepts) {
           const { id, path } = metadata;
-          const allowed = await this.policy.authorizeConcept({ principal, mount, concept: { id, access: metadata.access }, queryMode: mode, capability: "read" }) === true;
-          if (!allowed) { internallyDenied = true; continue; }
           let bytes;
           try { bytes = await this.readConcept(`${mount.root}/${path}`); }
           catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }

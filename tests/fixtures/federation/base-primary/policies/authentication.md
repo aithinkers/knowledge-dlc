@@ -3,7 +3,7 @@ type: Policy
 title: Authentication Standard
 description: Authentication requires phishing-resistant credentials.
 status: stable
-access: { classification: internal, compartments: [engineering] }
+access: { classification: internal, compartments: [engineering], policy_ref: acme-access@4 }
 verified: { by: human:reviewer, at: 2026-08-01T00:00:00Z }
 stale_after: 2027-01-01
 relationships:

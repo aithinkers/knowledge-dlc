@@ -49,13 +49,15 @@ async function readRetrievalCatalog(root) {
     const expectedId = safePath ? entry.path.slice(0, -3) : null;
     const access = entry?.access;
     const validAccess = access && typeof access === "object" && !Array.isArray(access) && typeof access.classification === "string"
-      && (access.compartments === undefined || (Array.isArray(access.compartments) && access.compartments.every((item) => typeof item === "string")));
+      && (access.compartments === undefined || (Array.isArray(access.compartments) && access.compartments.every((item) => typeof item === "string")))
+      && (access.policy_ref === undefined || (typeof access.policy_ref === "string" && access.policy_ref.length > 0));
     if (!safePath || entry?.id !== expectedId || !/^sha256:[0-9a-f]{64}$/.test(entry?.byte_hash ?? "") || !validAccess || ids.has(entry.id) || paths.has(entry.path)) {
       federationFail("KDLC_RETRIEVAL_CATALOG", "Mounted retrieval catalog contains an invalid or duplicate concept entry");
     }
     ids.add(entry.id); paths.add(entry.path);
     return Object.freeze({ id: entry.id, path: entry.path, byte_hash: entry.byte_hash,
-      access: Object.freeze({ classification: access.classification, ...(access.compartments ? { compartments: Object.freeze([...access.compartments]) } : {}) }) });
+      access: Object.freeze({ classification: access.classification, ...(access.compartments ? { compartments: Object.freeze([...access.compartments]) } : {}),
+        ...(access.policy_ref ? { policy_ref: access.policy_ref } : {}) }) });
   });
   for (const concept of concepts) {
     let conceptBytes; let parsed;
