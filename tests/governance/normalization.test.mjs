@@ -30,10 +30,10 @@ function makePdf(value = "Hello PDF") {
 }
 
 const packages = {
-  docx: () => zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "word/document.xml": strToU8("<w:document xmlns:w='w'><w:body><w:p><w:r><w:t>Heading</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>") }),
-  xlsx: () => zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "xl/workbook.xml": strToU8("<workbook><sheets><sheet name='Data' sheetId='1'/></sheets><definedNames><definedName name='Area'>Data!A1:B2</definedName></definedNames></workbook>"), "xl/worksheets/sheet1.xml": strToU8("<worksheet><dimension ref='A1:B2'/><sheetData><row r='1'><c r='A1'><v>1</v></c><c r='B1'><f>A1+1</f><v>2</v></c></row></sheetData></worksheet>") }),
-  pptx: () => zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "ppt/presentation.xml": strToU8("<p:presentation xmlns:p='p'/>"), "ppt/slides/slide1.xml": strToU8("<p:sld xmlns:p='p' xmlns:a='a'><p:sp><a:t>Title</a:t></p:sp><p:cxnSp/></p:sld>") }),
-  vsdx: () => zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "visio/pages/page1.xml": strToU8("<PageContents><Shapes><Shape ID='1' NameU='Start'><Text>Start</Text></Shape><Shape ID='2' NameU='Next'><Text>Next</Text></Shape></Shapes><Connect FromSheet='1' ToSheet='2'/></PageContents>") })
+  docx: () => zipSync({ "[Content_Types].xml": strToU8("<Types><Override ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'/></Types>"), "word/document.xml": strToU8("<w:document xmlns:w='w'><w:body><w:p><w:r><w:t>Heading</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>") }),
+  xlsx: () => zipSync({ "[Content_Types].xml": strToU8("<Types><Override ContentType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'/></Types>"), "xl/workbook.xml": strToU8("<workbook><sheets><sheet name='Data' sheetId='1'/></sheets><definedNames><definedName name='Area'>Data!A1:B2</definedName></definedNames></workbook>"), "xl/worksheets/sheet1.xml": strToU8("<worksheet><dimension ref='A1:B2'/><sheetData><row r='1'><c r='A1'><v>1</v></c><c r='B1'><f>A1+1</f><v>2</v></c></row></sheetData></worksheet>") }),
+  pptx: () => zipSync({ "[Content_Types].xml": strToU8("<Types><Override ContentType='application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml'/></Types>"), "ppt/presentation.xml": strToU8("<p:presentation xmlns:p='p'/>"), "ppt/slides/slide1.xml": strToU8("<p:sld xmlns:p='p' xmlns:a='a'><p:sp><a:t>Title</a:t></p:sp><p:cxnSp/></p:sld>") }),
+  vsdx: () => zipSync({ "[Content_Types].xml": strToU8("<Types><Override ContentType='application/vnd.ms-visio.drawing.main+xml'/></Types>"), "visio/pages/page1.xml": strToU8("<PageContents><Shapes><Shape ID='1' NameU='Start'><Text>Start</Text></Shape><Shape ID='2' NameU='Next'><Text>Next</Text></Shape></Shapes><Connect FromSheet='1' ToSheet='2'/></PageContents>") })
 };
 
 test("FEAT-003 descriptor, manifest, and unit schemas validate every deterministic profile", async () => {
@@ -93,7 +93,7 @@ test("FEAT-003 corrupt, encrypted, oversized, archive-bomb, external, macro, and
 
 test("FEAT-003 deterministic units and probabilistic model-derived units remain separate", async () => {
   const bytes = Buffer.from("evidence"); const sourceHash = byteHash(bytes);
-  const derived = { unit_id: "unit_0123456789abcdef", kind: "ocr", parent_id: null, order: 0, text: "model text", locator: { kind: "line-range", start_line: 1, end_line: 1 }, source_hash: sourceHash, extraction_method: { mode: "probabilistic", normalizer: "kdlc.ocr", version: "1.0.0", model: { id: "fixture", version: "1" } }, quality_warnings: ["probabilistic"] };
+  const derived = { unit_id: "unit_0123456789abcdef", kind: "ocr", parent_id: null, order: 0, text: "model text", locator: { kind: "line-range", start_line: 1, end_line: 1 }, source_hash: sourceHash, extraction_method: { mode: "probabilistic", normalizer: "kdlc.ocr", version: "1.0.0", model: { id: "fixture", version: "1", provider: "recorded-fixture", recorded_output_hash: `sha256:${"b".repeat(64)}` } }, quality_warnings: ["probabilistic"] };
   const result = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [derived] });
   assert(result.units.length > 0); assert.equal(result.probabilisticUnits.length, 1); assert.deepEqual(result.manifest.outputs.map(({ mode }) => mode), ["deterministic", "probabilistic"]);
   const invalid = await normalize({ bytes, filename: "source.txt", probabilisticUnits: [{ ...derived, extraction_method: { ...derived.extraction_method, model: undefined } }] }); assert.equal(invalid.manifest.status, "quarantined");
@@ -102,11 +102,27 @@ test("FEAT-003 deterministic units and probabilistic model-derived units remain 
 });
 
 test("FEAT-003 restricted JSONL worker refuses active policy and returns bounded output", async () => {
-  const child = spawn(process.execPath, [join(root, "workers/normalizer/worker.mjs")], { shell: false, env: { PATH: process.env.PATH }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [join(root, "workers/normalizer/worker.mjs")], { shell: false, env: { PATH: process.env.PATH, KDLC_RESTRICTED_WORKER: "1" }, stdio: ["pipe", "pipe", "pipe"] });
   let output = ""; child.stdout.setEncoding("utf8"); child.stdout.on("data", (chunk) => { output += chunk; });
   child.stdin.end(`${JSON.stringify({ id: "ok", bytes_base64: Buffer.from("safe").toString("base64"), filename: "safe.txt", network: false, execute: false })}\n${JSON.stringify({ id: "deny", bytes_base64: "", filename: "safe.txt", network: true })}\n`);
   await once(child, "exit"); const records = output.trim().split("\n").map(JSON.parse); assert.equal(records[0].ok, true); assert.equal(records[1].ok, false); assert.match(records[1].error.message, /forbids/);
   const isolated = await runRestrictedNormalizer({ id: "isolated", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt" }, { timeoutMs: 5_000 });
   assert.equal(isolated.manifest.security.network, false); assert.equal(isolated.units.find(({ kind }) => kind === "line").text, "bounded");
   await assert.rejects(runRestrictedNormalizer({ id: "limited", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt" }, { outputBytes: 1 }), /output limit/);
+});
+
+test("FEAT-003 trusted ceilings, package identity, provenance, and portable paths fail closed", async () => {
+  assert.equal((await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", limits: { source_bytes: 99_000_000 } })).manifest.quarantine.code, "invalid-limits");
+  await assert.rejects(runRestrictedNormalizer({ id: "relax", bytes_base64: "", filename: "safe.txt", limits: { processing_ms: 99_000 } }), /cannot relax/);
+  const spoofed = zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "word/document.xml": strToU8("<w:document/>") });
+  assert.equal((await normalize({ bytes: spoofed, filename: "spoof.docx" })).manifest.quarantine.code, "unsupported");
+  const externalDrawio = await normalize({ bytes: Buffer.from("<mxfile><diagram><mxGraphModel><root><mxCell id='1' href='https://example.invalid'/></root></mxGraphModel></diagram></mxfile>"), filename: "external.drawio" });
+  assert.equal(externalDrawio.manifest.quarantine.code, "external-relationship");
+  const bomb = Buffer.from(deflateSync(strToU8(encodeURIComponent(`<mxGraphModel><root>${" ".repeat(50_000)}</root></mxGraphModel>`)))).toString("base64");
+  assert.equal((await normalize({ bytes: Buffer.from(`<mxfile><diagram>${bomb}</diagram></mxfile>`), filename: "bomb.drawio" })).manifest.quarantine.code, "limit-exceeded");
+  const quarantined = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", settings: { invalid: 1n } });
+  assert.doesNotThrow(() => JSON.stringify(quarantined.manifest));
+  const safe = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt" }); assert.throws(() => portableArtifacts(safe, ".."), /portable/);
+  const valid = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "source-7", normalizedAt: "2026-08-15T00:00:00Z" });
+  assert.equal(valid.manifest.source_id, "source-7"); assert.equal(valid.manifest.normalized_at, "2026-08-15T00:00:00Z");
 });

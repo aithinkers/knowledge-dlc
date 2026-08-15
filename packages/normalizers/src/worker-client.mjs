@@ -9,10 +9,13 @@ import { defaultLimits } from "./descriptors.mjs";
 const worker = fileURLToPath(new URL("../../../workers/normalizer/worker.mjs", import.meta.url));
 
 export async function runRestrictedNormalizer(request, { timeoutMs, memoryBytes, outputBytes } = {}) {
-  const limits = { ...defaultLimits, ...(request.limits ?? {}) }; const timeout = timeoutMs ?? limits.processing_ms; const maximumOutput = outputBytes ?? limits.output_bytes;
+  for (const [name, value] of Object.entries(request.limits ?? {})) if (!(name in defaultLimits) || !Number.isSafeInteger(value) || value <= 0 || value > defaultLimits[name]) throw new Error(`Normalizer limit cannot relax trusted ceiling: ${name}`);
+  const limits = { ...defaultLimits, ...(request.limits ?? {}) };
+  const bounded = (value, ceiling, name) => { if (value === undefined) return ceiling; if (!Number.isSafeInteger(value) || value <= 0 || value > ceiling) throw new Error(`${name} cannot relax trusted worker ceiling`); return value; };
+  const timeout = bounded(timeoutMs, limits.processing_ms, "timeoutMs"); const maximumOutput = bounded(outputBytes, limits.output_bytes, "outputBytes"); const maximumMemory = bounded(memoryBytes, limits.memory_bytes, "memoryBytes");
   const directory = await mkdtemp(join(tmpdir(), "kdlc-normalizer-"));
   try {
-    const child = spawn(process.execPath, [`--max-old-space-size=${Math.max(16, Math.floor((memoryBytes ?? limits.memory_bytes) / 1_048_576))}`, worker], { shell: false, cwd: directory, env: {}, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [`--max-old-space-size=${Math.max(16, Math.floor(maximumMemory / 1_048_576))}`, "--disable-proto=throw", worker], { shell: false, cwd: directory, env: { KDLC_RESTRICTED_WORKER: "1" }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = ""; let stderr = ""; let exceeded = false;
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout += chunk; if (Buffer.byteLength(stdout) > maximumOutput) { exceeded = true; child.kill("SIGKILL"); } });

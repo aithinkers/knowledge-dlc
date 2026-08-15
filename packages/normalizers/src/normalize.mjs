@@ -8,6 +8,7 @@ import { defaultLimits, descriptors } from "./descriptors.mjs";
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const security = Object.freeze({ network: false, executed_code: false, macros: false, external_relationships: false });
+const MAX_RATIO = 100;
 
 class Quarantine extends Error { constructor(code, message, details = {}) { super(message); this.code = code; this.details = details; } }
 const exceed = (name, actual, maximum) => { if (actual > maximum) throw new Quarantine("limit-exceeded", `${name} exceeds configured limit`, { limit: name, actual, maximum }); };
@@ -100,7 +101,9 @@ async function pdfProfile(bytes, sourceHash, limits) {
   const metadata = await document.getMetadata().catch(() => ({ info: {} })); const outline = await document.getOutline().catch(() => []);
   units.push(make("pdf-metadata", { kind: "page", page: 0 }, { structured_data: { metadata: metadata.info ?? {}, outline: (outline ?? []).map(({ title }) => title), page_count: document.numPages } }));
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-    const page = await document.getPage(pageNumber); const content = await page.getTextContent(); const annotations = await page.getAnnotations().catch(() => []); const pageText = content.items.map((item) => item.str).join(" ").trim();
+    const page = await document.getPage(pageNumber); const content = await page.getTextContent(); const annotations = await page.getAnnotations().catch(() => []);
+    if (annotations.some(({ url, unsafeUrl }) => typeof (url ?? unsafeUrl) === "string")) throw new Quarantine("external-relationship", "External PDF relationships are disabled", { page: pageNumber });
+    const pageText = content.items.map((item) => item.str).join(" ").trim();
     units.push(make("pdf-page", { kind: "page", page: pageNumber }, { text: pageText || "", structured_data: { width: page.view[2], height: page.view[3], text_blocks: content.items.length, images: 0, tables: 0, links: annotations.filter(({ subtype }) => subtype === "Link").map(({ url, dest }) => ({ url: url ?? null, destination: dest ?? null })) } }, pageText ? [] : ["scanned-or-empty-page; OCR requires probabilistic worker"]));
     for (const item of content.items) if (item.str?.trim()) units.push(make("pdf-text-block", { kind: "page-bbox", page: pageNumber, x: item.transform?.[4] ?? 0, y: item.transform?.[5] ?? 0, width: item.width ?? 0, height: item.height ?? 0 }, { text: item.str }));
   }
@@ -108,7 +111,14 @@ async function pdfProfile(bytes, sourceHash, limits) {
 }
 
 function officeKind(parts, requested) {
-  if (parts["word/document.xml"]) return "docx"; if (parts["xl/workbook.xml"]) return "xlsx"; if (parts["ppt/presentation.xml"]) return "pptx"; if (Object.keys(parts).some((name) => /^visio\/pages\/page\d+\.xml$/i.test(name))) return "vsdx";
+  if (!parts["[Content_Types].xml"]) throw new Quarantine("malformed", "OPC package lacks [Content_Types].xml");
+  const types = text(parts["[Content_Types].xml"]); const declaredTypes = new Set();
+  parseXml(types, { open(node) { if (node.name === "Override" || node.name.endsWith(":Override")) { const value = node.attributes.ContentType; if (typeof value === "string") declaredTypes.add(value); } } });
+  const has = (contentType) => declaredTypes.has(contentType);
+  if (has("application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml") && parts["word/document.xml"]) return "docx";
+  if (has("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml") && parts["xl/workbook.xml"]) return "xlsx";
+  if (has("application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml") && parts["ppt/presentation.xml"]) return "pptx";
+  if (has("application/vnd.ms-visio.drawing.main+xml") && Object.keys(parts).some((name) => /^visio\/pages\/page\d+\.xml$/i.test(name))) return "vsdx";
   throw new Quarantine("unsupported", `ZIP package is not a supported ${requested ?? "document"}`);
 }
 
@@ -139,11 +149,12 @@ function officeProfile(bytes, sourceHash, limits) {
 function drawioProfile(bytes, sourceHash, limits) {
   const descriptor = descriptors.drawio; const make = unitFactory(sourceHash, descriptor); const value = text(bytes);
   if (/<script\b|javascript:/i.test(value)) throw new Quarantine("unsafe-active-content", "Draw.io active content is disabled");
+  if (/\b(?:href|link|src|target)\s*=\s*["'][^"']*(?:https?|file):\/\//i.test(value)) throw new Quarantine("external-relationship", "External Draw.io relationships are disabled");
   const units = []; let cells = 0; const diagrams = [...value.matchAll(/<diagram\b([^>]*)>([\s\S]*?)<\/diagram>/g)];
   for (let index = 0; index < diagrams.length; index += 1) {
     let contents = diagrams[index][2].trim();
     if (contents && !contents.startsWith("<")) {
-      try { const expanded = inflateSync(Buffer.from(contents, "base64")); exceed("expanded_bytes", expanded.byteLength, limits.expanded_bytes); contents = decodeURIComponent(text(expanded)); }
+      try { const compressed = Buffer.from(contents, "base64"); const expanded = inflateSync(compressed); exceed("expanded_bytes", expanded.byteLength, limits.expanded_bytes); if (expanded.byteLength / Math.max(compressed.byteLength, 1) > MAX_RATIO) throw new Quarantine("limit-exceeded", "Draw.io decompression ratio exceeds limit", { maximum: MAX_RATIO }); contents = decodeURIComponent(text(expanded)); }
       catch (error) { if (error instanceof Quarantine) throw error; throw new Quarantine("malformed", "Malformed compressed Draw.io page"); }
     }
     parseXml(contents, { open(node) { if (node.name === "mxCell") { cells += 1; exceed("shapes", cells, limits.shapes); const a = node.attributes; const activeReference = [a.href, a.link, a.style].filter(Boolean).find((entry) => /(?:https?|file):\/\//i.test(String(entry))); if (activeReference) throw new Quarantine("external-relationship", "External Draw.io relationships are disabled"); units.push(make(a.edge === "1" ? "connector" : "diagram-cell", { kind: "diagram-cell", page: index + 1, cell: String(a.id ?? cells) }, { text: String(a.value ?? ""), structured_data: { parent: a.parent ?? null, source: a.source ?? null, target: a.target ?? null, edge: a.edge === "1", direction: a.source && a.target ? `${a.source}->${a.target}` : null, group: a.vertex !== "1", layer: a.parent ?? null, embedded_resource: /data:image\//i.test(String(a.style ?? "")) } })); } } });
@@ -160,14 +171,17 @@ function gifProfile(bytes, sourceHash, settings, limits) {
   return { descriptor, units, discovered: frames.length, warnings: sampleCount < frames.length ? ["frames-sampled"] : [], coverage: { duration_ms: elapsed, width: gif.lsd.width, height: gif.lsd.height } };
 }
 
-function quarantineManifest(sourceHash, settings, error) {
-  return { api_version: "kdlc.dev/normalization-manifest/v1", source_hash: sourceHash, status: "quarantined", format: null, normalizer: null, settings, coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: error.code ?? "malformed", message: error.message, details: error.details ?? {} } };
+function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJson(value)); } catch { return fallback; } }
+function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error) {
+  return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: serializable(settings), coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
 }
 
-export async function normalize({ bytes, filename = "", mediaType = "", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
-  const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes); const resolvedLimits = { ...defaultLimits, ...limits }; const computedHash = byteHash(input); const hash = computedHash;
+export async function normalize({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
+  const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes); const computedHash = byteHash(input); const hash = computedHash; sourceId ??= `source-${hash.slice(7, 23)}`;
   try {
-    for (const [name, value] of Object.entries(resolvedLimits)) if (!Number.isFinite(value) || value <= 0) throw new Quarantine("invalid-limits", "Normalizer limits must be positive finite numbers", { limit: name });
+    if (typeof sourceId !== "string" || !sourceId || typeof normalizedAt !== "string" || !Number.isFinite(Date.parse(normalizedAt))) throw new Quarantine("invalid-source-metadata", "Source ID and normalization timestamp are required");
+    const resolvedLimits = { ...defaultLimits };
+    for (const [name, value] of Object.entries(limits)) { if (!(name in defaultLimits) || !Number.isSafeInteger(value) || value <= 0 || value > defaultLimits[name]) throw new Quarantine("invalid-limits", "Normalizer limits may only tighten trusted ceilings", { limit: name }); resolvedLimits[name] = value; }
     if (sourceHash && sourceHash !== computedHash) throw new Quarantine("source-hash-mismatch", "Declared source hash does not match input bytes", { declared: sourceHash, actual: computedHash });
     settings = JSON.parse(canonicalJson(settings));
     exceed("source_bytes", input.byteLength, resolvedLimits.source_bytes); const started = performance.now(); let format = detect(input, filename, mediaType); let result;
@@ -182,21 +196,21 @@ export async function normalize({ bytes, filename = "", mediaType = "", sourceHa
       if (!/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(settings.language)) throw new Quarantine("invalid-language", "Language must be a BCP 47 tag");
       result.units = result.units.map((unit) => ({ ...unit, language: settings.language }));
     }
-    if (probabilisticUnits.some((unit) => unit.extraction_method?.mode !== "probabilistic" || !unit.extraction_method?.model || unit.source_hash !== hash)) throw new Quarantine("invalid-probabilistic-output", "Probabilistic units require separate model provenance and matching source identity");
+    if (probabilisticUnits.some((unit) => { const model = unit.extraction_method?.model; return unit.extraction_method?.mode !== "probabilistic" || !model?.id || !model?.version || !model?.provider || !/^sha256:[a-f0-9]{64}$/.test(model?.recorded_output_hash ?? "") || unit.source_hash !== hash; })) throw new Quarantine("invalid-probabilistic-output", "Probabilistic units require substantive recorded-model provenance and matching source identity");
     const deterministicBytes = `${result.units.map((unit) => canonicalJson(unit)).join("\n")}${result.units.length ? "\n" : ""}`; exceed("output_bytes", Buffer.byteLength(deterministicBytes), resolvedLimits.output_bytes);
     const outputs = [{ path: "units.jsonl", hash: byteHash(deterministicBytes), bytes: Buffer.byteLength(deterministicBytes), mode: "deterministic" }];
-    if (probabilisticUnits.length) { const derived = `${probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}\n`; outputs.push({ path: "probabilistic-units.jsonl", hash: byteHash(derived), bytes: Buffer.byteLength(derived), mode: "probabilistic" }); }
+    if (probabilisticUnits.length) { const derived = `${probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}\n`; exceed("output_bytes", Buffer.byteLength(deterministicBytes) + Buffer.byteLength(derived), resolvedLimits.output_bytes); exceed("shapes", probabilisticUnits.length, resolvedLimits.shapes); exceed("processing_ms", performance.now() - started, resolvedLimits.processing_ms); outputs.push({ path: "probabilistic-units.jsonl", hash: byteHash(derived), bytes: Buffer.byteLength(derived), mode: "probabilistic" }); }
     const qualityWarnings = [...new Set([...result.warnings, ...result.units.flatMap((unit) => unit.quality_warnings)])].sort();
     const omissions = qualityWarnings.filter((warning) => /sampled|scanned|omitted|excluded/i.test(warning)).map((reason) => ({ reason }));
-    return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest: { api_version: "kdlc.dev/normalization-manifest/v1", source_hash: hash, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security } };
+    return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest: { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security } };
   } catch (error) {
     const quarantined = error instanceof Quarantine ? error : new Quarantine("malformed", "Normalizer failed safely", { parser: error.message });
-    return { descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(hash, settings, quarantined) };
+    return { descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(sourceId, hash, normalizedAt, settings, quarantined) };
   }
 }
 
 export function portableArtifacts(result, sourceId) {
-  if (!/^[A-Za-z0-9._-]+$/.test(sourceId)) throw new Error("Source ID is not portable");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId) || sourceId === "." || sourceId === "..") throw new Error("Source ID is not portable");
   const basis = result.manifest.outputs.find(({ mode }) => mode === "deterministic")?.hash ?? result.manifest.source_hash;
   const directory = `sources/normalized/${sourceId}/${basis.replace("sha256:", "sha256-")}`;
   const files = { [`${directory}/manifest.json`]: `${canonicalJson(result.manifest)}\n` };
