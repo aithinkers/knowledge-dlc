@@ -33,6 +33,19 @@ function sourceRecord(source) {
   return { id: source.id, resource: source.resource, ...(source.source_hash ? { source_hash: source.source_hash } : {}) };
 }
 function fileIdentity(metadata) { return { dev: metadata.dev, ino: metadata.ino, size: metadata.size, mtimeMs: metadata.mtimeMs }; }
+function deepFreeze(value, seen = new WeakSet()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value); for (const member of Object.values(value)) deepFreeze(member, seen); return Object.freeze(value);
+}
+function immutableJson(value) { return deepFreeze(JSON.parse(canonicalJson(value))); }
+function sourcePolicyRecord(source) {
+  const citation = sourceRecord(source); if (!citation) return null;
+  return { ...citation, ...(source.access !== undefined ? { access: source.access } : {}) };
+}
+function dispatchAudit(audit, event) {
+  if (!audit || !event) return;
+  setTimeout(() => { void Promise.resolve().then(() => audit(event)).catch(() => {}); }, 0);
+}
 
 async function verifySnapshot(mount) {
   try {
@@ -63,7 +76,7 @@ export class FederatedRetriever {
 
   async prepareAuthorization({ principal, queryModes = [...MODES] }) {
     if (!Array.isArray(queryModes) || !queryModes.length || queryModes.some((mode) => !MODES.has(mode))) retrievalFail("KDLC_QUERY_MODE", "Authorization snapshot requires supported query modes");
-    let principalHash; try { principalHash = artifactHash(principal ?? null); }
+    let principalHash, principalSnapshot; try { principalSnapshot = immutableJson(principal ?? null); principalHash = artifactHash(principalSnapshot); }
     catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
     const modes = new Map();
     const orderedMounts = [...this.mounts].sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -87,14 +100,15 @@ export class FederatedRetriever {
             if (byteHash(bytes) !== metadata.byte_hash) throw new Error("concept hash mismatch");
             const parsed = parseMarkdownConcept(bytes);
             if (canonicalJson(parsed.frontmatter.access ?? null) !== canonicalJson(metadata.access)) throw new Error("concept access mismatch");
-            const concept = Object.freeze({ id: metadata.id, path: metadata.path, frontmatter: parsed.frontmatter, body: parsed.body });
-            const sources = list(parsed.frontmatter.sources).map((source) => ({ source, citation: sourceRecord(source) })).filter(({ citation }) => citation);
-            const sourceAllowed = await Promise.all(sources.map(({ source }) => this.policy.authorizeSource?.({
-              principal, mount, concept, source, queryMode, capability: "read"
-            })));
+            const concept = immutableJson({ id: metadata.id, path: metadata.path, frontmatter: parsed.frontmatter, body: parsed.body });
+            const sources = list(parsed.frontmatter.sources).map((source) => ({ policySource: sourcePolicyRecord(source), citation: sourceRecord(source) })).filter(({ citation }) => citation);
+            const sourceAllowed = await Promise.all(sources.map(({ policySource }) => this.policy.authorizeSource?.(immutableJson({
+              principal: principalSnapshot, mount: { id: mount.id, ...(mount.alias !== undefined ? { alias: mount.alias } : {}), access: mount.access ?? null }, concept: { id: concept.id, access: concept.frontmatter.access ?? null },
+              source: policySource, queryMode, capability: "read"
+            }))));
             if (sourceAllowed.some((value) => value !== true)) internallyDenied = true;
-            const sourceCitations = sources.filter((_, sourceIndex) => sourceAllowed[sourceIndex] === true).map(({ citation }) => Object.freeze(citation));
-            return Object.freeze({ metadata, concept, sourceCitations: Object.freeze(sourceCitations), fileIdentity: Object.freeze(fileIdentity(await lstat(conceptPath))) });
+            const sourceCitations = immutableJson(sources.filter((_, sourceIndex) => sourceAllowed[sourceIndex] === true).map(({ citation }) => citation));
+            return deepFreeze({ metadata: immutableJson(metadata), concept, sourceCitations, fileIdentity: fileIdentity(await lstat(conceptPath)) });
           } catch (error) {
             if (error?.code?.startsWith?.("KDLC_")) throw error;
             retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
@@ -110,14 +124,14 @@ export class FederatedRetriever {
   }
 
   async search({ authorization, principal, query, mode = "wiki-only", minimumTrust = "unverified", staleBehavior = "warn", limit = 20, includeSources = false }) {
-    const started = this.monotonic();
+    const started = this.monotonic(); let auditEvent = null;
     try {
       if (!MODES.has(mode)) retrievalFail("KDLC_QUERY_MODE", "Unsupported retrieval query mode");
       if (!(minimumTrust in TRUST)) retrievalFail("KDLC_TRUST_TIER", "Unsupported minimum trust tier");
       if (!["warn", "exclude", "fail"].includes(staleBehavior)) retrievalFail("KDLC_FRESHNESS_POLICY", "Unsupported stale behavior");
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) retrievalFail("KDLC_RETRIEVAL_LIMIT", "Retrieval limit must be between 1 and 100");
-      const authorizationState = authorizationStates.get(authorization); let principalHash;
-      try { principalHash = artifactHash(principal ?? null); } catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
+      const authorizationState = authorizationStates.get(authorization); let principalHash, principalSnapshot;
+      try { principalSnapshot = immutableJson(principal ?? null); principalHash = artifactHash(principalSnapshot); } catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
       const authorizedMode = authorizationState?.modes.get(mode);
       if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt <= this.authorizationMonotonic()
         || authorizationState.principalHash !== principalHash || !authorizedMode) retrievalFail("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED", "Retrieval requires a matching current precomputed authorization snapshot");
@@ -174,13 +188,14 @@ export class FederatedRetriever {
         }
       }
       if (!results.length) {
-        await this.audit?.({ action: "retrieval.empty", denied: internallyDenied, principal, minimized: true });
+        auditEvent = immutableJson({ action: "retrieval.empty", denied: internallyDenied, principal: principalSnapshot, minimized: true });
         return noDisclosure();
       }
       return { status: "ok", results, citations, conflicts, warnings, timing_class: "bounded-floor", ...(mode === "audit" ? { retrieved_at: this.now().toISOString(), resolved_bases: Object.fromEntries(selected.map(({ mount }) => [mount.id, { revision: mount.resolved_ref, tree_hash: mount.tree_hash }])) } : {}) };
     } finally {
       const remaining = this.minimumDurationMs - (this.monotonic() - started);
       if (remaining > 0) await this.wait(remaining);
+      dispatchAudit(this.audit, auditEvent);
     }
   }
 }

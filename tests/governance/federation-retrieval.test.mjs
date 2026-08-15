@@ -129,13 +129,28 @@ test("FEAT-005 traverses hierarchical indexes and retrieves across mounts with q
   assert.deepEqual(await traverseHierarchicalIndex(mounts.find(({ alias }) => alias === "primary").root), [
     "policies/authentication.md", "policies/nightfall.md", "policies/spoof.md", "references/sources/authentication.md"
   ]);
-  const retriever = new FederatedRetriever({ mounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z") });
+  const mutatingPolicy = policy(); const authorizeSource = mutatingPolicy.authorizeSource; const sourceInputs = [];
+  mutatingPolicy.authorizeSource = async (input) => {
+    sourceInputs.push(input);
+    for (const mutate of [
+      () => { input.source.resource = "https://attacker.invalid/"; },
+      () => { input.source.access.classification = "public"; },
+      () => { input.concept.access.classification = "public"; },
+      () => { input.mount.id = "attacker"; }
+    ]) try { mutate(); } catch {}
+    return authorizeSource(input);
+  };
+  const retriever = new FederatedRetriever({ mounts, policy: mutatingPolicy, now: () => new Date("2026-08-14T15:00:00Z") });
   const principal = { id: "human:reader" }; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
   const response = await retriever.search({ authorization, principal, query: "authentication", mode: "wiki-only", includeSources: true, limit: 1 });
   assert.equal(response.status, "ok"); assert.equal(response.results.length, 2); assert.equal(response.citations.length, 2);
   assert.match(response.citations[0].concept, /^kb:\/\/acme\.(?:primary|legacy)@[0-9a-z:-]+\/policies\/authentication$/);
   assert.equal(response.conflicts.length, 2);
   assert.deepEqual(response.results.find(({ id }) => id.startsWith("kb://acme.primary/")).source_citations.map(({ id }) => id), ["auth-source"]);
+  assert.equal(sourceInputs.length > 0, true); assert.equal(sourceInputs.every((input) => Object.isFrozen(input) && Object.isFrozen(input.source)
+    && Object.isFrozen(input.source.access) && Object.isFrozen(input.concept) && Object.isFrozen(input.concept.access) && Object.isFrozen(input.mount)), true);
+  assert.deepEqual(Object.keys(sourceInputs[0]).sort(), ["capability", "concept", "mount", "principal", "queryMode", "source"]);
+  assert.equal(sourceInputs.find(({ source }) => source.id === "auth-source").source.resource, "https://example.invalid/auth");
   const contracts = await createContractValidator(); assert.equal(contracts.validate("retrievalResponse", response).valid, true);
 
   const zeroScoreConflict = await retriever.search({ authorization, principal, query: "phishing-resistant", mode: "wiki-only", limit: 1 });
@@ -184,21 +199,28 @@ test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized re
   catalog.concepts.find(({ id }) => id === "policies/authentication").byte_hash = byteHash(authentication);
   await writeFile(indexPath, index); await writeFile(catalogPath, `${JSON.stringify(catalog)}\n`);
   const { mounts } = await new FederationResolver({ projectRoot: root, now: fixedNow }).resolveProject(project(root));
+  const auditEvents = []; const auditCompletions = [];
+  const slowAudit = (event) => {
+    auditEvents.push(event); const completion = new Promise((resolve) => setTimeout(resolve, event.denied ? 250 : 0)); auditCompletions.push(completion); return completion;
+  };
   const reads = []; let conceptDecisions = 0; let sourceDecisions = 0; const delayedPolicy = policy();
   const authorizeConcept = delayedPolicy.authorizeConcept; const authorizeSource = delayedPolicy.authorizeSource;
   delayedPolicy.authorizeConcept = async (input) => { conceptDecisions += 1; await new Promise((resolve) => setTimeout(resolve, 12)); return authorizeConcept(input); };
   delayedPolicy.authorizeSource = async (input) => { sourceDecisions += 1; await new Promise((resolve) => setTimeout(resolve, 12)); return authorizeSource(input); };
-  const retriever = new FederatedRetriever({ mounts, policy: delayedPolicy, now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75,
+  const retriever = new FederatedRetriever({ mounts, policy: delayedPolicy, now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75, audit: slowAudit,
     readConcept: async (path) => { reads.push(path); if (path.endsWith("/policies/nightfall.md")) throw new Error("unauthorized body opened"); return readFile(path); } });
   const principal = {}; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  const allAccessState = { ...policyState, classifications: [...policyState.classifications, "restricted"], compartments: [...policyState.compartments, "nightfall"] };
+  const absentRetriever = new FederatedRetriever({ mounts, policy: policy(allAccessState), now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75, audit: slowAudit });
+  const absentAuthorization = await absentRetriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
   const preparedDecisions = conceptDecisions; const preparedSourceDecisions = sourceDecisions;
   const sourced = await retriever.search({ authorization, principal, query: "authentication", mode: "wiki-only", includeSources: true });
   assert.deepEqual(sourced.results.find(({ id }) => id === "kb://acme.primary/policies/authentication").source_citations.map(({ id }) => id), ["auth-source"]);
   const durations = []; let unauthorized; let absent;
   for (let iteration = 0; iteration < 3; iteration += 1) {
-    let started = performance.now(); unauthorized = await retriever.search({ authorization, principal, query: "Project Nightfall", mode: "wiki-only" });
+    let started = performance.now(); unauthorized = await retriever.search({ authorization, principal, query: "Nightfall", mode: "wiki-only" });
     durations.push(performance.now() - started);
-    started = performance.now(); absent = await retriever.search({ authorization, principal, query: "Project Zephyr", mode: "wiki-only" });
+    started = performance.now(); absent = await absentRetriever.search({ authorization: absentAuthorization, principal, query: "Zephyr", mode: "wiki-only" });
     durations.push(performance.now() - started);
     assert.deepEqual(unauthorized, absent);
   }
@@ -208,7 +230,12 @@ test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized re
   assert.equal(sourceDecisions, preparedSourceDecisions, "query path must not call the source PDP");
   assert.equal(reads.some((path) => path.endsWith("/policies/nightfall.md")), false);
   assert.equal(durations.every((duration) => duration >= 65), true, `floor was not enforced: ${durations.join(", ")}`);
+  assert.equal(durations.every((duration) => duration < 200), true, `protected audit completion leaked into response time: ${durations.join(", ")}`);
   for (let index = 0; index < durations.length; index += 2) assert.equal(Math.abs(durations[index] - durations[index + 1]) < 40, true, `timing classes diverged: ${durations.join(", ")}`);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(auditEvents.map(({ denied }) => denied).sort(), [false, false, false, true, true, true]);
+  assert.equal(auditEvents.every((event) => Object.isFrozen(event) && Object.isFrozen(event.principal)), true);
+  await Promise.all(auditCompletions);
   assert.deepEqual(Object.keys(absent), ["status", "results", "citations", "conflicts", "warnings", "timing_class"]);
   const contracts = await createContractValidator(); assert.equal(contracts.validate("retrievalResponse", absent).valid, true);
 });
