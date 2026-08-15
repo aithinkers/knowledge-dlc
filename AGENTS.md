@@ -72,6 +72,23 @@ local simulation of the trusted checks, independent review of the final commit,
 and an explicit record of any accepted platform limitation. It expires when PR
 #15 is merged and does not apply to later reporter changes.
 
+PR #39, linked to issue #36, may use a one-time protected-harness bootstrap
+bypass solely to transition `.github/workflows/candidate-tests.yml` from
+SHA-256 `27da9c03af4b3dbc3468093207341b3b72ff030fc81e80d897ae062834cbc3f8`
+to SHA-256 `5c8325a59d01c127cddb9b3536a5ea00d09ee770b3a5a274e9f3af6b6a808c9c`.
+The exception applies only at PR #39 head
+`81bb6cade0bc945b554425cf3a82669be4510308`; any other head or byte hash is
+unauthorized. Candidate tests and every required or security check other than
+the protected harness's `Repository policy` self-difference must pass, and an
+independent agent must approve that exact head with no unresolved critical or
+high finding. The PR diff must contain only the authorized workflow transition,
+the issue #36 traceability status/evidence update, and its mechanical
+conformance evidence hash; commands, triggers, permissions, toolchain, and the
+governance verifier must remain unchanged. The owner exception record must
+identify that self-difference as its sole failed check and bypass reason. This
+authority is consumed and expires immediately when PR #39 merges, and it does
+not authorize any later harness, reporter, workflow, or verifier change.
+
 Repository administrators, write collaborators, and repository-configured
 GitHub Actions are inside the current CI trust boundary. Bare commit-status
 contexts are therefore enforcement against ordinary candidate changes, not a
