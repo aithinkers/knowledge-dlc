@@ -136,7 +136,9 @@ export function renderKiroAgentManifest(definition, { harness }) {
     allowedTools: ["fs_read", "thinking"],
     ...(readOnly ? {} : {
       toolsSettings: {
-        execute_bash: { allowedCommands: [`node (\\./)?distribution/${harness}/run\\.mjs [a-z-]+( .*)?`] },
+        // Argument tail excludes every shell metacharacter so a prompt-injected
+        // "; extra-command" can never ride through the allowlist (§5.7).
+        execute_bash: { allowedCommands: [`node (\\./)?distribution/${harness}/run\\.mjs [a-z-]+( [A-Za-z0-9@=_"\\[\\],{}:. /-]*)?`] },
       },
     }),
   };
