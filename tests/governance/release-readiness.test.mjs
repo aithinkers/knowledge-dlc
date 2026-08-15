@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
-import { exactPackageManifestFailures, installedMetadataFailures } from "../../scripts/supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash } from "../../scripts/supply-chain-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const text = (path) => readFile(resolve(root, path), "utf8");
@@ -70,6 +70,10 @@ test("REL-001 npm updates, installed licenses, dependency graph, and exact packa
   assert.ok(sbom.relationships.some((item) => item.spdxElementId === byName.ajv && item.relationshipType === "DEPENDS_ON" && item.relatedSpdxElement === byName["fast-deep-equal"]));
   assert.ok(sbom.relationships.some((item) => item.spdxElementId === byName.ajv && item.relationshipType === "DEV_DEPENDENCY_OF" && item.relatedSpdxElement === "SPDXRef-Root"));
   assert.ok(sbom.packages.filter(({ SPDXID }) => SPDXID !== "SPDXRef-Root").every((item) => item.externalRefs?.some(({ referenceType }) => referenceType === "kdlc:installed-manifest-sha256")));
+  assert.ok(sbom.packages.filter(({ SPDXID }) => SPDXID !== "SPDXRef-Root").every((item) => item.externalRefs?.some(({ referenceType }) => referenceType === "kdlc:installed-tree-sha256")));
+  const installedBytes = [{ path: "package.json", size: 2, sha256: "a".repeat(64) }];
+  assert.notEqual(installedTreeHash(installedBytes), installedTreeHash([{ ...installedBytes[0], sha256: "b".repeat(64) }]));
+  assert.throws(() => installedTreeHash([{ path: "../escape", size: 1, sha256: "a".repeat(64) }]), /invalid/);
 });
 
 test("REL-001 readiness record keeps final release gates explicitly open", async () => {

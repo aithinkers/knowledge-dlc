@@ -99,6 +99,7 @@
     "packages/core/src/provenance.mjs",
     "packages/core/src/resolution.mjs",
     "packages/core/src/scaffold.mjs",
+    "packages/core/src/temporal.mjs",
     "packages/extensions/index.mjs",
     "packages/extensions/src/authority.mjs",
     "packages/extensions/src/compatibility.mjs",

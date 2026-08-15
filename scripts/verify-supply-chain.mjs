@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { access, lstat, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { exactPackageManifestFailures, installedMetadataFailures } from "./supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,6 +18,26 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 const spdxId = (name, version) => `SPDXRef-Package-${digest(`${name}@${version}`).slice(0, 20)}`;
 const exists = async (path) => { try { await access(resolve(root, path)); return true; } catch { return false; } };
 const packageName = (path) => path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+function safeInstalledPath(path) {
+  const absolute = resolve(root, path); const rel = relative(root, absolute).split(sep).join("/");
+  return path.startsWith("node_modules/") && rel === path && !path.split("/").some((part) => !part || part === "." || part === "..");
+}
+
+async function installedTreeEvidence(path) {
+  const base = resolve(root, path); const entries = [];
+  const visit = async (directory) => {
+    for (const name of (await readdir(directory)).sort()) {
+      if (name === "node_modules") continue;
+      const absolute = resolve(directory, name); const rel = relative(base, absolute).split(sep).join("/");
+      const metadata = await lstat(absolute);
+      if (metadata.isSymbolicLink() || (!metadata.isDirectory() && !metadata.isFile())) throw new Error(`unsupported installed entry: ${rel}`);
+      if (metadata.isDirectory()) await visit(absolute);
+      else { const content = await readFile(absolute); entries.push({ path: rel, size: content.byteLength, sha256: digest(content) }); }
+    }
+  };
+  await visit(base);
+  return { file_count: entries.length, tree_sha256: installedTreeHash(entries) };
+}
 
 function dependencyPath(packages, parentPath, name) {
   let parent = parentPath;
@@ -54,7 +74,10 @@ try {
 
 const lockPackages = lock.packages ?? {};
 const installedPaths = [];
-for (const path of Object.keys(lockPackages).filter((path) => path.includes("node_modules/") && lockPackages[path].optional !== true)) if (await exists(path)) installedPaths.push(path);
+for (const path of Object.keys(lockPackages).filter((path) => path.includes("node_modules/") && lockPackages[path].optional !== true)) {
+  if (!safeInstalledPath(path)) { failures.push(`unsafe installed package path in lock: ${path}`); continue; }
+  if (await exists(path)) installedPaths.push(path);
+}
 installedPaths.sort();
 const installed = new Set(installedPaths);
 const inventory = [];
@@ -65,7 +88,7 @@ for (const path of installedPaths) {
   if (!/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(entry.integrity ?? "")) failures.push(`package integrity is not pinned with sha512: ${identity}`);
   if (!/^https:\/\/registry\.npmjs\.org\//.test(entry.resolved ?? "")) failures.push(`package is not resolved from the approved npm registry: ${identity}`);
   const metadataPath = `${path}/package.json`;
-  let metadataBytes, metadata, licenseFiles = [];
+  let metadataBytes, metadata, licenseFiles = [], tree;
   try {
     const stat = await lstat(resolve(root, path));
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("package directory is not a regular installed directory");
@@ -74,9 +97,10 @@ for (const path of installedPaths) {
     if (metadataFailures.length) throw new Error(metadataFailures.join("; "));
     const names = (await readdir(resolve(root, path))).filter((name) => /^(?:licen[cs]e|copying|notice)(?:\.|$)/iu.test(name)).sort();
     for (const name of names) licenseFiles.push({ path: name, sha256: digest(await bytes(`${path}/${name}`)) });
+    tree = await installedTreeEvidence(path);
   } catch (error) { failures.push(`installed package bytes invalid: ${identity} (${error.message})`); continue; }
   const license = metadata.license;
-  inventory.push({ name: metadata.name, version: metadata.version, license, integrity: entry.integrity, resolved: entry.resolved, path, manifest_sha256: digest(metadataBytes), license_evidence: licenseFiles.length ? "installed-license-files" : "installed-package-metadata", license_files: licenseFiles });
+  inventory.push({ name: metadata.name, version: metadata.version, license, integrity: entry.integrity, resolved: entry.resolved, path, manifest_sha256: digest(metadataBytes), installed_tree_sha256: tree.tree_sha256, installed_file_count: tree.file_count, license_evidence: licenseFiles.length ? "installed-license-files" : "installed-package-metadata", license_files: licenseFiles });
 }
 
 const runtimeReachable = new Set();
@@ -90,7 +114,7 @@ for (const name of Object.keys(packageDocument.dependencies ?? {})) visitRuntime
 for (const item of inventory) item.scope = runtimeReachable.has(item.path) ? "runtime" : "development";
 
 const inventoryHash = `sha256:${digest(JSON.stringify(inventory))}`;
-const notices = `# Third-party notices\n\nThis inventory is generated from the integrity-bound required installed dependency graph. Platform-specific optional packages are excluded from this portable SBOM and remain pinned and audited through \`package-lock.json\`. K-DLC is licensed under MIT; dependencies remain under their respective licenses. Manifest and license-file hashes bind the listed evidence to installed bytes.\n\nInventory hash: \`${inventoryHash}\`\n\n| Package | Version | Scope | License | Installed manifest | Locked source |\n| --- | --- | --- | --- | --- | --- |\n${inventory.map(({ name, version, scope, license, manifest_sha256, resolved }) => `| \`${name}\` | \`${version}\` | \`${scope}\` | \`${license}\` | \`sha256:${manifest_sha256}\` | [npm tarball](${resolved}) |`).join("\n")}\n`;
+const notices = `# Third-party notices\n\nThis inventory is generated after a clean integrity-checked \`npm ci --ignore-scripts\` from the required installed dependency graph. Platform-specific optional packages are excluded from this portable SBOM and remain pinned and audited through \`package-lock.json\`. K-DLC is licensed under MIT; dependencies remain under their respective licenses. Installed tree, manifest, and license-file hashes bind the listed evidence to the verified bytes. Where a package ships no license or notice file, the declared license is explicitly sourced from its installed \`package.json\` metadata.\n\nInventory hash: \`${inventoryHash}\`\n\n| Package | Version | Scope | License | Installed tree | Installed manifest | Locked source |\n| --- | --- | --- | --- | --- | --- | --- |\n${inventory.map(({ name, version, scope, license, installed_tree_sha256, manifest_sha256, resolved }) => `| \`${name}\` | \`${version}\` | \`${scope}\` | \`${license}\` | \`sha256:${installed_tree_sha256}\` | \`sha256:${manifest_sha256}\` | [npm tarball](${resolved}) |`).join("\n")}\n`;
 
 const packages = [{
   SPDXID: "SPDXRef-Root", name: packageDocument.name, versionInfo: packageDocument.version,
@@ -100,7 +124,11 @@ const packages = [{
   filesAnalyzed: false, licenseConcluded: "NOASSERTION", licenseDeclared: item.license,
   checksums: [{ algorithm: "SHA512", checksumValue: Buffer.from(item.integrity.slice("sha512-".length), "base64").toString("hex") }],
   primaryPackagePurpose: item.scope === "runtime" ? "LIBRARY" : "BUILD_TOOL", copyrightText: "NOASSERTION",
-  externalRefs: [{ referenceCategory: "OTHER", referenceType: "kdlc:installed-manifest-sha256", referenceLocator: `sha256:${item.manifest_sha256}` }]
+  externalRefs: [
+    { referenceCategory: "OTHER", referenceType: "kdlc:installed-manifest-sha256", referenceLocator: `sha256:${item.manifest_sha256}` },
+    { referenceCategory: "OTHER", referenceType: "kdlc:installed-tree-sha256", referenceLocator: `sha256:${item.installed_tree_sha256}` },
+    { referenceCategory: "OTHER", referenceType: "kdlc:dependency-scope", referenceLocator: item.scope }
+  ]
 }))];
 const relationships = [];
 for (const name of Object.keys(packageDocument.dependencies ?? {})) {
