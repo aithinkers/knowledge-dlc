@@ -5,7 +5,7 @@
   "corpus": {
     "id": "kdlc-mvp-recorded",
     "version": 1,
-    "sha256": "sha256:a2055f4eab2dcee9aaaec3882f4a7708c48941d9e83ea46cf979846ff99fa4a6"
+    "sha256": "sha256:ed593716099076851352f9915d6769e66f7f2611db87152e0eac2f75f243e64f"
   },
   "mandatory_requirements": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005", "FEAT-006", "FEAT-008", "FEAT-009"],
   "mode": "recorded-only",

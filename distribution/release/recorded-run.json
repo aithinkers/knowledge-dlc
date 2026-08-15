@@ -1,14 +1,14 @@
 {
   "api_version": "kdlc.dev/recorded-release-run/v1alpha1",
   "id": "pre-release-recorded-1",
-  "corpus_hash": "sha256:a2055f4eab2dcee9aaaec3882f4a7708c48941d9e83ea46cf979846ff99fa4a6",
-  "profile_hash": "sha256:4625037bbe142f0dc91268ac652a71430f83f4d0ba6e5862d71f90a7b0be0986",
+  "corpus_hash": "sha256:ed593716099076851352f9915d6769e66f7f2611db87152e0eac2f75f243e64f",
+  "profile_hash": "sha256:1333e5b283ed6f670370745abbeb33ed4728cfb79cd5944375235201abcbe38e",
   "runtime": {"node": "24.5.0", "npm": "11.5.1"},
   "external_network_calls": 0,
   "live_model_calls": 0,
   "results": [
-    {"case_id": "recorded-ingest", "case_hash":"sha256:489df54c08e736c00068f174afb8fcbafeb5339ca5eaf9f61e12c1b445f9b30c", "status": "passed", "observations": ["Recorded ingest fixtures validate and replay without a model provider."], "evidence_hash":"sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee"},
-    {"case_id": "governed-publication", "case_hash":"sha256:213a8de00cc0a786d119612b6b184cae63a3c9c0a0211c818ded591ff6587805", "status": "passed", "observations": ["Approval and publication bind exact persisted review inputs and invalidate on drift."], "evidence_hash":"sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee"},
+    {"case_id": "recorded-ingest", "case_hash":"sha256:e78974430c6a9f405c3661ee42816f7f1bfc7d40faef8b767ceae6c27f85a87f", "status": "passed", "observations": ["Recorded ingest fixtures validate and replay without a model provider."], "evidence_hash":"sha256:2626a06921e669a2b571bda5a6b3ba71b3c8c9a75a95b8529b7064412c519933"},
+    {"case_id": "governed-publication", "case_hash":"sha256:43d88ebd6cb8da7983b8e3711f661ee0649251685b455f5b38dc75eeebd83762", "status": "passed", "observations": ["Approval and publication bind exact persisted review inputs and invalidate on drift."], "evidence_hash":"sha256:2626a06921e669a2b571bda5a6b3ba71b3c8c9a75a95b8529b7064412c519933"},
     {"case_id": "adversarial-governance", "case_hash":"sha256:12179053f70d8f50ec0575cfde4c0324168ba60e564647c71f66ecc08f14945c", "status": "passed", "observations": ["Recorded injection, falsehood, rights, and authority-spoofing cases fail closed."], "evidence_hash":"sha256:6afd8731bb1883573e59ff08d74c2471b2608db687ed0e3a454cc7ea7f0c1f6c"},
     {"case_id": "bounded-normalization", "case_hash":"sha256:50111f300e2d193e938ff29fe6a9e98f979da21358942e1505b925ac3031554a", "status": "passed", "observations": ["Structural profiles remain bounded and unsafe inputs quarantine."], "evidence_hash":"sha256:8c784c4f8d27f447c373af8e17665e7e7d67330203ee56e60f0387d752dc7230"},
     {"case_id": "federated-nondisclosure", "case_hash":"sha256:4d0e6d17002535bc5a008787de4b49b19705d0acb44fe476dc383c2cd5444261", "status": "passed", "observations": ["Pre-query authorization, integrity, conflict, and nondisclosure cases pass."], "evidence_hash":"sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724"},

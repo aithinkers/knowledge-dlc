@@ -222,7 +222,10 @@ export class NodeFileStore {
         await this.writeJsonAtomic(leasePath, acquiredLease);
         break;
       } catch (error) {
-        if (error?.code === "ENOENT") continue;
+        // Windows may report EBADF when a contending stale-recovery rename
+        // wins between safe-path inspection and realpath. No mutation has
+        // occurred in this contender, so retry exactly as for ENOENT.
+        if (["ENOENT", "EBADF"].includes(error?.code)) continue;
         if (error?.code !== "EEXIST") throw error;
         let stale = false;
         let staleToken = null;
@@ -301,7 +304,22 @@ export class NodeFileStore {
           current.expires_at = new Date(clock.millis() + leaseMs).toISOString();
           const target = await this.safePath(leasePath);
           const temporary = `${target}.heartbeat-${process.pid}-${Math.random().toString(16).slice(2)}`;
-          try { await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx", mode: 0o600 }); await this.replaceAtomic(temporary, target); }
+          try {
+            await writeFile(temporary, `${JSON.stringify(current, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+            for (let attempt = 0; ; attempt += 1) {
+              try { await this.replaceAtomic(temporary, target); break; }
+              catch (replaceError) {
+                if (!["EPERM", "EACCES"].includes(replaceError?.code) || process.platform !== "win32" || attempt >= 20) throw replaceError;
+                // Windows may briefly deny replacement while a contender has
+                // owner.json open. Re-check the exact lease before every retry;
+                // a reclaimed directory moves the temporary file with it, so
+                // this cannot overwrite a successor lease in a new directory.
+                const observed = await this.readJson(leasePath);
+                if (observed.lease_id !== acquiredLeaseId) throw conflict("Filesystem mutex lease was lost");
+                await new Promise((resolveDelay) => setTimeout(resolveDelay, 2));
+              }
+            }
+          }
           finally { await rm(temporary, { force: true }).catch(() => {}); }
         } catch (error) { if (error?.code !== "ENOENT") throw error; break; }
       }
