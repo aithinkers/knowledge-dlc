@@ -179,7 +179,7 @@ before issue #44 is complete.
 PR #52, linked to issue #41, may establish a one-time protected statistical-
 evaluation transition contract for implementation PR #42. It supersedes closed
 PR #43 and applies only to PR #42 head
-`3ef7c53fe9dd9fd2a9d515a3d0fd86dac9d55788`, based on
+`efa9590aa4102a53ffb3cb2273f3b5ccadc431b5`, based on
 `488eb7a28ad4dbc84e6df97e99a4f8386f9f21e5`, and only to these protected
 before/after SHA-256 byte transitions (`absent` means a newly protected file):
 
@@ -190,7 +190,7 @@ before/after SHA-256 byte transitions (`absent` means a newly protected file):
   `c8bf55d47a048aedb1cf0fdcc46a770180b569679aa175f93cad2fa513155897` to
   `4488d88c6b97fcc9d63d25ac7938abb0cdc1d89c5ba0494bef68560c22be0e97`.
 - `core/schemas/release/statistical-gold.schema.json`: `absent` to
-  `e7d3444aa338fcc6603955f6ac51e4c5c28b950c47e20635a1caa4c96e63fac4`.
+  `e905a695ab0a5c1c41fe97e09b005bf110eee624acb37e6957eaa9128907f845`.
 - `core/schemas/release/statistical-profile.schema.json`:
   `f635bc1bb3653ef3de93361234a66cbc29c826ca346a719bc5209c58f5004a6b` to
   `b0f3cb5836149b4845fbecd0d72b36742eb8a00b32fc68affcc63773195f5be4`.
@@ -216,7 +216,7 @@ before/after SHA-256 byte transitions (`absent` means a newly protected file):
   `4c77651cbb0c9c68162540c6443f9cf91f4334fdb9a2c8b2cfdbadbe177e28c1` to
   `e681e5264e59db1eee219c84883a1b71c8af748f127f08cde19e4ac28162a650`.
 
-PR #42 must contain exactly 18 changed paths and 473 additions/142 deletions.
+PR #42 must contain exactly 18 changed paths and 474 additions/142 deletions.
 Besides the protected transitions above, its only permitted paths are
 `distribution/release/conformance-statement.json`,
 `distribution/release/statistical/profile.json`, `docs/release-readiness.md`,
