@@ -43,6 +43,14 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   const stateSteps = parsedWorkflow.jobs["release-state"].steps;
   assert.equal(stateSteps.filter((step) => step.uses?.startsWith("actions/checkout@")).length, 1);
   assert.equal(stateSteps.find((step) => step.name === "Check out trusted release-state collector").with.ref, "${{ github.event.pull_request.base.sha || github.sha }}");
+  const stateInstall = stateSteps.find((step) => step.name === "Install trusted locked dependencies without lifecycle scripts");
+  assert.equal(stateInstall.run, "npm ci --ignore-scripts --prefix trusted");
+  assert.equal(stateInstall.env, undefined);
+  assert.equal(stateSteps.findIndex((step) => step.name === "Install trusted locked dependencies without lifecycle scripts")
+    < stateSteps.findIndex((step) => step.name === "Collect live state without candidate checkout or execution"), true);
+  const stateRuntime = stateSteps.find((step) => step.name === "Set up trusted collector runtime");
+  assert.equal(stateRuntime.with["cache-dependency-path"], "trusted/package-lock.json");
+  assert.doesNotMatch(JSON.stringify(parsedWorkflow.jobs["release-state"]), /pull_request\.head|github\.sha[^}]*head/u);
   assert.match(stateSteps.find((step) => step.name === "Collect live state without candidate checkout or execution").run, /node trusted\/scripts\/collect-release-state\.mjs/);
   assert.equal(stateSteps.find((step) => step.name === "Collect live state without candidate checkout or execution").env.KDLC_ADMIN_SETTINGS_ATTESTATION, "${{ vars.KDLC_ADMIN_SETTINGS_ATTESTATION }}");
   assert.doesNotMatch(collector, /actions\/permissions\/workflow/);
