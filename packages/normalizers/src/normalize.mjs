@@ -2,6 +2,9 @@ import { parse as parseCsv } from "csv-parse/sync";
 import { inflateSync, unzipSync } from "fflate";
 import { decompressFrames, parseGIF } from "gifuct-js";
 import { SaxesParser } from "saxes";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import { readFile } from "node:fs/promises";
 
 import { byteHash, canonicalJson } from "../../core/index.mjs";
 import { defaultLimits, descriptors } from "./descriptors.mjs";
@@ -9,6 +12,9 @@ import { defaultLimits, descriptors } from "./descriptors.mjs";
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const security = Object.freeze({ network: false, executed_code: false, macros: false, external_relationships: false });
 const MAX_RATIO = 100;
+const unitAjv = new Ajv2020({ strict: true, allErrors: true }); addFormats(unitAjv);
+unitAjv.addSchema(JSON.parse(await readFile(new URL("../../../core/schemas/common.schema.json", import.meta.url), "utf8")));
+const validateUnit = unitAjv.compile(JSON.parse(await readFile(new URL("../../../core/schemas/normalization/normalized-unit.schema.json", import.meta.url), "utf8")));
 
 class Quarantine extends Error { constructor(code, message, details = {}) { super(message); this.code = code; this.details = details; } }
 const exceed = (name, actual, maximum) => { if (actual > maximum) throw new Quarantine("limit-exceeded", `${name} exceeds configured limit`, { limit: name, actual, maximum }); };
@@ -104,7 +110,7 @@ async function pdfProfile(bytes, sourceHash, limits) {
     const page = await document.getPage(pageNumber); const content = await page.getTextContent(); const annotations = await page.getAnnotations().catch(() => []);
     if (annotations.some(({ url, unsafeUrl }) => typeof (url ?? unsafeUrl) === "string")) throw new Quarantine("external-relationship", "External PDF relationships are disabled", { page: pageNumber });
     const pageText = content.items.map((item) => item.str).join(" ").trim();
-    units.push(make("pdf-page", { kind: "page", page: pageNumber }, { text: pageText || "", structured_data: { width: page.view[2], height: page.view[3], text_blocks: content.items.length, images: 0, tables: 0, links: annotations.filter(({ subtype }) => subtype === "Link").map(({ url, dest }) => ({ url: url ?? null, destination: dest ?? null })) } }, pageText ? [] : ["scanned-or-empty-page; OCR requires probabilistic worker"]));
+    units.push(make("pdf-page", { kind: "page", page: pageNumber }, { text: pageText || "", structured_data: { width: page.view[2], height: page.view[3], text_blocks: content.items.length, images: null, tables: null, links: annotations.filter(({ subtype }) => subtype === "Link").map(({ dest }) => ({ destination: dest ?? null })) } }, [...(pageText ? [] : ["scanned-or-empty-page; OCR requires probabilistic worker"]), "pdf-images-and-tables-omitted"]));
     for (const item of content.items) if (item.str?.trim()) units.push(make("pdf-text-block", { kind: "page-bbox", page: pageNumber, x: item.transform?.[4] ?? 0, y: item.transform?.[5] ?? 0, width: item.width ?? 0, height: item.height ?? 0 }, { text: item.str }));
   }
   return { descriptor, units, discovered: document.numPages, warnings: [] };
@@ -112,13 +118,15 @@ async function pdfProfile(bytes, sourceHash, limits) {
 
 function officeKind(parts, requested) {
   if (!parts["[Content_Types].xml"]) throw new Quarantine("malformed", "OPC package lacks [Content_Types].xml");
-  const types = text(parts["[Content_Types].xml"]); const declaredTypes = new Set();
-  parseXml(types, { open(node) { if (node.name === "Override" || node.name.endsWith(":Override")) { const value = node.attributes.ContentType; if (typeof value === "string") declaredTypes.add(value); } } });
-  const has = (contentType) => declaredTypes.has(contentType);
-  if (has("application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml") && parts["word/document.xml"]) return "docx";
-  if (has("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml") && parts["xl/workbook.xml"]) return "xlsx";
-  if (has("application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml") && parts["ppt/presentation.xml"]) return "pptx";
-  if (has("application/vnd.ms-visio.drawing.main+xml") && Object.keys(parts).some((name) => /^visio\/pages\/page\d+\.xml$/i.test(name))) return "vsdx";
+  const types = text(parts["[Content_Types].xml"]); const declaredTypes = new Map();
+  parseXml(types, { open(node) { if (node.name === "Override" || node.name.endsWith(":Override")) { const contentType = node.attributes.ContentType; const partName = node.attributes.PartName; if (typeof contentType === "string" && typeof partName === "string" && /^\/[A-Za-z0-9_.\/-]+$/.test(partName) && !partName.split("/").includes("..")) declaredTypes.set(partName, contentType); } } });
+  if (!parts["_rels/.rels"]) throw new Quarantine("malformed", "OPC package lacks the root relationship part");
+  const roots = []; parseXml(text(parts["_rels/.rels"]), { open(node) { if ((node.name === "Relationship" || node.name.endsWith(":Relationship")) && /\/officeDocument$/.test(String(node.attributes.Type))) { if (node.attributes.TargetMode === "External") throw new Quarantine("external-relationship", "External package relationships are disabled"); roots.push(`/${String(node.attributes.Target).replace(/^\//, "")}`); } } });
+  const main = roots.length === 1 ? roots[0] : null; const contentType = main ? declaredTypes.get(main) : null;
+  if (main === "/word/document.xml" && contentType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml" && parts["word/document.xml"]) return "docx";
+  if (main === "/xl/workbook.xml" && contentType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" && parts["xl/workbook.xml"]) return "xlsx";
+  if (main === "/ppt/presentation.xml" && contentType === "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml" && parts["ppt/presentation.xml"]) return "pptx";
+  if (main === "/visio/document.xml" && contentType === "application/vnd.ms-visio.drawing.main+xml" && parts["visio/document.xml"] && Object.keys(parts).some((name) => /^visio\/pages\/page\d+\.xml$/i.test(name))) return "vsdx";
   throw new Quarantine("unsupported", `ZIP package is not a supported ${requested ?? "document"}`);
 }
 
@@ -150,11 +158,11 @@ function drawioProfile(bytes, sourceHash, limits) {
   const descriptor = descriptors.drawio; const make = unitFactory(sourceHash, descriptor); const value = text(bytes);
   if (/<script\b|javascript:/i.test(value)) throw new Quarantine("unsafe-active-content", "Draw.io active content is disabled");
   if (/\b(?:href|link|src|target)\s*=\s*["'][^"']*(?:https?|file):\/\//i.test(value)) throw new Quarantine("external-relationship", "External Draw.io relationships are disabled");
-  const units = []; let cells = 0; const diagrams = [...value.matchAll(/<diagram\b([^>]*)>([\s\S]*?)<\/diagram>/g)];
+  const units = []; let cells = 0; let expandedTotal = 0; const diagrams = [...value.matchAll(/<diagram\b([^>]*)>([\s\S]*?)<\/diagram>/g)];
   for (let index = 0; index < diagrams.length; index += 1) {
     let contents = diagrams[index][2].trim();
     if (contents && !contents.startsWith("<")) {
-      try { const compressed = Buffer.from(contents, "base64"); const expanded = inflateSync(compressed); exceed("expanded_bytes", expanded.byteLength, limits.expanded_bytes); if (expanded.byteLength / Math.max(compressed.byteLength, 1) > MAX_RATIO) throw new Quarantine("limit-exceeded", "Draw.io decompression ratio exceeds limit", { maximum: MAX_RATIO }); contents = decodeURIComponent(text(expanded)); }
+      try { const compressed = Buffer.from(contents, "base64"); if (compressed.byteLength * MAX_RATIO > limits.expanded_bytes - expandedTotal) throw new Quarantine("limit-exceeded", "Draw.io declared expansion could exceed the remaining budget", { maximum: limits.expanded_bytes }); const expanded = inflateSync(compressed); expandedTotal += expanded.byteLength; exceed("expanded_bytes", expandedTotal, limits.expanded_bytes); if (expanded.byteLength / Math.max(compressed.byteLength, 1) > MAX_RATIO) throw new Quarantine("limit-exceeded", "Draw.io decompression ratio exceeds limit", { maximum: MAX_RATIO }); contents = decodeURIComponent(text(expanded)); }
       catch (error) { if (error instanceof Quarantine) throw error; throw new Quarantine("malformed", "Malformed compressed Draw.io page"); }
     }
     parseXml(contents, { open(node) { if (node.name === "mxCell") { cells += 1; exceed("shapes", cells, limits.shapes); const a = node.attributes; const activeReference = [a.href, a.link, a.style].filter(Boolean).find((entry) => /(?:https?|file):\/\//i.test(String(entry))); if (activeReference) throw new Quarantine("external-relationship", "External Draw.io relationships are disabled"); units.push(make(a.edge === "1" ? "connector" : "diagram-cell", { kind: "diagram-cell", page: index + 1, cell: String(a.id ?? cells) }, { text: String(a.value ?? ""), structured_data: { parent: a.parent ?? null, source: a.source ?? null, target: a.target ?? null, edge: a.edge === "1", direction: a.source && a.target ? `${a.source}->${a.target}` : null, group: a.vertex !== "1", layer: a.parent ?? null, embedded_resource: /data:image\//i.test(String(a.style ?? "")) } })); } } });
@@ -176,7 +184,7 @@ function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error)
   return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: serializable(settings), coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
 }
 
-export async function normalize({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
+export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
   const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes); const computedHash = byteHash(input); const hash = computedHash; sourceId ??= `source-${hash.slice(7, 23)}`;
   try {
     if (typeof sourceId !== "string" || !sourceId || typeof normalizedAt !== "string" || !Number.isFinite(Date.parse(normalizedAt))) throw new Quarantine("invalid-source-metadata", "Source ID and normalization timestamp are required");
@@ -196,7 +204,7 @@ export async function normalize({ bytes, filename = "", mediaType = "", sourceId
       if (!/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(settings.language)) throw new Quarantine("invalid-language", "Language must be a BCP 47 tag");
       result.units = result.units.map((unit) => ({ ...unit, language: settings.language }));
     }
-    if (probabilisticUnits.some((unit) => { const model = unit.extraction_method?.model; return unit.extraction_method?.mode !== "probabilistic" || !model?.id || !model?.version || !model?.provider || !/^sha256:[a-f0-9]{64}$/.test(model?.recorded_output_hash ?? "") || unit.source_hash !== hash; })) throw new Quarantine("invalid-probabilistic-output", "Probabilistic units require substantive recorded-model provenance and matching source identity");
+    if (probabilisticUnits.some((unit) => { const model = unit.extraction_method?.model; return !validateUnit(unit) || unit.extraction_method?.mode !== "probabilistic" || !model?.id || !model?.version || !model?.provider || !/^sha256:[a-f0-9]{64}$/.test(model?.recorded_output_hash ?? "") || unit.source_hash !== hash; })) throw new Quarantine("invalid-probabilistic-output", "Probabilistic units require schema-valid locators, substantive recorded-model provenance, and matching source identity");
     const deterministicBytes = `${result.units.map((unit) => canonicalJson(unit)).join("\n")}${result.units.length ? "\n" : ""}`; exceed("output_bytes", Buffer.byteLength(deterministicBytes), resolvedLimits.output_bytes);
     const outputs = [{ path: "units.jsonl", hash: byteHash(deterministicBytes), bytes: Buffer.byteLength(deterministicBytes), mode: "deterministic" }];
     if (probabilisticUnits.length) { const derived = `${probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}\n`; exceed("output_bytes", Buffer.byteLength(deterministicBytes) + Buffer.byteLength(derived), resolvedLimits.output_bytes); exceed("shapes", probabilisticUnits.length, resolvedLimits.shapes); exceed("processing_ms", performance.now() - started, resolvedLimits.processing_ms); outputs.push({ path: "probabilistic-units.jsonl", hash: byteHash(derived), bytes: Buffer.byteLength(derived), mode: "probabilistic" }); }
@@ -205,12 +213,15 @@ export async function normalize({ bytes, filename = "", mediaType = "", sourceId
     return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest: { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security } };
   } catch (error) {
     const quarantined = error instanceof Quarantine ? error : new Quarantine("malformed", "Normalizer failed safely", { parser: error.message });
-    return { descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(sourceId, hash, normalizedAt, settings, quarantined) };
+    const safeSourceId = typeof sourceId === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId) && sourceId !== "." && sourceId !== ".." ? sourceId : `source-${hash.slice(7, 23)}`;
+    const safeNormalizedAt = typeof normalizedAt === "string" && Number.isFinite(Date.parse(normalizedAt)) ? normalizedAt : "1970-01-01T00:00:00.000Z";
+    return { descriptor: null, units: [], probabilisticUnits: [], manifest: quarantineManifest(safeSourceId, hash, safeNormalizedAt, settings, quarantined) };
   }
 }
 
 export function portableArtifacts(result, sourceId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId) || sourceId === "." || sourceId === "..") throw new Error("Source ID is not portable");
+  if (sourceId !== result?.manifest?.source_id) throw new Error("Source ID does not match the normalization manifest");
   const basis = result.manifest.outputs.find(({ mode }) => mode === "deterministic")?.hash ?? result.manifest.source_hash;
   const directory = `sources/normalized/${sourceId}/${basis.replace("sha256:", "sha256-")}`;
   const files = { [`${directory}/manifest.json`]: `${canonicalJson(result.manifest)}\n` };
