@@ -122,7 +122,7 @@ test("FEAT-004 role and stage descriptors enforce runtime path capabilities", as
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   await assert.rejects(() => createContractValidator(root, { claim: "core/schemas/artifacts/concept-proposal.schema.json" }), /cannot replace core contract/);
   const roles = await loadRoleDescriptors({ validator });
-  assert.deepEqual([...roles.keys()].sort(), ["conductor", "governance-reviewer", "integrator", "librarian", "source-analyst", "trust-reviewer"]);
+  assert.deepEqual([...roles.keys()].sort(), ["conductor", "curator", "governance-reviewer", "integrator", "librarian", "maintainer", "retrieval-agent", "source-analyst", "trust-reviewer"]);
   const capabilities = new CapabilityRuntime(roles);
   assert.equal(capabilities.authorize("source-analyst", "write", "workflow/runs/wf_ingest/claims/clm_alpha.json"), true);
   assert.throws(() => capabilities.authorize("trust-reviewer", "write", "workflow/runs/wf_ingest/receipts/rr_alpha.json"), (error) => error.code === "KDLC_REVIEWER_READ_ONLY");
