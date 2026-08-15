@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCapture, validateScorerBinding, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
+import { loadPreregistration, providerRequestBytes, scoreCaptures, sha256, validateCandidatePreregistration, validateCapture, validateScorerBinding, wilsonLower } from "../../scripts/statistical-evidence-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 async function perfectCapture(index) {
@@ -39,9 +39,27 @@ test("REL-001 trusted preregistration permits the frozen-model transition but re
   Object.assign(model, { id: "approved-provider-model", status: "frozen", configuration: { provider: "provider.example", model: "model-1", revision: "2026-08-15", temperature: 0, seed: 421 } });
   const modelBytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, modelBytes);
   const profile = JSON.parse(await readFile(profilePath, "utf8")); profile.manifest_hashes.model = sha256(modelBytes); await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
-  assert.equal((await loadPreregistration(candidate)).documents.model.status, "frozen");
+  assert.equal((await validateCandidatePreregistration(root, candidate)).documents.model.status, "frozen");
   profile.manifest_hashes.model = `sha256:${"0".repeat(64)}`; await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
   await assert.rejects(loadPreregistration(candidate), /exact-bind preregistered corpus\/manifests/);
+});
+
+test("REL-001 trusted profile comparison rejects threshold, seed, trial, exclusion, and scorer substitutions", async (context) => {
+  for (const mutation of ["threshold", "seed", "trials", "exclusions", "scorer"]) {
+    const candidate = await mkdtemp(resolve(tmpdir(), `kdlc-profile-${mutation}-`)); context.after(() => rm(candidate, { recursive: true, force: true }));
+    await cp(resolve(root, "core"), resolve(candidate, "core"), { recursive: true });
+    await cp(resolve(root, "distribution/release/statistical"), resolve(candidate, "distribution/release/statistical"), { recursive: true });
+    await mkdir(resolve(candidate, "scripts")); await cp(resolve(root, "scripts/statistical-evidence-validation.mjs"), resolve(candidate, "scripts/statistical-evidence-validation.mjs"));
+    const modelPath = resolve(candidate, "distribution/release/statistical/model-manifest.json"); const profilePath = resolve(candidate, "distribution/release/statistical/profile.json");
+    const model = JSON.parse(await readFile(modelPath, "utf8")); const profile = JSON.parse(await readFile(profilePath, "utf8"));
+    if (mutation === "threshold") profile.metrics[0].minimum_wilson_lower_bound = 0;
+    if (mutation === "trials") profile.required_trials = 1;
+    if (mutation === "exclusions") profile.exclusions.allowed = true;
+    if (mutation === "scorer") profile.scorer.version = 2;
+    if (mutation === "seed") { model.configuration.seed = 7; const bytes = `${JSON.stringify(model, null, 2)}\n`; await writeFile(modelPath, bytes); profile.manifest_hashes.model = sha256(bytes); }
+    await writeFile(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+    await assert.rejects(validateCandidatePreregistration(root, candidate), undefined, mutation);
+  }
 });
 
 test("REL-001 offline scorer derives declared Wilson bounds from all 30 complete trials", async () => {

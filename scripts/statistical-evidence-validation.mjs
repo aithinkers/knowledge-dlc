@@ -46,6 +46,20 @@ export async function loadPreregistration(root) {
   const metricIds = documents.profile.metrics.map(({ id }) => id); if (!same(metricIds, ["decision_accuracy", "required_term_recall", "security_fail_closed"])) throw new Error("metric set/order was substituted");
   return { ajv, documents, hashes, caseIds: ids };
 }
+export async function validateCandidatePreregistration(trustedRoot, candidateRoot) {
+  const trusted = await loadPreregistration(trustedRoot); const candidate = await loadPreregistration(candidateRoot);
+  const trustedProfile = structuredClone(trusted.documents.profile); const candidateProfile = structuredClone(candidate.documents.profile);
+  candidateProfile.manifest_hashes.model = trustedProfile.manifest_hashes.model;
+  if (!same(candidateProfile, trustedProfile)) throw new Error("candidate statistical profile changed outside the permitted model hash transition");
+  const trustedModel = trusted.documents.model; const candidateModel = candidate.documents.model;
+  if (same(candidateModel, trustedModel)) return candidate;
+  if (trustedModel.status !== "awaiting-provider-inputs" || candidateModel.status !== "frozen" ||
+      candidateModel.api_version !== trustedModel.api_version || candidateModel.kind !== trustedModel.kind || candidateModel.version !== trustedModel.version ||
+      candidateModel.configuration.temperature !== trustedModel.configuration.temperature || candidateModel.configuration.seed !== trustedModel.configuration.seed) {
+    throw new Error("candidate model manifest is not the permitted pending-to-frozen transition");
+  }
+  return candidate;
+}
 export function providerRequestBytes(state, trialId, releaseCase) {
   return `${JSON.stringify({ api_version: "kdlc.dev/statistical-provider-request/v1alpha1", trial_id: trialId, case: releaseCase,
     prompt: state.documents.prompt, tool: state.documents.tool, model: state.documents.model })}\n`;

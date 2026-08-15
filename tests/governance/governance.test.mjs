@@ -247,6 +247,8 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
       ".github/workflows/release-matrix.yml",
       "scripts/run-release-matrix-cell.mjs",
       "scripts/verify-release-matrix.mjs",
+      "scripts/run-release-evaluation.mjs",
+      "scripts/verify-release-evidence.mjs",
       "scripts/release-matrix-definition.mjs",
       "core/schemas/release/release-matrix-result.schema.json"
     ]) await writeFile(join(candidate, path), `candidate substituted ${path}\n`);
@@ -273,6 +275,8 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
       ".github/workflows/release-matrix.yml",
       "scripts/run-release-matrix-cell.mjs",
       "scripts/verify-release-matrix.mjs",
+      "scripts/run-release-evaluation.mjs",
+      "scripts/verify-release-evidence.mjs",
       "scripts/release-matrix-definition.mjs",
       "core/schemas/release/release-matrix-result.schema.json"
     ]) assert.ok(failures.includes(`protected harness file differs from trusted base: ${path}`));

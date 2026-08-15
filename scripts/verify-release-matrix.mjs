@@ -3,11 +3,13 @@ import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 import { releaseMatrixCells, releaseMatrixCommandIds, releaseMatrixDifferences } from "./release-matrix-definition.mjs";
-import { loadPreregistration } from "./statistical-evidence-validation.mjs";
+import { validateReleaseEvidence } from "./release-evidence-validation.mjs";
+import { validateCandidatePreregistration } from "./statistical-evidence-validation.mjs";
 
 const [directory] = process.argv.slice(2); if (!directory || process.argv.length !== 3) throw new Error("usage: node scripts/verify-release-matrix.mjs <download-directory>");
 const candidateRoot = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDATE_ROOT) : process.cwd();
-await loadPreregistration(candidateRoot);
+await validateCandidatePreregistration(process.cwd(), candidateRoot);
+const releaseFailures = await validateReleaseEvidence(candidateRoot); if (releaseFailures.length) throw new Error(releaseFailures.join("; "));
 const root = resolve(directory); const schema = JSON.parse(await readFile(resolve(process.cwd(), "core/schemas/release/release-matrix-result.schema.json"), "utf8")); const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
 const visit = async (path) => { const found = []; for (const entry of await readdir(path, { withFileTypes: true })) entry.isDirectory() ? found.push(...await visit(resolve(path, entry.name))) : entry.name === "result.json" && found.push(resolve(path, entry.name)); return found; };
 const files = await visit(root); const results = await Promise.all(files.map(async (path) => JSON.parse(await readFile(path, "utf8"))));
