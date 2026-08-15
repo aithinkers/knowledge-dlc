@@ -90,8 +90,8 @@ authority is consumed and expires immediately when PR #39 merges, and it does
 not authorize any later harness, reporter, workflow, or verifier change.
 
 PR #59, linked to issue #55, may use a one-time protected release-evidence
-bypass solely at head `c9c0f0ad5f1541d13bdcbdbe6ddadc6a147b9e0f` on base
-`7655fe4dbe8b187e7b895f3a52f46eb0154ac09c`. It authorizes exactly these
+bypass solely at head `9145327daf5a2a752078991d0d5d6e3b3cc681bf` on base
+`900ab7eeb161b623265611ce238d05cf321c8dad`. It authorizes exactly these
 SHA-256 transitions caused by rebinding the pinned byte hash of
 `tests/governance/agent-workflows.test.mjs` (whose role-set assertion grows
 from six to the nine specification §22 roles) and its dependent
@@ -104,11 +104,11 @@ corpus/profile/run/report chain:
   `4e8e6634df73f613776226730750015c3f87fba132f6f4ddcf8e52898570a970`
   to `3b0421e391a734a98d1c1c216ad07b86ab7e4402019debb30dc2d3750549cef4`.
 
-The complete PR #59 diff is limited to 25 paths (823 additions, 68 deletions):
+The complete PR #59 diff is limited to 25 paths (563 additions, 33 deletions):
 the three new role descriptors, the role-descriptor schema enum, authored
 agent definitions and generator wiring, generated Claude Code agent files and
 plugin manifest, the supply-chain package manifest, the agent-workflows
-role-set assertion, the FEAT-010 traceability entry, the new agent-layer test,
+role-set assertion, the FEAT-010 traceability status/evidence update, the new agent-layer test,
 and the mechanical recorded-run/report/conformance evidence rebinds those
 transitions require. No workflow, validator, scorer, statistical, schema
 (other than the role enum), or release-status byte may change. Candidate
