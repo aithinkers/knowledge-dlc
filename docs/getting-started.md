@@ -105,7 +105,23 @@ integrator, librarian, trust-reviewer, retrieval-agent, maintainer,
 governance-reviewer). Agent capabilities are enforced by the runtime role
 descriptors, not by prompt text.
 
-## 6. MCP server
+## 6. Pick your harness
+
+| Harness | Install | Invoke |
+|---|---|---|
+| Claude Code | `claude plugin install <repo>/distribution/claude-code` | `/kdlc:<operation>` commands, `kdlc:<role>` agents |
+| Codex CLI (≥ 0.145) | copy `distribution/codex/` conventions into your Codex setup | `$kdlc` skill (`SKILL.md`), `.codex/agents/<role>` |
+| Kiro CLI (≥ 2.6) | copy `distribution/kiro/.kiro/` into your project | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
+| Kiro IDE | copy `distribution/kiro-ide/.kiro/` into your project | `/kdlc-<operation>` skills, `.kiro/agents/<role>` |
+| Any MCP client | `distribution/mcp/desktop.json` (stdio) or `custom-app.json` (HTTP) | `kb_search`, `kb_fetch`, `proposal_create`, … |
+
+Every harness invokes the same governed CLI engine and returns the same
+versioned JSON envelope; adapters never change stage requirements, security
+policy, state transitions, or artifact contracts (§25). Kiro operations run
+`node distribution/<harness>/run.mjs` from this repository checkout, so keep
+the checkout available (or `npm link` and adjust the runner path).
+
+## 7. MCP server
 
 Local stdio configuration (Claude Desktop and other spawning clients) is
 generated at `distribution/mcp/desktop.json`; it runs
