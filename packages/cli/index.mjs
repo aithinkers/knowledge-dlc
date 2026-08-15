@@ -23,6 +23,7 @@ import {
   parseYamlArtifact,
 } from "../contracts/index.mjs";
 import { FederationResolver } from "../federation/index.mjs";
+import { createCoreSensors, scanLintContext, SensorRunner } from "../lifecycle/src/index.mjs";
 import { guardRetriever, RevocationGuard } from "../erasure/index.mjs";
 import { createExtensionValidator, previewMigration } from "../extensions/index.mjs";
 import { PrincipalAuthority, ReviewContextAuthority, RuntimeTrustAuthority } from "../agents/index.mjs";
@@ -1062,7 +1063,20 @@ export function createLocalProjectEngine(options = {}) {
             await readFile(resolve(root, "knowledge-project.yaml"), "utf8"),
           );
           const result = contracts.validate("project", project);
-          return { valid: result.valid, issues: result.errors };
+          // FEAT-015: run the §26 core sensors over the primary knowledge base.
+          const sensors = createCoreSensors({ profile: null });
+          const lintNow = new Date().toISOString();
+          const runner = new SensorRunner({ sensors, clock: { now: () => lintNow, millis: () => Date.parse(lintNow) } });
+          const context = await scanLintContext({ root, today: lintNow.slice(0, 10) });
+          const report = await runner.run(sensors.map(({ id }) => id), { ...context, scope: "lint" });
+          const sensorResults = report.results.map(({ sensor_id, version, status, findings }) => ({ sensor_id, version, status, findings: findings ?? [] }));
+          const findings = sensorResults.flatMap(({ findings: sensorFindings }) => sensorFindings);
+          return {
+            valid: result.valid && !findings.some(({ severity }) => severity === "error"),
+            issues: result.errors,
+            sensors: sensorResults,
+            findings,
+          };
         },
         kb_conflicts: async () => {
           const result = await search({

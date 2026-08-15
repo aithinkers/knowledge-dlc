@@ -30,14 +30,21 @@ machine-readable `not-ready` release status.
 
 ## Known conformance gaps disclosed before release
 
-- Specification §26 lists ~24 deterministic sensor categories. The sensor
-  runtime (determinism checks, severity, auditable waivers) and the seven
-  governance-gate sensors (§27.4–§27.7) are implemented and tested; the
-  remaining §26 sensor definitions (OKF conformance, link/alias/orphan/index
-  checks, claim-sidecar consistency, lock-file drift, and related lint
-  sensors) are not yet implemented. Tracked as FEAT-015 (issue #75); the
-  FEAT-008 traceability entry is scoped accordingly. `kdlc lint` currently
-  validates the project manifest only.
+- Specification §26 sensor coverage: the sensor runtime (determinism checks,
+  severity, auditable waivers), the seven governance-gate sensors
+  (§27.4–§27.7), and sixteen core lint sensor definitions (FEAT-015, issue
+  #75 — OKF conformance, profile frontmatter, source/citation resolvability,
+  claim-sidecar consistency, link/alias/duplicate/relationship/orphan checks,
+  index completeness and reproducibility, stale verification, lifecycle
+  transitions, review binding, lock drift, workflow lock/job integrity) are
+  implemented and run by `kdlc lint` with info/warning/error findings.
+  Generated-distribution drift remains enforced by `check:distribution` in CI
+  rather than as a lint sensor, and the remaining §26 categories are enforced
+  outside lint: manifest schema validity by the contract validator in
+  `kdlc lint`, duplicate mounted knowledge-base IDs and tree-hash mismatches
+  at mount resolution (`packages/core/src/resolution.mjs`,
+  `packages/federation`), and normalizer coverage/locator/limit/probabilistic
+  labels by quarantine-on-violation in `packages/normalizers`.
 - Codex and Kiro harness surfaces run from this repository checkout; a
   self-contained packaged runner is future work (see issue #73 notes).
 

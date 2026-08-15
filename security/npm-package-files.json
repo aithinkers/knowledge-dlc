@@ -260,6 +260,7 @@
     "packages/governance/index.mjs",
     "packages/governance/src/controls.mjs",
     "packages/lifecycle/src/audit.mjs",
+    "packages/lifecycle/src/core-sensors.mjs",
     "packages/lifecycle/src/errors.mjs",
     "packages/lifecycle/src/index.mjs",
     "packages/lifecycle/src/jobs.mjs",

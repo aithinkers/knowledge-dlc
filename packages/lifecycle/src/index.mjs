@@ -1,4 +1,5 @@
 export * from "./audit.mjs";
+export * from "./core-sensors.mjs";
 export * from "./errors.mjs";
 export * from "./jobs.mjs";
 export * from "./locks.mjs";
