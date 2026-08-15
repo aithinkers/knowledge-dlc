@@ -12,10 +12,8 @@ import {
 import { basename, dirname, resolve } from "node:path";
 
 import {
-  byteHash,
   canonicalJson,
   materializeScaffold,
-  parseMarkdownConcept,
   scaffoldProject,
 } from "../core/index.mjs";
 import {
@@ -778,7 +776,7 @@ export function createLocalProjectEngine(options = {}) {
       project,
     );
   };
-  const search = async (input) => {
+  const authorizedRetriever = async () => {
     const { mounts } = await resolveMounts();
     const order = { public: 0, internal: 1, confidential: 2, restricted: 3 };
     const allowed = (access) =>
@@ -798,6 +796,10 @@ export function createLocalProjectEngine(options = {}) {
       minimumDurationMs: 0,
     });
     const authorization = await retriever.prepareAuthorization({ principal });
+    return { retriever, authorization };
+  };
+  const search = async (input) => {
+    const { retriever, authorization } = await authorizedRetriever();
     return retriever.search({
       authorization,
       principal,
@@ -809,45 +811,11 @@ export function createLocalProjectEngine(options = {}) {
     });
   };
   const fetchConcept = async ({ uri }) => {
-    const match = /^kb:\/\/([a-z0-9.-]+)\/(.+)$/.exec(uri ?? "");
-    if (!match) throw inputError("A canonical kb URI is required");
-    const authorization = await search({ query: match[2], mode: "audit" });
-    if (
-      !authorization.results.some(
-        ({ id }) => id === `kb://${match[1]}/${match[2]}`,
-      )
-    )
-      throw missing("Requested concept is unavailable");
-    const { mounts } = await resolveMounts();
-    const mount = mounts.find(({ id }) => id === match[1]);
-    const record = mount?.retrieval_catalog.find(({ id }) => id === match[2]);
-    if (!mount || !record) throw missing("Requested concept is unavailable");
-    const bytes = await readFile(resolve(mount.root, record.path));
-    if (byteHash(bytes) !== record.byte_hash)
-      throw new EngineError(
-        "KDLC_HASH_CONFLICT",
-        "Concept bytes drifted",
-        EXIT.conflict,
-      );
-    const concept = parseMarkdownConcept(bytes);
-    return {
-      uri,
-      knowledge_base_id: mount.id,
-      revision: mount.resolved_ref,
-      concept: {
-        id: record.id,
-        frontmatter: concept.frontmatter,
-        body: concept.body,
-      },
-      citations: [
-        {
-          concept: `kb://${mount.id}@${mount.resolved_ref}/${record.id}`,
-          knowledge_base_id: mount.id,
-          revision: mount.resolved_ref,
-          tree_hash: mount.tree_hash,
-        },
-      ],
-    };
+    if (!/^kb:\/\/[^/]+\/.+/.test(uri ?? "")) throw inputError("A canonical kb URI is required");
+    const { retriever, authorization } = await authorizedRetriever();
+    const result = await retriever.fetch({ authorization, principal, uri, mode: "audit" });
+    if (result.status !== "ok") throw missing("Requested concept is unavailable");
+    return result;
   };
   const ingest = async (
     { sources },
@@ -883,11 +851,27 @@ export function createLocalProjectEngine(options = {}) {
     }
     return { idempotency_key: durableIdempotencyKey, normalized };
   };
+  const sourceExcerpt = async ({ source_id: sourceId, locator }) => {
+    if (typeof sourceId !== "string" || !portable(sourceId) || !locator || typeof locator !== "object" || Array.isArray(locator)) throw inputError("A portable source_id and locator object are required");
+    const jobsPath = resolve(root, ".kdlc/jobs");
+    if (!existsSync(jobsPath)) throw missing("Requested source excerpt is unavailable");
+    for (const name of (await readdir(jobsPath)).filter((item) => /^job_[a-f0-9]{16}\.json$/.test(item)).sort()) {
+      const job = JSON.parse(await readFile(resolve(jobsPath, name), "utf8"));
+      if (job.state !== "completed" || job.principal !== principal.actor) continue;
+      for (const artifact of job.result?.normalized ?? []) {
+        if (artifact.manifest?.source_id !== sourceId) continue;
+        const unit = artifact.units?.find((candidate) => canonicalJson(candidate.locator) === canonicalJson(locator));
+        if (unit) return { source_id: sourceId, source_hash: unit.source_hash, locator: structuredClone(unit.locator), excerpt: unit.text, extraction_method: structuredClone(unit.extraction_method), job_id: job.id };
+      }
+    }
+    throw missing("Requested source excerpt is unavailable");
+  };
   const handlers = policy
     ? {
         query: search,
         kb_search: search,
         kb_fetch: fetchConcept,
+        source_excerpt: sourceExcerpt,
         trace: fetchConcept,
         kb_trace: fetchConcept,
         ingest,

@@ -17,6 +17,7 @@ export const distributionDefinition = Object.freeze({
       "kb_trace",
       "kb_conflicts",
       "kb_gaps",
+      "source_excerpt",
       "ingest_start",
       "job_status",
       "job_cancel",
