@@ -64,9 +64,9 @@ projections — plain files remain the durable contract.
 | Harness | Install | Invoke |
 | --- | --- | --- |
 | **Claude Code** | `claude plugin install <repo>/distribution/claude-code` | `/kdlc:<operation>`, `kdlc:<role>` agents |
-| **Codex CLI** (≥ 0.145) | copy `distribution/codex/` conventions | `$kdlc` skill, `.codex/agents/<role>` |
-| **Kiro CLI** (≥ 2.6) | copy `distribution/kiro/.kiro/` into your project | `/kdlc-<operation>`, `.kiro/agents/<role>` |
-| **Kiro IDE** | copy `distribution/kiro-ide/.kiro/` into your project | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Codex CLI** (≥ 0.145) | run Codex from this checkout; surface in `distribution/codex/` | `$kdlc` skill, `.codex/agents/<role>` |
+| **Kiro CLI** (≥ 2.6) | run Kiro from this checkout; surface in `distribution/kiro/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Kiro IDE** | run Kiro from this checkout; surface in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
 | **Any MCP client** | `distribution/mcp/desktop.json` (stdio) / `custom-app.json` (HTTP) | `kb_search`, `kb_fetch`, `proposal_create`, … |
 
 Adapters differ only in packaging: stage requirements, security policy, state

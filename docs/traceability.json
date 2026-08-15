@@ -510,6 +510,25 @@
       }
     },
     {
+      "id": "REQ-UX-001",
+      "title": "Clean input errors for trace/migrate and truthful harness install instructions",
+      "issue": 73,
+      "specification_sections": [
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "docs/getting-started.md",
+          "README.md"
+        ],
+        "tests": [
+          "tests/governance/getting-started.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,

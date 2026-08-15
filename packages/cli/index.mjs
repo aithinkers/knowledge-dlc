@@ -752,7 +752,13 @@ export function parseCli(argv) {
     if (!input.question)
       throw inputError("query requires a non-empty question");
   }
-  if (operation === "trace") input.uri = positionals[0];
+  if (operation === "trace") {
+    if (!positionals[0]) throw inputError("trace requires a concept reference, for example: kdlc trace kb://<knowledge-base-id>/<concept-id>");
+    input.uri = positionals[0];
+  }
+  if (operation === "migrate" && !positionals[0]) {
+    throw inputError("migrate requires a JSON argument object, for example: kdlc migrate '{\"target\": ...}'");
+  }
   if (operation === "review") {
     [input.proposal_id, input.decision, input.receipt_id] = positionals;
   }
