@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/artifacts/review-context.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidence", "sensors", "impact", "resolved", "provenance", "budget"],
+  "properties": {
+    "evidence": {"$ref": "./review-packet.schema.json#/properties/evidence"},
+    "sensors": {"$ref": "./review-packet.schema.json#/properties/sensors"},
+    "impact": {"$ref": "./review-packet.schema.json#/properties/impact"},
+    "resolved": {"$ref": "./review-packet.schema.json#/properties/resolved"},
+    "provenance": {"$ref": "./review-packet.schema.json#/properties/provenance"},
+    "budget": {"$ref": "./review-packet.schema.json#/properties/budget"}
+  }
+}

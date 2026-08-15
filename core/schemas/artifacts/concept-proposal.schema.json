@@ -43,6 +43,15 @@
       }
     },
     "created_by": {"$ref": "../common.schema.json#/$defs/actor"},
+    "input_hashes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["normalized_evidence", "claims", "review_context"],
+      "properties": {
+        "normalized_evidence": {"$ref": "../common.schema.json#/$defs/digest"},
+        "claims": {"$ref": "../common.schema.json#/$defs/digest"},
+        "review_context": {"$ref": "../common.schema.json#/$defs/digest"}
+      }
+    },
     "direct_edit": {
       "type": "object",
       "additionalProperties": false,

@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +10,7 @@ const roleRoot = resolve(packageRoot, "roles");
 const safeSegment = /^[A-Za-z0-9._-]+$/;
 const reviewerRoles = new Set(["trust-reviewer", "governance-reviewer"]);
 const authenticatedSessions = new WeakSet();
+const trustedReviewContexts = new WeakMap();
 
 export const AGENT_WORKFLOW_SCHEMA_PATHS = Object.freeze({
   conceptProposal: "core/schemas/artifacts/concept-proposal.schema.json",
@@ -19,7 +20,8 @@ export const AGENT_WORKFLOW_SCHEMA_PATHS = Object.freeze({
   publicationIntent: "core/schemas/artifacts/publication-intent.schema.json",
   governedReviewPacket: "core/schemas/artifacts/governed-review-packet.schema.json",
   reviewDecision: "core/schemas/artifacts/review-decision.schema.json",
-  freshnessAuthorization: "core/schemas/artifacts/freshness-authorization.schema.json"
+  freshnessAuthorization: "core/schemas/artifacts/freshness-authorization.schema.json",
+  reviewContext: "core/schemas/artifacts/review-context.schema.json"
 });
 
 export class AgentPolicyError extends Error {
@@ -105,7 +107,7 @@ export class CapabilityRuntime {
     if (operation !== "read" && operation !== "write") throw new AgentPolicyError("KDLC_CAPABILITY_INVALID", `Unknown capability operation: ${operation}`);
     const descriptor = this.descriptor(role);
     safePath(path);
-    const reviewerWrite = matches("workflow/runs/**/receipts/**", path) || matches("workflow/runs/**/reviews/**/decision.json", path) || matches("workflow/runs/**/reviews/**/freshness-authorization.json", path);
+    const reviewerWrite = matches("workflow/runs/**/receipts/**", path);
     if (reviewerRoles.has(role) && operation === "write" && !reviewerWrite) {
       throw new AgentPolicyError("KDLC_REVIEWER_READ_ONLY", `${role} cannot mutate reviewed artifacts`, { operation, path });
     }
@@ -122,13 +124,11 @@ function cloneJson(value) { return JSON.parse(canonicalJson(value)); }
 export class MediatedAgentRuntime {
   #capabilities;
   #store;
-  #tools;
 
-  constructor({ capabilities, store, tools = new Map() }) {
+  constructor({ capabilities, store }) {
     if (!capabilities || typeof store?.get !== "function" || typeof store?.put !== "function") throw new TypeError("Mediated runtime requires capabilities and a read/write store");
     this.#capabilities = capabilities;
     this.#store = store;
-    this.#tools = new Map(tools);
   }
 
   async read(role, path) {
@@ -143,13 +143,40 @@ export class MediatedAgentRuntime {
     return safeValue;
   }
 
-  async invoke(role, toolName, input) {
-    const descriptor = this.#capabilities.descriptor(role);
-    if (!descriptor.permissions.tools.includes(toolName)) throw new AgentPolicyError("KDLC_TOOL_DENIED", `${role} cannot invoke ${toolName}`, { role, tool: toolName });
-    const handler = this.#tools.get(toolName);
-    if (typeof handler !== "function") throw new AgentPolicyError("KDLC_TOOL_UNAVAILABLE", `Authorized tool is unavailable: ${toolName}`);
-    return cloneJson(await handler(cloneJson(input)));
+}
+
+export class RepositoryFileStore {
+  #root;
+
+  constructor(root) {
+    if (typeof root !== "string" || root.length === 0) throw new TypeError("Repository file store requires a root");
+    this.#root = root;
   }
+
+  async #target(path) {
+    const segments = safePath(path);
+    const root = await realpath(this.#root);
+    let current = root;
+    for (let index = 0; index < segments.length; index += 1) {
+      current = resolve(current, segments[index]);
+      try {
+        const stat = await lstat(current);
+        if (stat.isSymbolicLink()) throw new AgentPolicyError("KDLC_PATH_SYMLINK", `Capability path crosses a symbolic link: ${path}`);
+        current = await realpath(current);
+      } catch (error) {
+        if (error instanceof AgentPolicyError) throw error;
+        if (error?.code !== "ENOENT") throw error;
+        current = resolve(current, ...segments.slice(index + 1));
+        break;
+      }
+      if (current !== root && !current.startsWith(`${root}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
+    }
+    if (current !== root && !current.startsWith(`${root}/`)) throw new AgentPolicyError("KDLC_PATH_ESCAPE", `Capability path escapes repository root: ${path}`);
+    return current;
+  }
+
+  async get(path) { return JSON.parse(await readFile(await this.#target(path), "utf8")); }
+  async put(path, value) { await writeFile(await this.#target(path), `${canonicalJson(value)}\n`, { encoding: "utf8", flag: "w" }); }
 }
 
 export class RecordedModelRuntime {
@@ -210,4 +237,29 @@ export class PrincipalAuthority {
 export function resolveAuthenticatedReviewSession(session) {
   if (!session || !authenticatedSessions.has(session) || !reviewerRoles.has(session.role)) throw new AgentPolicyError("KDLC_SESSION_INVALID", "Review decision requires a trusted authenticated session");
   return { role: session.role, reviewer: structuredClone(session.reviewer) };
+}
+
+export class ReviewContextAuthority {
+  #contexts;
+
+  constructor(records) {
+    if (!Array.isArray(records)) throw new TypeError("ReviewContextAuthority requires trusted executed context records");
+    this.#contexts = new Map();
+    for (const record of records) {
+      if (!record || typeof record.workflow_id !== "string" || !record.context || this.#contexts.has(record.workflow_id)) throw new AgentPolicyError("KDLC_REVIEW_CONTEXT_INVALID", "Trusted review context record is invalid or duplicated");
+      this.#contexts.set(record.workflow_id, structuredClone(record.context));
+    }
+  }
+
+  establish(workflowId) {
+    if (!this.#contexts.has(workflowId)) throw new AgentPolicyError("KDLC_REVIEW_CONTEXT_UNRESOLVED", `No trusted executed review context exists for ${workflowId}`);
+    const session = Object.freeze({ workflow_id: workflowId });
+    trustedReviewContexts.set(session, structuredClone(this.#contexts.get(workflowId)));
+    return session;
+  }
+}
+
+export function resolveTrustedReviewContext(session, workflowId) {
+  if (!session || !trustedReviewContexts.has(session) || session.workflow_id !== workflowId) throw new AgentPolicyError("KDLC_REVIEW_CONTEXT_UNTRUSTED", "Recorded workflow requires a trusted executed review context for the exact workflow");
+  return structuredClone(trustedReviewContexts.get(session));
 }

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { AGENT_WORKFLOW_SCHEMA_PATHS, AgentPolicyError, CapabilityRuntime, loadRoleDescriptors, MediatedAgentRuntime, PrincipalAuthority } from "../../packages/agents/index.mjs";
+import { AGENT_WORKFLOW_SCHEMA_PATHS, AgentPolicyError, CapabilityRuntime, loadRoleDescriptors, MediatedAgentRuntime, PrincipalAuthority, RepositoryFileStore, ReviewContextAuthority } from "../../packages/agents/index.mjs";
 import { createContractValidator } from "../../packages/contracts/index.mjs";
 import { artifactHash } from "../../packages/core/index.mjs";
 import { assessPublication, verificationStatus } from "../../packages/governance/index.mjs";
@@ -27,8 +28,8 @@ async function normalizedFixture(name) {
 
 function reviewContext(sourceHash = digest("a")) {
   return {
-    evidence: [{ source_id: "src_alpha", source_hash: sourceHash, locator: { heading: "Token lifetime" }, excerpt: "Tokens expire after 60 minutes.", authority: "team:security", access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "high", warnings: [] }],
-    sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed" }],
+    evidence: [{ source_id: "src_alpha", source_hash: sourceHash, locator: { heading: "Token lifetime" }, excerpt: "Production API tokens expire after 60 minutes.", authority: "team:security", access: { classification: "public" }, rights: { use: "internal" }, extraction_quality: "high", warnings: [] }],
+    sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: digest("7") }],
     impact: { links: [], dependents: [], freshness_change: "2030-01-01", unresolved_conflicts: [] },
     resolved: {
       profile: { id: "kdlc-base", version: "0.2.0", hash: digest("e") },
@@ -40,20 +41,24 @@ function reviewContext(sourceHash = digest("a")) {
   };
 }
 
+function trustedReviewContext(workflowId, context) {
+  return new ReviewContextAuthority([{ workflow_id: workflowId, context }]).establish(workflowId);
+}
+
 async function approvedHarness() {
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   const store = new MemoryArtifactStore();
   const session = principals.establishReviewSession("reviewer-123", "trust-reviewer");
-  const harness = await GovernedAgentWorkflows.create({ validator, store, clock, session });
+  const context = reviewContext();
+  const harness = await GovernedAgentWorkflows.create({ validator, store, clock, session, reviewContextSession: trustedReviewContext("wf_ingest", context) });
   const recording = await fixture("ingest");
   const output = await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording, normalizedEvidence: await normalizedFixture("ingest") });
-  const context = reviewContext();
-  const review = await harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha", claims: output.claims, ...context });
+  const review = await harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" });
   const decision = await harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_approved" });
   return { validator, store, harness, recording, output, context, review, receipt: decision.receipt };
 }
 
-test("FEAT-004 role and stage descriptors enforce runtime path capabilities", async () => {
+test("FEAT-004 role and stage descriptors enforce runtime path capabilities", async (t) => {
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   await assert.rejects(() => createContractValidator(root, { claim: "core/schemas/artifacts/concept-proposal.schema.json" }), /cannot replace core contract/);
   const roles = await loadRoleDescriptors({ validator });
@@ -66,11 +71,22 @@ test("FEAT-004 role and stage descriptors enforce runtime path capabilities", as
   assert.throws(() => capabilities.authorize("conductor", "write", "knowledge-bases/acme.docs/concept.md"), (error) => error.code === "KDLC_CAPABILITY_DENIED");
   assert.equal(capabilities.run, undefined);
   const values = new Map([["workflow/runs/wf_ingest/reviews/pr_alpha/packet.json", { safe: true }]]);
-  const mediated = new MediatedAgentRuntime({ capabilities, store: { get: async (path) => values.get(path), put: async (path, value) => values.set(path, value) }, tools: new Map([["model.recorded", async (input) => ({ echoed: input })]]) });
+  let ambientCallbackInvoked = false;
+  const mediated = new MediatedAgentRuntime({ capabilities, store: { get: async (path) => values.get(path), put: async (path, value) => values.set(path, value) }, tools: new Map([["ambient", async () => { ambientCallbackInvoked = true; await fetch("https://example.invalid"); }]]) });
   await assert.rejects(() => mediated.write("trust-reviewer", "workflow/runs/wf_ingest/proposals/pr_alpha.json", { forged: true }), (error) => error.code === "KDLC_REVIEWER_READ_ONLY");
   assert.equal(values.has("workflow/runs/wf_ingest/proposals/pr_alpha.json"), false);
-  assert.deepEqual(await mediated.invoke("source-analyst", "model.recorded", { task: "ingest" }), { echoed: { task: "ingest" } });
-  await assert.rejects(() => mediated.invoke("trust-reviewer", "model.recorded", {}), (error) => error.code === "KDLC_TOOL_DENIED");
+  assert.equal(mediated.invoke, undefined);
+  await assert.rejects(() => mediated.write("conductor", "workflow/runs/wf_ingest/reviews/pr_alpha/packet.json", { overwritten: true }), (error) => error.code === "KDLC_CAPABILITY_DENIED");
+  assert.deepEqual(values.get("workflow/runs/wf_ingest/reviews/pr_alpha/packet.json"), { safe: true });
+  assert.equal(ambientCallbackInvoked, false);
+  const repositoryRoot = await mkdtemp(resolve(tmpdir(), "kdlc-capability-"));
+  const outsideRoot = await mkdtemp(resolve(tmpdir(), "kdlc-outside-"));
+  t.after(async () => { await rm(repositoryRoot, { recursive: true, force: true }); await rm(outsideRoot, { recursive: true, force: true }); });
+  await mkdir(resolve(repositoryRoot, "workflow/runs/wf_ingest/state"), { recursive: true });
+  await writeFile(resolve(outsideRoot, "secret.json"), '{"secret":true}\n');
+  await symlink(outsideRoot, resolve(repositoryRoot, "workflow/runs/wf_ingest/state/link"));
+  const fileRuntime = new MediatedAgentRuntime({ capabilities, store: new RepositoryFileStore(repositoryRoot) });
+  await assert.rejects(() => fileRuntime.read("conductor", "workflow/runs/wf_ingest/state/link/secret.json"), (error) => error.code === "KDLC_PATH_SYMLINK");
 
   for (const name of (await readdir(resolve(root, "packages/workflows/stages"))).sort()) {
     const stage = JSON.parse(await readFile(resolve(root, "packages/workflows/stages", name), "utf8"));
@@ -82,7 +98,9 @@ test("FEAT-004 ingest and adoption replay schema-valid recorded model outputs", 
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   for (const [task, workflowId] of [["ingest", "wf_ingest"], ["adopt", "wf_adopt"]]) {
     const store = new MemoryArtifactStore();
-    const harness = await GovernedAgentWorkflows.create({ validator, store, clock });
+    const context = reviewContext(task === "ingest" ? digest("a") : digest("c"));
+    if (task === "adopt") { context.evidence[0].source_id = "src_beta"; context.evidence[0].locator = { heading: "Ownership" }; context.evidence[0].excerpt = "The service is maintained by the platform team."; }
+    const harness = await GovernedAgentWorkflows.create({ validator, store, clock, reviewContextSession: trustedReviewContext(workflowId, context) });
     const recording = await fixture(task);
     const normalizedEvidence = await normalizedFixture(task);
     assert.equal(recording.input_hashes.normalized_evidence, artifactHash(normalizedEvidence));
@@ -90,6 +108,9 @@ test("FEAT-004 ingest and adoption replay schema-valid recorded model outputs", 
     assert.equal(output.claims.length, 1);
     assert.equal(validator.validate("claim", output.claims[0]).valid, true);
     assert.equal(validator.validate("conceptProposal", output.proposals[0]).valid, true);
+    assert.equal(output.proposals[0].input_hashes.normalized_evidence, artifactHash(normalizedEvidence));
+    assert.equal(output.proposals[0].input_hashes.claims, artifactHash(output.claims));
+    assert.equal(output.proposals[0].input_hashes.review_context, artifactHash(context));
     assert.equal(await store.has(`workflow/runs/${workflowId}/claims/${output.claims[0].id}.json`), true);
     assert.equal(await store.has(`workflow/runs/${workflowId}/proposals/${output.proposals[0].id}.json`), true);
   }
@@ -98,7 +119,7 @@ test("FEAT-004 ingest and adoption replay schema-valid recorded model outputs", 
 test("FEAT-004 invalid or drifted model recordings fail before emitting artifacts", async () => {
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   const store = new MemoryArtifactStore();
-  const harness = await GovernedAgentWorkflows.create({ validator, store, clock });
+  const harness = await GovernedAgentWorkflows.create({ validator, store, clock, reviewContextSession: trustedReviewContext("wf_ingest", reviewContext()) });
   const recording = await fixture("ingest");
   recording.claims[0].source_hash = "not-a-digest";
   const normalizedEvidence = await normalizedFixture("ingest");
@@ -106,7 +127,7 @@ test("FEAT-004 invalid or drifted model recordings fail before emitting artifact
   assert.equal(store.artifacts.size, 0);
 
   const nonAtomicStore = { put: async () => {}, get: async () => {}, has: async () => false };
-  const nonAtomicHarness = await GovernedAgentWorkflows.create({ validator, store: nonAtomicStore, clock });
+  const nonAtomicHarness = await GovernedAgentWorkflows.create({ validator, store: nonAtomicStore, clock, reviewContextSession: trustedReviewContext("wf_ingest", reviewContext()) });
   const atomicRecording = await fixture("ingest");
   await assert.rejects(() => nonAtomicHarness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: atomicRecording, normalizedEvidence }), (error) => error.code === "KDLC_STORE_ATOMIC_REQUIRED");
 
@@ -135,7 +156,7 @@ test("FEAT-004 approved human review binds the exact packet and permits stable p
   assert.equal(publication.intent.packet_hash, receipt.packet_hash);
   assert.equal(publication.intent.review_hash, receipt.review.hash);
   assert.equal(validator.validate("publicationIntent", publication.intent).valid, true);
-  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha", claims: output.claims, ...context }), (error) => error.code === "KDLC_REVIEW_PACKET_IMMUTABLE");
+  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_PACKET_IMMUTABLE");
   await assert.rejects(() => harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_approved", expectedReceiptId: "rr_approved" }), (error) => error.code === "KDLC_RECEIPT_IMMUTABLE");
 });
 
@@ -186,16 +207,37 @@ test("FEAT-004 review packets require exact claims, applicable governance, dynam
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   const store = new MemoryArtifactStore();
   const requirements = { sensor_ids: ["source-anchor-valid"], policy_ids: ["freshness-policy", "team-policy"], substantive_fields: ["risk"], freshness: { mode: "separate", policy_id: "freshness-policy" } };
-  const harness = await GovernedAgentWorkflows.create({ validator, store, clock, session: principals.establishReviewSession("reviewer-123", "trust-reviewer"), reviewRequirements: requirements });
+  const context = reviewContext();
+  context.resolved.policies.push({ id: "freshness-policy", version: "3", hash: digest("3") });
+  const harness = await GovernedAgentWorkflows.create({ validator, store, clock, session: principals.establishReviewSession("reviewer-123", "trust-reviewer"), reviewRequirements: requirements, reviewContextSession: trustedReviewContext("wf_ingest", context) });
   const recording = await fixture("ingest");
   recording.proposals[0].concept.after.frontmatter.risk = "high";
   const output = await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording, normalizedEvidence: await normalizedFixture("ingest") });
-  const context = reviewContext();
-  context.resolved.policies.push({ id: "freshness-policy", version: "3", hash: digest("3") });
-  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha", claims: [], ...context }), (error) => error.code === "KDLC_REVIEW_CLAIMS_INCOMPLETE");
-  const extraSensor = { ...context, sensors: [...context.sensors, { id: "unconfigured", severity: "info", result: "passed" }] };
-  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha", claims: output.claims, ...extraSensor }), (error) => error.code === "KDLC_REVIEW_GOVERNANCE_INCOMPLETE");
-  const review = await harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha", claims: output.claims, ...context });
+  const claimPath = "workflow/runs/wf_ingest/claims/clm_alpha.json";
+  const forgedClaim = structuredClone(output.claims[0]);
+  forgedClaim.text = "Same ID, substituted claim body.";
+  await store.put(claimPath, forgedClaim);
+  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_INPUT_DRIFT");
+  await store.put(claimPath, output.claims[0]);
+  const contextPath = "workflow/runs/wf_ingest/state/review-context.json";
+  const forgedSensor = structuredClone(context);
+  forgedSensor.sensors[0] = { ...forgedSensor.sensors[0], result: "passed", execution_hash: digest("9") };
+  await store.put(contextPath, forgedSensor);
+  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_INPUT_DRIFT");
+  const forgedEvidence = structuredClone(context);
+  forgedEvidence.evidence[0].excerpt = "Same source ID and hash, substituted evidence body.";
+  await store.put(contextPath, forgedEvidence);
+  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_INPUT_DRIFT");
+  const forgedPolicy = structuredClone(context);
+  forgedPolicy.resolved.policies[0].hash = digest("9");
+  await store.put(contextPath, forgedPolicy);
+  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_INPUT_DRIFT");
+  const forgedProfile = structuredClone(context);
+  forgedProfile.resolved.profile.hash = digest("9");
+  await store.put(contextPath, forgedProfile);
+  await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_INPUT_DRIFT");
+  await store.put(contextPath, context);
+  const review = await harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" });
   assert.equal(review.packet.review.fields.includes("risk"), true);
   assert.equal(review.packet.review.fields.includes("stale_after"), false);
   const { receipt } = await harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_dynamic" });
