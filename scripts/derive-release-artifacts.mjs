@@ -21,7 +21,7 @@ await withReleaseCleanup(async () => {
   for (const destination of destinations) {
     const { stdout } = await execute(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: candidate, env: safeEnvironment, maxBuffer: 32 * 1024 * 1024, ...npmOptions });
     const parsed = JSON.parse(stdout); if (!Array.isArray(parsed) || parsed.length !== 1 || !parsed[0].filename || !Array.isArray(parsed[0].files)) throw new Error("npm pack did not emit one artifact and exact manifest");
-    const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path: normalizeNpmPackPath(path), size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en")); const archive = resolve(destination, parsed[0].filename); const bytes = await readFile(archive); const contents = await inspectPackageArchive(archive, resolve(destination, "extracted"));
+    const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path: normalizeNpmPackPath(path), size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en")); const archive = resolve(destination, parsed[0].filename); const bytes = await readFile(archive); const contents = await inspectPackageArchive(archive);
     builds.push({ filename: parsed[0].filename, sha256: digest(bytes), manifest_sha256: digest(JSON.stringify(manifest)), content_sha256: contents.content_sha256, file_count: manifest.length });
   }
   if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].content_sha256 !== builds[1].content_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("trusted double-package derivation is not reproducible");

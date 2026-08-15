@@ -3,13 +3,23 @@ import { lstat, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFil
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, npmCommandInvocation, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
+import { exactPackageManifestFailures, inspectPackageArchive, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, npmCommandInvocation, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const text = (path) => readFile(resolve(root, path), "utf8");
 const json = async (path) => JSON.parse(await text(path));
+function tarArchive(entries) {
+  const blocks = [];
+  for (const entry of entries) {
+    const content = Buffer.from(entry.content ?? "x"); const size = entry.size ?? content.byteLength; const header = Buffer.alloc(512); const octal = (value, width) => `${value.toString(8).padStart(width - 1, "0")}\0`;
+    header.write(entry.name); header.write(octal(0o644, 8), 100); header.write(octal(0, 8), 108); header.write(octal(0, 8), 116); header.write(octal(size, 12), 124); header.write(octal(0, 12), 136); header.fill(32, 148, 156); header[156] = (entry.type ?? "0").charCodeAt(0); header.write("ustar\0", 257); header.write("00", 263);
+    const sum = header.reduce((total, value) => total + value, 0); header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148); blocks.push(header); if (size <= content.byteLength) { blocks.push(content.subarray(0, size)); blocks.push(Buffer.alloc((512 - (size % 512)) % 512)); }
+  }
+  blocks.push(Buffer.alloc(1024)); return gzipSync(Buffer.concat(blocks));
+}
 
 test("REL-001 public policies provide actionable low-disclosure security and conduct channels", async () => {
   const [readme, security, conduct, support, config] = await Promise.all([
@@ -129,4 +139,18 @@ test("REL-001 package evidence reads are descriptor-pinned, no-follow, ancestry-
     const after = (await readdir(descriptorDirectory)).length;
     assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
   }
+});
+
+test("REL-001 package archive inspection rejects aliases, links, traversal, and resource abuse before extraction", async (context) => {
+  const directory = await mkdtemp(resolve(tmpdir(), "kdlc-hostile-tar-")); context.after(() => rm(directory, { recursive: true, force: true }));
+  const check = async (name, entries, pattern) => { const path = resolve(directory, `${name}.tgz`); await writeFile(path, tarArchive(entries)); if (pattern) await assert.rejects(inspectPackageArchive(path), pattern); else assert.equal((await inspectPackageArchive(path)).file_count, entries.length); };
+  await check("valid", [{ name: "package/index.mjs", content: "export {};\n" }]);
+  await check("duplicate", [{ name: "package/a.txt" }, { name: "package/a.txt" }], /duplicate|aliased/);
+  await check("case-alias", [{ name: "package/A.txt" }, { name: "package/a.txt" }], /duplicate|aliased/);
+  await check("unicode-alias", [{ name: "package/Caf\u00e9.txt" }, { name: "package/Cafe\u0301.txt" }], /duplicate|aliased/);
+  await check("traversal", [{ name: "package/../escape" }], /namespace/);
+  await check("backslash", [{ name: "package\\escape" }], /namespace/);
+  await check("symlink", [{ name: "package/link", type: "2" }], /links/);
+  await check("hardlink", [{ name: "package/link", type: "1" }], /links/);
+  await check("oversize", [{ name: "package/large", size: 16 * 1024 * 1024 + 1 }], /size/);
 });
