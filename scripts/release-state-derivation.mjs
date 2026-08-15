@@ -1,4 +1,5 @@
 function globPattern(pattern) {
+  if (/[\[\]]/u.test(pattern)) throw new Error("unsupported ruleset character-set pattern");
   let source = "";
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index];
@@ -17,9 +18,13 @@ export function matchesRulesetRef(pattern, { baseRef, defaultBranch }) {
 }
 
 export function deriveRulesetState(rulesets, { baseRef, defaultBranch }) {
-  const applicable = rulesets.filter(({ target, enforcement, conditions }) => target === "branch" && enforcement === "active" &&
-    (conditions?.ref_name?.include ?? []).some((pattern) => matchesRulesetRef(pattern, { baseRef, defaultBranch })) &&
-    !(conditions?.ref_name?.exclude ?? []).some((pattern) => matchesRulesetRef(pattern, { baseRef, defaultBranch })));
+  const applicable = rulesets.filter(({ target, enforcement, conditions }) => {
+    if (target !== "branch" || enforcement !== "active") return false;
+    try {
+      if (!(conditions?.ref_name?.include ?? []).some((pattern) => matchesRulesetRef(pattern, { baseRef, defaultBranch }))) return false;
+      return !(conditions?.ref_name?.exclude ?? []).some((pattern) => matchesRulesetRef(pattern, { baseRef, defaultBranch }));
+    } catch { return false; }
+  });
   const rules = applicable.flatMap(({ rules: values }) => values ?? []); const byType = (type) => rules.filter((rule) => rule.type === type);
   const pullRequests = byType("pull_request").map(({ parameters }) => parameters ?? {}); const statuses = byType("required_status_checks").map(({ parameters }) => parameters ?? {});
   const allowedSets = pullRequests.map(({ allowed_merge_methods }) => new Set(allowed_merge_methods ?? [])); const allowed = allowedSets.length ? [...allowedSets[0]].filter((method) => allowedSets.every((set) => set.has(method))).sort() : [];

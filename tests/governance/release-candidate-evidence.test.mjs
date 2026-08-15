@@ -49,7 +49,7 @@ test("REL-001 live ruleset derivation respects exact ref exclusions and composes
   const checks = { ...base, id: 2, conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } }, rules: [{ type: "required_status_checks", parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: "Release matrix" }] } }] };
   const composed = deriveRulesetState([structural, checks], { baseRef: "main", defaultBranch: "main" });
   assert.deepEqual(composed.ids, [1, 2]); assert.equal(composed.prevents_deletion, true); assert.deepEqual(composed.required_checks, ["Release matrix"]);
-  for (const exclusion of ["~DEFAULT_BRANCH", "refs/heads/main"]) {
+  for (const exclusion of ["~DEFAULT_BRANCH", "refs/heads/main", "refs/heads/[m]ain", "refs/heads/[a-z]ain", "refs/heads/[!x]ain", "refs/heads/[main"]) {
     const excluded = structuredClone(structural); excluded.conditions.ref_name.exclude = [exclusion];
     assert.equal(deriveRulesetState([excluded], { baseRef: "main", defaultBranch: "main" }).active, false);
   }
