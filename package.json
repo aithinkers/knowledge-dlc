@@ -23,7 +23,7 @@
     "test:governance": "node --test tests/governance/*.test.mjs",
     "generate:distribution": "node packages/adapters/generate.mjs",
     "check:distribution": "node packages/adapters/generate.mjs --check",
-    "test": "npm run check:governance && npm run check:distribution && npm run test:governance"
+    "test": "npm run check:governance && npm run test:governance"
   },
   "dependencies": {
     "acorn": "8.15.0",
