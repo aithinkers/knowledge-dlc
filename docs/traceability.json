@@ -41,6 +41,17 @@
       }
     },
     {
+      "id": "ADR-002",
+      "title": "Record repository layout mapping and amend specification section 9.1",
+      "issue": 54,
+      "specification_sections": ["9.1", "34"],
+      "status": "implemented",
+      "evidence": {
+        "implementation": ["docs/decisions/0002-repository-layout-mapping.md", "docs/knowledge-development-lifecycle-specification.md", "docs/specification-baseline.md"],
+        "tests": ["tests/governance/layout-mapping.test.mjs"]
+      }
+    },
+    {
       "id": "FEAT-001",
       "title": "Portable artifacts and deterministic indexes",
       "issue": 3,
