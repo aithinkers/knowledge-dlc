@@ -79,7 +79,6 @@ test("FEAT-011 the getting-started walkthrough works exactly as documented", asy
   assert.ok(runner && runner.startsWith("/"), "installed skill must reference an absolute runner path");
   const conductor = JSON.parse(await readFile(resolve(installTarget, ".kiro/agents/conductor.json"), "utf8"));
   assert.match(conductor.toolsSettings.execute_bash.allowedCommands[0], /run\\\.mjs/u);
-  const installedRun = await run(installTarget, "setup-smoke-placeholder").catch(() => null);
   // Invoke the installed absolute runner from an unrelated cwd.
   {
     const child = spawn(process.execPath, [runner, "status", "--output", "json"], { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
