@@ -129,6 +129,34 @@ unrelated release-gate changes. It is consumed and expires immediately when PR
 #45 merges. A subsequent ordinary PR must demonstrate green `Trusted release
 state` and `Release matrix` before issue #44 is treated as fully verified.
 
+PR #49, linked to issue #44, may use a one-time protected release-state
+dependency bootstrap bypass only at head
+`ade72cceea998ad7e5bbedfe58dac59f09476b6c`. It authorizes
+`.github/workflows/release-matrix.yml` to transition from SHA-256
+`3e03834c1d4d9bc9c12bde39d22bdbfbf9d09da8196984faeef3dc01ad4acfb1`
+to SHA-256
+`683eedf931a101b61316a73518df8b296fa71c225302a1b78632ed7eb49eeb52`
+solely to install dependencies from the trusted base `package-lock.json` with
+`npm ci --ignore-scripts --prefix trusted` before the trusted collector runs.
+The token-bearing job must retain exactly one base-SHA checkout; dependency
+installation must receive neither `GH_TOKEN` nor the owner attestation, and no
+candidate package, lockfile, lifecycle script, checkout, or executable may be
+used by that job.
+
+The complete PR #49 diff is limited to that workflow transition, its focused
+release-matrix regression, and the issue #44 traceability gate transition.
+Candidate tests and every non-self required/security check must pass, and an
+independent agent must approve the exact head with no unresolved critical or
+high finding. Only `Repository policy` rejection of the protected workflow
+byte and `Trusted release state`/aggregate `Release matrix` failures caused by
+trusted `main` lacking this exact dependency step may be bypassed; the owner
+record must name them as self-transition failures. This authority does not
+permit trigger, permission, token, attestation, checkout, toolchain version,
+candidate-test, governance-verifier, collector, validator, package, or lockfile
+changes. It is consumed and expires immediately when PR #49 merges. A later
+ordinary PR must demonstrate green `Trusted release state` and `Release matrix`
+before issue #44 is complete.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
