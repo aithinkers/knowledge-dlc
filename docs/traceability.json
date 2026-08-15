@@ -407,6 +407,27 @@
       }
     },
     {
+      "id": "FEAT-011",
+      "title": "Getting-started guide and validated local install path",
+      "issue": 56,
+      "specification_sections": [
+        "9.2",
+        "19.4",
+        "25",
+        "27.3"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "docs/getting-started.md",
+          "package.json"
+        ],
+        "tests": [
+          "tests/governance/getting-started.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
