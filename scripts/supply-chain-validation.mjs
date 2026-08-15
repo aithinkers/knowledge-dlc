@@ -57,24 +57,49 @@ export function npmCommandInvocation({ platform = process.platform, environment 
   return { command: node, prefix: [cli] };
 }
 
+function parseTarOctal(field, label) {
+  const match = field.toString("ascii").match(/^ *([0-7]+)[\0 ]*$/u);
+  if (!match) throw new Error(`package archive ${label} is invalid`);
+  const value = Number.parseInt(match[1], 8);
+  if (!Number.isSafeInteger(value)) throw new Error(`package archive ${label} is invalid`);
+  return value;
+}
+
 export async function inspectPackageArchive(archive) {
   const bytes = gunzipSync(await readFile(archive), { maxOutputLength: 128 * 1024 * 1024 }); const entries = []; const identities = new Set(); let offset = 0; let ended = false;
   while (offset + 512 <= bytes.length) {
-    const header = bytes.subarray(offset, offset + 512); if (header.every((value) => value === 0)) { ended = true; break; }
+    const header = bytes.subarray(offset, offset + 512);
+    if (header.every((value) => value === 0)) {
+      const secondEnd = offset + 1024;
+      if (secondEnd > bytes.length || !bytes.subarray(offset + 512, secondEnd).every((value) => value === 0)
+        || !bytes.subarray(secondEnd).every((value) => value === 0)) throw new Error("package archive end marker or trailing bytes are invalid");
+      ended = true; offset = bytes.length; break;
+    }
     if (entries.length >= 512) throw new Error("package archive entry count exceeds the trusted ceiling");
-    const storedChecksum = Number.parseInt(header.subarray(148, 156).toString("ascii").replace(/\0.*$/u, "").trim(), 8); let checksum = 0;
+    const storedChecksum = parseTarOctal(header.subarray(148, 156), "header checksum"); let checksum = 0;
     for (let index = 0; index < 512; index += 1) checksum += index >= 148 && index < 156 ? 32 : header[index];
-    if (!Number.isSafeInteger(storedChecksum) || storedChecksum !== checksum) throw new Error("package archive header checksum is invalid");
-    const field = (start, end) => header.subarray(start, end).toString("utf8").replace(/\0.*$/u, ""); const name = `${field(345, 500) ? `${field(345, 500)}/` : ""}${field(0, 100)}`; const size = Number.parseInt(field(124, 136).trim() || "0", 8); const type = header[156];
+    if (storedChecksum !== checksum) throw new Error("package archive header checksum is invalid");
+    const field = (start, end) => header.subarray(start, end).toString("utf8").replace(/\0.*$/u, ""); const name = `${field(345, 500) ? `${field(345, 500)}/` : ""}${field(0, 100)}`; const size = parseTarOctal(header.subarray(124, 136), "entry size"); const type = header[156];
     if (type !== 0 && type !== 48) throw new Error("package archive links, devices, directories, and extended headers are forbidden");
     if (!Number.isSafeInteger(size) || size < 0 || size > 16 * 1024 * 1024) throw new Error("package archive entry size exceeds the trusted ceiling");
     if (!name.startsWith("package/") || name.includes("\\") || name.startsWith("/") || name.split("/").some((part) => !part || part === "." || part === "..")) throw new Error("package archive path is outside the exact package namespace");
     const path = name.slice("package/".length); const identity = path.normalize("NFC").toLocaleLowerCase("en-US"); if (identities.has(identity)) throw new Error("package archive contains a duplicate or aliased path"); identities.add(identity);
-    const start = offset + 512; const end = start + size; if (end > bytes.length) throw new Error("package archive entry is truncated"); const content = bytes.subarray(start, end);
-    entries.push({ path, size, sha256: createHash("sha256").update(content).digest("hex") }); offset = start + Math.ceil(size / 512) * 512;
+    const start = offset + 512; const end = start + size; const paddedEnd = start + Math.ceil(size / 512) * 512;
+    if (end > bytes.length || paddedEnd > bytes.length) throw new Error("package archive entry is truncated");
+    if (!bytes.subarray(end, paddedEnd).every((value) => value === 0)) throw new Error("package archive entry padding is invalid");
+    const content = bytes.subarray(start, end);
+    entries.push({ path, size, sha256: createHash("sha256").update(content).digest("hex") }); offset = paddedEnd;
   }
   if (!ended || entries.length === 0) throw new Error("package archive is missing a bounded end marker or content"); entries.sort((left, right) => left.path.localeCompare(right.path, "en"));
-  return { content_sha256: createHash("sha256").update(JSON.stringify(entries)).digest("hex"), file_count: entries.length };
+  return { content_sha256: createHash("sha256").update(JSON.stringify(entries)).digest("hex"), file_count: entries.length, files: entries };
+}
+
+export function assertArchiveManifestMatch(contents, manifest) {
+  if (!Array.isArray(contents?.files) || !Array.isArray(manifest)) throw new Error("package archive and npm manifest are invalid");
+  const inspected = contents.files.map(({ path, size }) => ({ path, size })).sort((left, right) => left.path.localeCompare(right.path, "en"));
+  const declared = manifest.map(({ path, size }) => ({ path: normalizeNpmPackPath(path), size })).sort((left, right) => left.path.localeCompare(right.path, "en"));
+  if (contents.file_count !== inspected.length || inspected.length !== declared.length || new Set(declared.map(({ path }) => path)).size !== declared.length
+    || JSON.stringify(inspected) !== JSON.stringify(declared)) throw new Error("package archive regular files do not exactly match the npm pack manifest");
 }
 
 export function exactPackageManifestFailures(actual, expected) {

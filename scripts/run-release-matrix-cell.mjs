@@ -7,7 +7,7 @@ import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { releaseMatrixCells, releaseMatrixDifferences } from "./release-matrix-definition.mjs";
-import { inspectPackageArchive, normalizeNpmPackPath, npmCommandInvocation } from "./supply-chain-validation.mjs";
+import { assertArchiveManifestMatch, inspectPackageArchive, normalizeNpmPackPath, npmCommandInvocation } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile); const [cellFlag, cell, outputFlag, output] = process.argv.slice(2);
 if (cellFlag !== "--cell" || !cell || outputFlag !== "--output" || !output) throw new Error("usage: node scripts/run-release-matrix-cell.mjs --cell <cell> --output <result.json>");
@@ -42,7 +42,7 @@ try {
     const { stdout } = await execute(npmCommand, npmArgs(["pack", "--json", "--ignore-scripts", "--pack-destination", destination]), { cwd: root, maxBuffer: 16 * 1024 * 1024 });
     const parsed = JSON.parse(stdout); if (!Array.isArray(parsed) || parsed.length !== 1 || !parsed[0].filename || !Array.isArray(parsed[0].files)) throw new Error("npm pack did not return one artifact and manifest");
     const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path: normalizeNpmPackPath(path), size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en"));
-    const artifactPath = resolve(destination, parsed[0].filename); const artifact = await readFile(artifactPath); const contents = await inspectPackageArchive(artifactPath); builds.push({ filename: parsed[0].filename, sha256: digest(artifact), manifest_sha256: digest(JSON.stringify(manifest)), content_sha256: contents.content_sha256, file_count: manifest.length });
+    const artifactPath = resolve(destination, parsed[0].filename); const artifact = await readFile(artifactPath); const contents = await inspectPackageArchive(artifactPath); assertArchiveManifestMatch(contents, manifest); builds.push({ filename: parsed[0].filename, sha256: digest(artifact), manifest_sha256: digest(JSON.stringify(manifest)), content_sha256: contents.content_sha256, file_count: contents.file_count });
   }
   if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].content_sha256 !== builds[1].content_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("two clean package builds are not byte-identical");
   commands.push({ id: "pack", status: "passed" });
