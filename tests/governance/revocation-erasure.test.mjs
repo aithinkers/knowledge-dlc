@@ -24,6 +24,31 @@ const source = {
   id: "src_private",
   hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 };
+const externalObjectHash = byteHash(Buffer.from("encrypted remote source copy"));
+const externalAttestationHash = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+function externalCatalogBinding(objectId = "object-private", boundSource = source) {
+  const claim = {
+    processor: "vault",
+    object_id: objectId,
+    object_hash: externalObjectHash,
+    deletion_identity_hash: byteHash(Buffer.from(objectId)),
+    bindings: { source_ids: [boundSource.id], source_hashes: [boundSource.hash] },
+    depends_on: [],
+  };
+  return {
+    claim,
+    record_hash: artifactHash(claim),
+    record: {
+      object_id: claim.object_id,
+      object_hash: claim.object_hash,
+      deletion_identity_hash: claim.deletion_identity_hash,
+      bindings: structuredClone(claim.bindings),
+      depends_on: [],
+      attestation_hash: externalAttestationHash,
+    },
+  };
+}
 const now = "2026-08-14T15:00:00.000Z";
 const clock = { now: () => now, millis: () => Date.parse(now) };
 const governancePolicy = {
@@ -393,9 +418,10 @@ test("FEAT-009 shipped complete project inventory rejects unknown files and oper
   await store.writeTextAtomic("sources/unknown.txt", "untracked\n");
   await assert.rejects(inventory.snapshot(), (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && error.details.unknown.includes("sources/unknown.txt"));
 
+  const externalBinding = externalCatalogBinding("external-secret", { id: source.id, hash: originalHash });
   const external = new ProjectProvenanceInventory({ store, externalProcessors: { vault: {
-    async inventory() { return [{ object_id: "external-secret", bindings: { source_ids: [source.id], source_hashes: [originalHash] }, depends_on: [] }]; },
-    async verifyInventory() { return true; },
+    async inventory() { return [structuredClone(externalBinding.record)]; },
+    async verifyInventory(evidence) { return artifactHash(evidence.claim) === externalBinding.record_hash && evidence.attestation_hash === externalAttestationHash; },
   } } });
   await assert.rejects(external.commitManifest(descriptors, { clock, owner: "external-omission" }),
     (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && /omitted/.test(error.message));
@@ -424,6 +450,72 @@ test("FEAT-009 production namespace blocks uncoordinated final-commit copies", a
   assert.equal(receipt.result, "erased");
   assert.equal((await lateWrite)?.code, "KDLC_HASH_CONFLICT");
   assert.equal(await state.store.exists("backups/uncoordinated-late.txt"), false);
+});
+
+test("FEAT-009 authenticated external catalogs reject empty provenance and bind real remote deletion", async (context) => {
+  const binding = externalCatalogBinding("remote-copy-009");
+  let catalog = [{
+    ...structuredClone(binding.record),
+    bindings: { source_ids: [], source_hashes: [] },
+  }];
+  const deleted = new Map();
+  const processor = {
+    async inventory() { return structuredClone(catalog); },
+    async verifyInventory(evidence) {
+      return evidence.record_hash === artifactHash(evidence.claim) &&
+        evidence.attestation_hash === externalAttestationHash &&
+        evidence.record_hash === binding.record_hash;
+    },
+    async delete({ objectId, objectHash, deletionIdentityHash, inventoryRecordHash, idempotencyKey }) {
+      assert.equal(objectId, binding.claim.object_id);
+      assert.equal(objectHash, binding.claim.object_hash);
+      assert.equal(deletionIdentityHash, binding.claim.deletion_identity_hash);
+      assert.equal(inventoryRecordHash, binding.record_hash);
+      const receipt = {
+        api_version: "kdlc.dev/external-deletion-receipt/v1alpha1",
+        processor: "vault",
+        object_id_hash: deletionIdentityHash,
+        object_hash: objectHash,
+        inventory_record_hash: inventoryRecordHash,
+        deletion_id: "delete_remote_009",
+        proof_hash: byteHash(Buffer.from(`${idempotencyKey}:${objectHash}`)),
+      };
+      deleted.set(idempotencyKey, structuredClone(receipt));
+      return receipt;
+    },
+    async verify({ objectId, objectHash, deletionIdentityHash, inventoryRecordHash, receipt }) {
+      return deletionIdentityHash === byteHash(Buffer.from(objectId)) && objectHash === binding.claim.object_hash &&
+        inventoryRecordHash === binding.record_hash && receipt.object_hash === objectHash &&
+        receipt.inventory_record_hash === inventoryRecordHash &&
+        [...deleted.values()].some((candidate) => artifactHash(candidate) === artifactHash(receipt));
+    },
+  };
+  const state = await fixture(context, { surfaces: [], externalProcessors: { vault: processor } });
+  const inventory = new ProjectProvenanceInventory({ store: state.store, externalProcessors: { vault: processor } });
+  const descriptors = [{
+    id: "remote-backup", kind: "backup", strategy: "external-delete",
+    processor: "vault", object_id: binding.claim.object_id,
+  }];
+  await assert.rejects(inventory.commitManifest(descriptors, { clock, owner: "empty-external" }),
+    (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && /unbound or ambiguous/.test(error.message));
+
+  catalog = [structuredClone(binding.record)];
+  await inventory.commitManifest(descriptors, { clock, owner: "bound-external" });
+  const snapshot = await inventory.snapshot();
+  assert.deepEqual(resolveImpact(snapshot, source).nodes.map(({ id }) => id), ["remote-backup"]);
+  const engine = new RevocationEngine({
+    store: state.store, clock, ids: state.ids, audit: state.audit, authority: state.authority,
+    inventory, externalProcessors: { vault: processor },
+  });
+  state.engine = engine;
+  const started = await engine.start(await request(state, { workflowId: "wf_external", idempotencyKey: "external-bound" }));
+  const receipt = await engine.run("wf_external", started.job.job_id);
+  assert.equal(receipt.result, "erased");
+  const plan = await state.store.readJson(engine.planPath("wf_external", started.job.job_id));
+  assert.deepEqual(plan.impact.nodes.map(({ id }) => id), ["remote-backup"]);
+  assert.equal(plan.external_receipts["remote-backup"].object_hash, binding.claim.object_hash);
+  assert.equal(plan.external_receipts["remote-backup"].inventory_record_hash, binding.record_hash);
+  assert.equal(deleted.size, 1);
 });
 
 test("FEAT-009 cooperative provenance updates cannot reintroduce a revoked source", async (context) => {
@@ -550,24 +642,35 @@ test("FEAT-009 a hold activated at the destructive boundary prevents the first d
 });
 
 test("FEAT-009 external processors require minimized receipts and verified idempotent deletion", async (context) => {
-  const surfaces = [{ id: "backup", kind: "backup", strategy: "external-delete", processor: "vault", object_id: "object-private", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] }];
+  const binding = externalCatalogBinding();
+  const surfaces = [{
+    id: "backup", kind: "backup", strategy: "external-delete", processor: "vault",
+    object_id: binding.claim.object_id, object_hash: binding.claim.object_hash,
+    deletion_identity_hash: binding.claim.deletion_identity_hash,
+    inventory_record_hash: binding.record_hash, inventory_attestation_hash: externalAttestationHash,
+    bindings: structuredClone(binding.claim.bindings), depends_on: [],
+  }];
   const deleted = new Map();
   let calls = 0;
   const processor = {
-    async delete({ objectId, idempotencyKey }) {
+    async delete({ objectId, objectHash, inventoryRecordHash, idempotencyKey }) {
       calls += 1;
       const receipt = {
         api_version: "kdlc.dev/external-deletion-receipt/v1alpha1",
         processor: "vault",
         object_id_hash: `sha256:${(await import("node:crypto")).createHash("sha256").update(objectId).digest("hex")}`,
+        object_hash: objectHash,
+        inventory_record_hash: inventoryRecordHash,
         deletion_id: "delete_001",
         proof_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       };
       deleted.set(idempotencyKey, receipt);
       return receipt;
     },
-    async verify({ objectId, receipt }) {
-      return receipt.object_id_hash === `sha256:${(await import("node:crypto")).createHash("sha256").update(objectId).digest("hex")}` && [...deleted.values()].some((candidate) => candidate.proof_hash === receipt.proof_hash);
+    async verify({ objectId, objectHash, inventoryRecordHash, receipt }) {
+      return receipt.object_id_hash === `sha256:${(await import("node:crypto")).createHash("sha256").update(objectId).digest("hex")}` &&
+        receipt.object_hash === objectHash && receipt.inventory_record_hash === inventoryRecordHash &&
+        [...deleted.values()].some((candidate) => candidate.proof_hash === receipt.proof_hash);
     },
   };
   const state = await fixture(context, { surfaces, externalProcessors: { vault: processor } });

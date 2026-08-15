@@ -1,6 +1,6 @@
 import { lstat, readdir } from "node:fs/promises";
 
-import { artifactHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
+import { artifactHash, byteHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
 import { denied, incomplete, invalid } from "./errors.mjs";
 import { RevocationGuard } from "./guard.mjs";
 import { SurfaceInventory } from "./inventory.mjs";
@@ -9,6 +9,8 @@ const MANIFEST_VERSION = "kdlc.dev/provenance-inventory/v1alpha1";
 const LOCK = "governance/erasure-inventory-lock";
 const GENERATION = "governance/revocations/generation.json";
 const NAMESPACE_PATH = ".kdlc/governed-mutation-namespace.json";
+const ID = /^[A-Za-z0-9._-]{1,128}$/;
+const HASH = /^sha256:[a-f0-9]{64}$/;
 export const PROJECT_GOVERNED_ROOTS = Object.freeze([
   ".kdlc/cache", ".kdlc/embeddings", ".kdlc/graph", ".kdlc/index",
   "backups", "exports", "knowledge", "sources", "workflow/audit-evidence",
@@ -71,6 +73,48 @@ function referencesPath(content, path) {
   return new RegExp(`\\]\\((?:\\.\\./|\\./)*${escaped}(?:#[^)]+)?\\)`).test(content);
 }
 
+async function authenticateExternalCatalog(processorId, processor, catalog) {
+  if (!Array.isArray(catalog) || typeof processor?.verifyInventory !== "function")
+    throw incomplete("External provenance inventory is unavailable or unauthenticated", { processor: processorId });
+  const records = [];
+  const objectIds = new Set();
+  for (const record of catalog) {
+    const sourceIds = record?.bindings?.source_ids;
+    const sourceHashes = record?.bindings?.source_hashes;
+    const dependencies = record?.depends_on;
+    if (!ID.test(record?.object_id ?? "") || !HASH.test(record?.object_hash ?? "") ||
+      record.deletion_identity_hash !== byteHash(Buffer.from(record.object_id ?? "")) ||
+      !HASH.test(record?.attestation_hash ?? "") || !Array.isArray(sourceIds) || !sourceIds.length ||
+      sourceIds.some((id) => !ID.test(id)) || new Set(sourceIds).size !== sourceIds.length ||
+      !Array.isArray(sourceHashes) || sourceHashes.length !== sourceIds.length ||
+      sourceHashes.some((hash) => !HASH.test(hash)) || new Set(sourceHashes).size !== sourceHashes.length ||
+      !Array.isArray(dependencies) || dependencies.some((id) => !ID.test(id)) ||
+      new Set(dependencies).size !== dependencies.length || objectIds.has(record?.object_id))
+      throw incomplete("External provenance catalog contains an unbound or ambiguous record", { processor: processorId });
+    objectIds.add(record.object_id);
+    const claim = {
+      processor: processorId,
+      object_id: record.object_id,
+      object_hash: record.object_hash,
+      deletion_identity_hash: record.deletion_identity_hash,
+      bindings: { source_ids: [...sourceIds].sort(), source_hashes: [...sourceHashes].sort() },
+      depends_on: [...dependencies].sort(),
+    };
+    const recordHash = artifactHash(claim);
+    if ((await processor.verifyInventory({
+      claim: structuredClone(claim),
+      record_hash: recordHash,
+      attestation_hash: record.attestation_hash,
+    })) !== true) throw incomplete("External provenance inventory is unavailable or unauthenticated", { processor: processorId });
+    records.push({
+      ...claim,
+      inventory_record_hash: recordHash,
+      inventory_attestation_hash: record.attestation_hash,
+    });
+  }
+  return records;
+}
+
 export class ProjectProvenanceInventory extends SurfaceInventory {
   constructor({ store, governedRoots = PROJECT_GOVERNED_ROOTS, manifestPath = ".kdlc/provenance-surfaces.json", externalProcessors = {} }) {
     if (!Array.isArray(governedRoots) || governedRoots.some((root) => typeof root !== "string" || !root) ||
@@ -126,19 +170,18 @@ export class ProjectProvenanceInventory extends SurfaceInventory {
     const externalCatalogs = new Map();
     for (const [processorId, processor] of Object.entries(externalProcessors)) {
       const catalog = await processor?.inventory?.();
-      if (!Array.isArray(catalog) || await Promise.all(catalog.map((record) => processor.verifyInventory?.(record))).then((results) => results.some((result) => result !== true)))
-        throw incomplete("External provenance inventory is unavailable or unauthenticated", { processor: processorId });
-      externalCatalogs.set(processorId, catalog);
-      for (const record of catalog) if (!descriptors.some((descriptor) => descriptor.strategy === "external-delete" && descriptor.processor === processorId && descriptor.object_id === record.object_id))
+      const authenticated = await authenticateExternalCatalog(processorId, processor, catalog);
+      externalCatalogs.set(processorId, authenticated);
+      for (const record of authenticated) if (!descriptors.some((descriptor) => descriptor.strategy === "external-delete" && descriptor.processor === processorId && descriptor.object_id === record.object_id))
         throw incomplete("Authenticated external surface is omitted from provenance inventory", { processor: processorId });
     }
     for (const descriptor of descriptors) {
       if (descriptor.strategy === "external-delete") {
-        const processor = externalProcessors[descriptor.processor];
         const catalog = externalCatalogs.get(descriptor.processor);
         const record = Array.isArray(catalog) ? catalog.find(({ object_id: objectId }) => objectId === descriptor.object_id) : null;
-        if (!record || !(await processor.verifyInventory?.(record))) throw incomplete("External provenance inventory is unavailable or unauthenticated", { processor: descriptor.processor });
-        surfaces.push({ ...structuredClone(descriptor), bindings: structuredClone(record.bindings), depends_on: [...new Set(record.depends_on ?? [])].sort() });
+        if (!record) throw incomplete("External provenance inventory is unavailable or unauthenticated", { processor: descriptor.processor });
+        const { processor: _processor, ...bindings } = record;
+        surfaces.push({ ...structuredClone(descriptor), ...structuredClone(bindings) });
         continue;
       }
       const bindings = await derivedReferences(store, descriptor.path, descriptor.evidence_paths ?? []);

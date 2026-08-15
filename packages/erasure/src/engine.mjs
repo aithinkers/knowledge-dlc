@@ -271,9 +271,17 @@ export class RevocationEngine {
     if (surface.strategy === "external-delete") {
       const processor = this.externalProcessors[surface.processor];
       if (!processor?.delete || !processor?.verify) throw incomplete("Configured external erasure processor is unavailable", { processor: surface.processor });
-      const receipt = await processor.delete({ objectId: surface.object_id, idempotencyKey: `${plan.job_id}:${surface.id}`, source: structuredClone(plan.source) });
+      const receipt = await processor.delete({
+        objectId: surface.object_id,
+        objectHash: surface.object_hash,
+        deletionIdentityHash: surface.deletion_identity_hash,
+        inventoryRecordHash: surface.inventory_record_hash,
+        idempotencyKey: `${plan.job_id}:${surface.id}`,
+        source: structuredClone(plan.source),
+      });
       if (!receipt || receipt.api_version !== "kdlc.dev/external-deletion-receipt/v1alpha1" ||
         receipt.processor !== surface.processor || receipt.object_id_hash !== opaque(surface.object_id) ||
+        receipt.object_hash !== surface.object_hash || receipt.inventory_record_hash !== surface.inventory_record_hash ||
         !ID.test(receipt.deletion_id ?? "") || !HASH.test(receipt.proof_hash ?? ""))
         throw incomplete("External deletion processor returned an invalid minimized receipt", { processor: surface.processor });
       return structuredClone(receipt);
@@ -333,7 +341,14 @@ export class RevocationEngine {
       } else {
         const processor = this.externalProcessors[surface.processor];
         const receipt = plan.external_receipts[surface.id];
-        if (!receipt || !(await processor?.verify?.({ objectId: surface.object_id, receipt, source: structuredClone(plan.source) })))
+        if (!receipt || !(await processor?.verify?.({
+          objectId: surface.object_id,
+          objectHash: surface.object_hash,
+          deletionIdentityHash: surface.deletion_identity_hash,
+          inventoryRecordHash: surface.inventory_record_hash,
+          receipt,
+          source: structuredClone(plan.source),
+        })))
           throw incomplete("External copy deletion is not verified", { surface_id: surface.id });
       }
     }

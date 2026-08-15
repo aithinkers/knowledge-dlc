@@ -1,4 +1,4 @@
-import { artifactHash } from "../../core/index.mjs";
+import { artifactHash, byteHash } from "../../core/index.mjs";
 import { incomplete, invalid } from "./errors.mjs";
 
 export const SURFACE_KINDS = Object.freeze([
@@ -32,7 +32,14 @@ export function surfaceIdentity(surface) {
     kind: surface.kind,
     strategy: surface.strategy,
     path: surface.path ?? null,
-    ...(surface.processor ? { processor: surface.processor, object_id: surface.object_id } : {}),
+    ...(surface.processor ? {
+      processor: surface.processor,
+      object_id: surface.object_id,
+      object_hash: surface.object_hash,
+      deletion_identity_hash: surface.deletion_identity_hash,
+      inventory_record_hash: surface.inventory_record_hash,
+      inventory_attestation_hash: surface.inventory_attestation_hash,
+    } : {}),
     bindings: surface.bindings,
     depends_on: surface.depends_on,
     retained_until: surface.retained_until ?? null,
@@ -72,8 +79,13 @@ export class SurfaceInventory {
         if (paths.has(path)) throw incomplete("Surface inventory aliases one local path", { path });
         paths.add(path);
         token = await this.store.exists(path) ? await this.store.tokenOf(path) : null;
-      } else if (!ID.test(candidate.processor ?? "") || !ID.test(candidate.object_id ?? "")) {
-        throw incomplete("External surface lacks a processor/object identity", { id: candidate.id });
+      } else if (!ID.test(candidate.processor ?? "") || !ID.test(candidate.object_id ?? "") ||
+        !HASH.test(candidate.object_hash ?? "") || !HASH.test(candidate.deletion_identity_hash ?? "") ||
+        candidate.deletion_identity_hash !== byteHash(Buffer.from(candidate.object_id ?? "")) ||
+        !HASH.test(candidate.inventory_record_hash ?? "") || !HASH.test(candidate.inventory_attestation_hash ?? "") ||
+        !candidate.bindings.source_ids.length || !candidate.bindings.source_hashes.length ||
+        candidate.bindings.source_ids.length !== candidate.bindings.source_hashes.length) {
+        throw incomplete("External surface lacks exact authenticated object/provenance bindings", { id: candidate.id });
       }
       const surface = {
         id: candidate.id,
@@ -81,7 +93,14 @@ export class SurfaceInventory {
         strategy: candidate.strategy,
         path,
         token,
-        ...(candidate.processor ? { processor: candidate.processor, object_id: candidate.object_id } : {}),
+        ...(candidate.processor ? {
+          processor: candidate.processor,
+          object_id: candidate.object_id,
+          object_hash: candidate.object_hash,
+          deletion_identity_hash: candidate.deletion_identity_hash,
+          inventory_record_hash: candidate.inventory_record_hash,
+          inventory_attestation_hash: candidate.inventory_attestation_hash,
+        } : {}),
         bindings: {
           source_ids: [...new Set(candidate.bindings.source_ids)].sort(),
           source_hashes: [...new Set(candidate.bindings.source_hashes)].sort(),
