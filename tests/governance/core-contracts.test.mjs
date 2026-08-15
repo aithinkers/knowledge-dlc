@@ -106,7 +106,7 @@ test("FEAT-001 vendors the exact pinned OKF 0.2 bytes", async () => {
 
 test("FEAT-001 publishes strict JSON Schema 2020-12 contracts", async () => {
   const schemas = await loadContractSchemas();
-  assert.equal(schemas.length, 20);
+  assert.equal(schemas.length, 24);
   for (const { relativePath, schema } of schemas) {
     assert.equal(schema.$schema, "https://json-schema.org/draft/2020-12/schema", relativePath);
     assert.match(schema.$id, /^https:\/\/kdlc\.dev\/schemas\//, relativePath);

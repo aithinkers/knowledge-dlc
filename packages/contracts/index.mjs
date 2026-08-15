@@ -28,7 +28,11 @@ export const CONTRACT_SCHEMA_PATHS = Object.freeze({
   lifecycleLeaseLock: "core/schemas/lifecycle/lease-lock.schema.json",
   lifecycleSensorResult: "core/schemas/lifecycle/sensor-result.schema.json",
   federationMountResolution: "core/schemas/federation/mount-resolution.schema.json",
-  retrievalResponse: "core/schemas/retrieval/response.schema.json"
+  retrievalResponse: "core/schemas/retrieval/response.schema.json",
+  revocationImpact: "core/schemas/erasure/revocation-impact.schema.json",
+  retentionDecision: "core/schemas/erasure/retention-decision.schema.json",
+  erasureReceipt: "core/schemas/erasure/erasure-receipt.schema.json",
+  revocationBarrier: "core/schemas/erasure/revocation-barrier.schema.json"
 });
 
 export async function loadContractSchemas(root = moduleRoot, additionalPaths = {}) {
