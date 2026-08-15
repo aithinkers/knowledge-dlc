@@ -143,6 +143,14 @@
       }
     },
     {
+      "id": "FEAT-008",
+      "title": "Built-in governance sensors and policy enforcement",
+      "issue": 23,
+      "specification_sections": ["26", "27.4", "27.5", "27.6", "27.7", "35.10", "35.11"],
+      "status": "in-progress",
+      "evidence": {"implementation": [], "tests": []}
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
