@@ -39,7 +39,12 @@ machine-readable `not-ready` release status.
   transitions, review binding, lock drift, workflow lock/job integrity) are
   implemented and run by `kdlc lint` with info/warning/error findings.
   Generated-distribution drift remains enforced by `check:distribution` in CI
-  rather than as a lint sensor.
+  rather than as a lint sensor, and the remaining §26 categories are enforced
+  outside lint: manifest schema validity by the contract validator in
+  `kdlc lint`, duplicate mounted knowledge-base IDs and tree-hash mismatches
+  at mount resolution (`packages/core/src/resolution.mjs`,
+  `packages/federation`), and normalizer coverage/locator/limit/probabilistic
+  labels by quarantine-on-violation in `packages/normalizers`.
 - Codex and Kiro harness surfaces run from this repository checkout; a
   self-contained packaged runner is future work (see issue #73 notes).
 

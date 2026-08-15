@@ -173,6 +173,16 @@ test("FEAT-015 state sensors catch review drift, lifecycle violations, stale loc
   }
 });
 
+test("FEAT-015 lock-drift sensor warns without a lock and errors with unlocked remote mounts", async (t) => {
+  const root = await workspace(t, { "policies/clean.md": CLEAN });
+  await rm(resolve(root, "knowledge.lock"));
+  let findings = await lint(root);
+  assert.ok(findings.some(({ code, severity }) => code === "KDLC_LOCK_MISSING" && severity === "warning"));
+  await writeFile(resolve(root, "knowledge-project.yaml"), 'api_version: kdlc.dev/v1alpha1\nkind: Project\nknowledge_bases:\n  - { name: security, uri: "git+ssh://git@example.invalid/security.git", mode: read-only }\n');
+  findings = await lint(root);
+  assert.ok(findings.some(({ code, severity }) => code === "KDLC_LOCK_MISSING" && severity === "error"));
+});
+
 test("FEAT-015 freshness sensor flags stale and unverified stable concepts", async (t) => {
   const root = await workspace(t, {
     "policies/stale.md": CLEAN.replace("stale_after: 2030-01-01", "stale_after: 2026-01-01").replace("verified: { by: human:reviewer, at: 2026-08-02T00:00:00Z }\n", ""),
