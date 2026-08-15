@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { canonicalJson } from "../core/index.mjs";
 import { distributionDefinition as definition } from "./definitions.mjs";
+import { AGENT_DEFINITIONS, renderAgentMarkdown } from "../agents/definitions/index.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const commandLines = definition.cli_commands
@@ -38,7 +39,7 @@ const generated = new Map([
   ],
   [
     "distribution/claude-code/.claude-plugin/plugin.json",
-    `${canonicalJson({ name: "kdlc", version: "0.2.0", description: "Governed K-DLC CLI adapter", commands: "./commands" })}\n`,
+    `${canonicalJson({ agents: "./agents", name: "kdlc", version: "0.2.0", description: "Governed K-DLC CLI adapter", commands: "./commands" })}\n`,
   ],
   [
     "distribution/claude-code/COMMANDS.md",
@@ -66,6 +67,8 @@ for (const command of definition.cli_commands)
     `distribution/claude-code/commands/kdlc-${command}.md`,
     `---\ndescription: Run the governed K-DLC ${command} operation\nargument-hint: JSON string array\n---\n\nThe native Claude Code binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
   );
+for (const agent of AGENT_DEFINITIONS)
+  generated.set(`distribution/claude-code/agents/${agent.role}.md`, renderAgentMarkdown(agent));
 let drift = false;
 for (const [relative, content] of generated) {
   const path = resolve(root, relative);

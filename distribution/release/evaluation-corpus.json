@@ -14,7 +14,7 @@
         {"path": "tests/fixtures/models/ingest-recording.json", "sha256": "sha256:3c9ccb5493cc7c20870cc074c9c0686b4c198dbe074fb337fdc6a200d0fca0ec"},
         {"path": "tests/fixtures/workflows/ingest-normalized.json", "sha256": "sha256:b28e24d946d65f47f852a78fc9fc6706419103d98603d20b23d1fa82a2b41a35"}
       ],
-      "executable_evidence": {"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:2626a06921e669a2b571bda5a6b3ba71b3c8c9a75a95b8529b7064412c519933", "test_ids": ["FEAT-004 ingest and adoption replay schema-valid recorded model outputs"]},
+      "executable_evidence": {"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:e3199b4e1102b9e9c08d775ef31781ef9be738494bfa879ecffc9ef60817d7b1", "test_ids": ["FEAT-004 ingest and adoption replay schema-valid recorded model outputs"]},
       "expected": ["recorded model output validates", "anchored claim and proposal are deterministic", "no live model call"],
       "security": false
     },
@@ -22,8 +22,8 @@
       "id": "governed-publication",
       "category": "governance",
       "requirement_ids": ["FEAT-004", "FEAT-008"],
-      "fixtures": [{"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:2626a06921e669a2b571bda5a6b3ba71b3c8c9a75a95b8529b7064412c519933"}],
-      "executable_evidence": {"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:2626a06921e669a2b571bda5a6b3ba71b3c8c9a75a95b8529b7064412c519933", "test_ids": ["FEAT-004 approved human review binds the exact packet and permits stable publication intent", "FEAT-004 stable publication fails closed and later decisions revoke approval"]},
+      "fixtures": [{"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:e3199b4e1102b9e9c08d775ef31781ef9be738494bfa879ecffc9ef60817d7b1"}],
+      "executable_evidence": {"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:e3199b4e1102b9e9c08d775ef31781ef9be738494bfa879ecffc9ef60817d7b1", "test_ids": ["FEAT-004 approved human review binds the exact packet and permits stable publication intent", "FEAT-004 stable publication fails closed and later decisions revoke approval"]},
       "expected": ["review packet and receipt exact-bind inputs", "stable publication rejects drift"],
       "security": true
     },

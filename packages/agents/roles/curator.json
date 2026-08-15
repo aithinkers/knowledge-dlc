@@ -1,0 +1,1 @@
+{"api_version":"kdlc.dev/agent-role/v1alpha1","role":"curator","actor":"kdlc-curator/0.2.0","review_only":false,"permissions":{"read":["workflow/runs/**","knowledge-bases/**"],"write":["workflow/runs/**/proposals/**"],"tools":["model.recorded"]}}
