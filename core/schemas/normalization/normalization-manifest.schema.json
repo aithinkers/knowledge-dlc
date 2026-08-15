@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/normalization/normalization-manifest-1.json",
+  "type": "object",
+  "required": ["api_version", "source_hash", "status", "format", "normalizer", "settings", "coverage", "omissions", "quality_warnings", "outputs", "security"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/normalization-manifest/v1"}, "source_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "status": {"enum": ["complete", "partial", "quarantined"]}, "format": {"type": ["string", "null"]},
+    "normalizer": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["id", "version", "parser"], "properties": {"id": {"type": "string"}, "version": {"type": "string"}, "parser": {"type": "object", "required": ["name", "version", "license"], "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "license": {"type": "string"}}, "additionalProperties": false}}, "additionalProperties": false}]}, "settings": {"type": "object"},
+    "coverage": {"type": "object", "required": ["discovered", "emitted"], "properties": {"discovered": {"type": "integer", "minimum": 0}, "emitted": {"type": "integer", "minimum": 0}}, "additionalProperties": true},
+    "omissions": {"type": "array", "items": {"type": "object", "required": ["reason"], "properties": {"reason": {"type": "string"}, "locator": {"type": "object"}}, "additionalProperties": false}},
+    "quality_warnings": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "outputs": {"type": "array", "items": {"type": "object", "required": ["path", "hash", "bytes", "mode"], "properties": {"path": {"type": "string"}, "hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"}, "bytes": {"type": "integer", "minimum": 0}, "mode": {"enum": ["deterministic", "probabilistic"]}}, "additionalProperties": false}},
+    "security": {"type": "object", "required": ["network", "executed_code", "macros", "external_relationships"], "properties": {"network": {"const": false}, "executed_code": {"const": false}, "macros": {"const": false}, "external_relationships": {"const": false}}, "additionalProperties": false},
+    "quarantine": {"type": "object", "required": ["code", "message"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "details": {"type": "object"}}, "additionalProperties": false}
+  },
+  "allOf": [{"if": {"properties": {"status": {"const": "quarantined"}}, "required": ["status"]}, "then": {"properties": {"quarantine": {}}, "required": ["quarantine"]}, "else": {"not": {"properties": {"quarantine": {}}, "required": ["quarantine"]}}}],
+  "additionalProperties": false
+}

@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/normalization/worker-request-1.json",
+  "type": "object",
+  "required": ["id", "bytes_base64"],
+  "properties": {"id": {"type": "string"}, "bytes_base64": {"type": "string", "contentEncoding": "base64"}, "filename": {"type": "string"}, "mediaType": {"type": "string"}, "sourceHash": {"type": "string"}, "settings": {"type": "object"}, "limits": {"type": "object"}, "network": {"const": false}, "execute": {"const": false}},
+  "additionalProperties": false
+}

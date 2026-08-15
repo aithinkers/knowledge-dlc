@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/normalization/normalized-unit-1.json",
+  "type": "object",
+  "required": ["unit_id", "kind", "order", "locator", "source_hash", "extraction_method", "quality_warnings"],
+  "properties": {
+    "unit_id": {"type": "string", "pattern": "^unit_[a-f0-9]{16}$"}, "kind": {"type": "string", "minLength": 1},
+    "parent_id": {"type": ["string", "null"]}, "order": {"type": "integer", "minimum": 0},
+    "text": {"type": "string"}, "structured_data": {},
+    "locator": {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string"}}, "additionalProperties": true},
+    "source_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "extraction_method": {"type": "object", "required": ["mode", "normalizer", "version"], "properties": {"mode": {"enum": ["deterministic", "probabilistic"]}, "normalizer": {"type": "string"}, "version": {"type": "string"}, "model": {"type": "object"}}, "additionalProperties": false},
+    "language": {"type": "string"}, "quality_warnings": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  },
+  "anyOf": [{"properties": {"text": {}}, "required": ["text"]}, {"properties": {"structured_data": {}}, "required": ["structured_data"]}],
+  "additionalProperties": false
+}
