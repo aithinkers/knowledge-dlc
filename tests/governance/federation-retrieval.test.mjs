@@ -82,11 +82,11 @@ test("FEAT-005 rejects duplicate stable IDs, cache drift, unsafe Git entries, an
 
   const resolved = await resolver.resolveProject(project(root)); const primary = resolved.mounts.find(({ alias }) => alias === "primary");
   const concept = join(primary.root, "policies/authentication.md");
+  const driftRetriever = new FederatedRetriever({ mounts: resolved.mounts, policy: policy(), now: () => new Date(fixedNow()) });
+  const driftAuthorization = await driftRetriever.prepareAuthorization({ principal: {}, queryModes: ["wiki-only"] });
   await chmod(primary.root, 0o755); await chmod(join(primary.root, "policies"), 0o755); await chmod(concept, 0o644);
   await writeFile(concept, `${await readFile(concept, "utf8")}\ndrift\n`);
   await assert.rejects(resolver.verify(primary), federationCode("KDLC_CACHE_DRIFT"));
-  const driftRetriever = new FederatedRetriever({ mounts: resolved.mounts, policy: policy(), now: () => new Date(fixedNow()) });
-  const driftAuthorization = await driftRetriever.prepareAuthorization({ principal: {}, queryModes: ["wiki-only"] });
   await assert.rejects(driftRetriever.search({ authorization: driftAuthorization, principal: {}, query: "authentication" }), retrievalCode("KDLC_MOUNT_INTEGRITY"));
   await assert.rejects(resolver.resolveMount(project(root).knowledge_bases[0]), federationCode("KDLC_CACHE_DRIFT"));
   await assert.rejects(stat(primary.root), (error) => error.code === "ENOENT");
@@ -159,6 +159,13 @@ test("FEAT-005 applies query-mode, trust, freshness, and access filters before d
   assert.equal(fresh.results.some(({ id }) => id.includes("references/sources")), false);
   await assert.rejects(retriever.search({ principal, query: "authentication", mode: "wiki-only" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
   await assert.rejects(retriever.search({ principal: {}, query: "authentication", mode: "vector-only" }), retrievalCode("KDLC_QUERY_MODE"));
+
+  let authorizationTime = 100;
+  const expiring = new FederatedRetriever({ mounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z"), authorizationTtlMs: 10,
+    authorizationMonotonic: () => authorizationTime });
+  const expiringAuthorization = await expiring.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  authorizationTime = 110;
+  await assert.rejects(expiring.search({ authorization: expiringAuthorization, principal, query: "authentication" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
 });
 
 test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized response timing", async (context) => {
@@ -169,13 +176,24 @@ test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized re
     await writeFile(join(root, "primary", "policies", `${name}.md`), body); index += `* [Restricted ${number}](${name}.md)\n`;
     catalog.concepts.push({ id: `policies/${name}`, path: `policies/${name}.md`, byte_hash: byteHash(body), access: { classification: "restricted", compartments: ["nightfall"] } });
   }
+  const authenticationPath = join(root, "primary", "policies", "authentication.md");
+  let authentication = await readFile(authenticationPath, "utf8");
+  authentication = authentication.replace("---\nAuthentication must use", `${Array.from({ length: 40 }, (_, number) =>
+    `  - { id: denied-${String(number).padStart(2, "0")}, resource: "https://restricted.example.invalid/${number}", access: { classification: restricted, compartments: [nightfall] } }`).join("\n")}\n---\nAuthentication must use`);
+  await writeFile(authenticationPath, authentication);
+  catalog.concepts.find(({ id }) => id === "policies/authentication").byte_hash = byteHash(authentication);
   await writeFile(indexPath, index); await writeFile(catalogPath, `${JSON.stringify(catalog)}\n`);
   const { mounts } = await new FederationResolver({ projectRoot: root, now: fixedNow }).resolveProject(project(root));
-  const reads = []; let conceptDecisions = 0; const delayedPolicy = policy(); const authorizeConcept = delayedPolicy.authorizeConcept;
+  const reads = []; let conceptDecisions = 0; let sourceDecisions = 0; const delayedPolicy = policy();
+  const authorizeConcept = delayedPolicy.authorizeConcept; const authorizeSource = delayedPolicy.authorizeSource;
   delayedPolicy.authorizeConcept = async (input) => { conceptDecisions += 1; await new Promise((resolve) => setTimeout(resolve, 12)); return authorizeConcept(input); };
+  delayedPolicy.authorizeSource = async (input) => { sourceDecisions += 1; await new Promise((resolve) => setTimeout(resolve, 12)); return authorizeSource(input); };
   const retriever = new FederatedRetriever({ mounts, policy: delayedPolicy, now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75,
     readConcept: async (path) => { reads.push(path); if (path.endsWith("/policies/nightfall.md")) throw new Error("unauthorized body opened"); return readFile(path); } });
-  const principal = {}; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] }); const preparedDecisions = conceptDecisions;
+  const principal = {}; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  const preparedDecisions = conceptDecisions; const preparedSourceDecisions = sourceDecisions;
+  const sourced = await retriever.search({ authorization, principal, query: "authentication", mode: "wiki-only", includeSources: true });
+  assert.deepEqual(sourced.results.find(({ id }) => id === "kb://acme.primary/policies/authentication").source_citations.map(({ id }) => id), ["auth-source"]);
   const durations = []; let unauthorized; let absent;
   for (let iteration = 0; iteration < 3; iteration += 1) {
     let started = performance.now(); unauthorized = await retriever.search({ authorization, principal, query: "Project Nightfall", mode: "wiki-only" });
@@ -185,7 +203,9 @@ test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized re
     assert.deepEqual(unauthorized, absent);
   }
   assert.equal(preparedDecisions > 40, true, "fixture must exercise a large restricted catalog");
+  assert.equal(preparedSourceDecisions > 40, true, "fixture must exercise a large restricted source list");
   assert.equal(conceptDecisions, preparedDecisions, "query path must not call the concept PDP");
+  assert.equal(sourceDecisions, preparedSourceDecisions, "query path must not call the source PDP");
   assert.equal(reads.some((path) => path.endsWith("/policies/nightfall.md")), false);
   assert.equal(durations.every((duration) => duration >= 65), true, `floor was not enforced: ${durations.join(", ")}`);
   for (let index = 0; index < durations.length; index += 2) assert.equal(Math.abs(durations[index] - durations[index + 1]) < 40, true, `timing classes diverged: ${durations.join(", ")}`);

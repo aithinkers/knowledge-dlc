@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 
 import { artifactHash, byteHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
@@ -28,6 +28,11 @@ function noDisclosure() {
   return { status: "not_found", results: [], citations: [], conflicts: [], warnings: [], timing_class: "bounded-floor" };
 }
 function livingReference(value) { return typeof value === "string" ? value.replace(/@[^/]+\//, "/") : null; }
+function sourceRecord(source) {
+  if (typeof source?.id !== "string" || typeof source?.resource !== "string" || (source.source_hash !== undefined && !/^sha256:[0-9a-f]{64}$/.test(source.source_hash))) return null;
+  return { id: source.id, resource: source.resource, ...(source.source_hash ? { source_hash: source.source_hash } : {}) };
+}
+function fileIdentity(metadata) { return { dev: metadata.dev, ino: metadata.ino, size: metadata.size, mtimeMs: metadata.mtimeMs }; }
 
 async function verifySnapshot(mount) {
   try {
@@ -74,7 +79,28 @@ export class FederatedRetriever {
           principal, mount, concept: { id: metadata.id, access: metadata.access }, queryMode, capability: "read"
         })));
         if (allowed.some((value) => value !== true)) internallyDenied = true;
-        return Object.freeze({ mount, concepts: Object.freeze(mount.retrieval_catalog.filter((_, index) => allowed[index] === true)) });
+        const concepts = await Promise.all(mount.retrieval_catalog.map(async (metadata, index) => {
+          if (allowed[index] !== true) return null;
+          const conceptPath = `${mount.root}/${metadata.path}`;
+          try {
+            const bytes = await this.readConcept(conceptPath);
+            if (byteHash(bytes) !== metadata.byte_hash) throw new Error("concept hash mismatch");
+            const parsed = parseMarkdownConcept(bytes);
+            if (canonicalJson(parsed.frontmatter.access ?? null) !== canonicalJson(metadata.access)) throw new Error("concept access mismatch");
+            const concept = Object.freeze({ id: metadata.id, path: metadata.path, frontmatter: parsed.frontmatter, body: parsed.body });
+            const sources = list(parsed.frontmatter.sources).map((source) => ({ source, citation: sourceRecord(source) })).filter(({ citation }) => citation);
+            const sourceAllowed = await Promise.all(sources.map(({ source }) => this.policy.authorizeSource?.({
+              principal, mount, concept, source, queryMode, capability: "read"
+            })));
+            if (sourceAllowed.some((value) => value !== true)) internallyDenied = true;
+            const sourceCitations = sources.filter((_, sourceIndex) => sourceAllowed[sourceIndex] === true).map(({ citation }) => Object.freeze(citation));
+            return Object.freeze({ metadata, concept, sourceCitations: Object.freeze(sourceCitations), fileIdentity: Object.freeze(fileIdentity(await lstat(conceptPath))) });
+          } catch (error) {
+            if (error?.code?.startsWith?.("KDLC_")) throw error;
+            retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
+          }
+        }));
+        return Object.freeze({ mount, concepts: Object.freeze(concepts.filter(Boolean)) });
       }));
       modes.set(queryMode, Object.freeze({ internallyDenied, mounts: Object.freeze(decisions.filter(Boolean)) }));
     }
@@ -93,30 +119,26 @@ export class FederatedRetriever {
       const authorizationState = authorizationStates.get(authorization); let principalHash;
       try { principalHash = artifactHash(principal ?? null); } catch { retrievalFail("KDLC_PRINCIPAL_INVALID", "Retrieval principal must have a stable serializable identity"); }
       const authorizedMode = authorizationState?.modes.get(mode);
-      if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt < this.authorizationMonotonic()
+      if (!authorizationState || authorizationState.retriever !== this || authorizationState.expiresAt <= this.authorizationMonotonic()
         || authorizationState.principalHash !== principalHash || !authorizedMode) retrievalFail("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED", "Retrieval requires a matching current precomputed authorization snapshot");
       const queryTerms = terms(query); if (!queryTerms.length) return noDisclosure();
       const today = this.now().toISOString().slice(0, 10); const eligible = []; const { internallyDenied } = authorizedMode;
       for (const { mount, concepts } of authorizedMode.mounts) {
         await verifyMountIdentity(mount);
-        for (const metadata of concepts) {
-          const { id, path } = metadata;
-          let bytes;
-          try { bytes = await this.readConcept(`${mount.root}/${path}`); }
-          catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
-          if (byteHash(bytes) !== metadata.byte_hash) retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
-          const parsed = parseMarkdownConcept(bytes);
-          if (canonicalJson(parsed.frontmatter.access ?? null) !== canonicalJson(metadata.access)) retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification");
-          const concept = { id, path, frontmatter: parsed.frontmatter, body: parsed.body };
-          const sourceLike = path.startsWith("references/sources/") || /source|evidence/i.test(parsed.frontmatter.type ?? "");
-          const status = parsed.frontmatter.status ?? "stable"; const tier = trustTier(parsed.frontmatter); const isStale = stale(parsed.frontmatter, today);
+        for (const prepared of concepts) {
+          const { metadata, concept, sourceCitations } = prepared; const { path } = metadata;
+          try {
+            if (canonicalJson(fileIdentity(await lstat(`${mount.root}/${path}`))) !== canonicalJson(prepared.fileIdentity)) throw new Error("concept identity mismatch");
+          } catch { retrievalFail("KDLC_MOUNT_INTEGRITY", "An authorized mount failed integrity verification"); }
+          const sourceLike = path.startsWith("references/sources/") || /source|evidence/i.test(concept.frontmatter.type ?? "");
+          const status = concept.frontmatter.status ?? "stable"; const tier = trustTier(concept.frontmatter); const isStale = stale(concept.frontmatter, today);
           const modeEligible = mode === "exploratory" || mode === "audit" || mode === "refresh"
             ? true : mode === "sources-only" ? sourceLike : !sourceLike && ["stable", "deprecated"].includes(status);
           const trustEligible = TRUST[tier] >= TRUST[mode === "trusted-only" && minimumTrust === "unverified" ? "human-reviewed" : minimumTrust];
           const freshnessEligible = !(mode === "fresh-only" || staleBehavior === "exclude") || !isStale;
           if (!modeEligible || !trustEligible || !freshnessEligible) continue;
           const score = rawScore(queryTerms, concept);
-          eligible.push({ mount, concept, score, tier, isStale });
+          eligible.push({ mount, concept, sourceCitations, score, tier, isStale });
         }
       }
       const candidates = eligible.filter(({ score }) => score > 0);
@@ -140,11 +162,7 @@ export class FederatedRetriever {
         const qualified = `kb://${item.mount.id}@${item.mount.resolved_ref}/${item.concept.id}`;
         const citation = { concept: qualified, knowledge_base_id: item.mount.id, revision: item.mount.resolved_ref, tree_hash: item.mount.tree_hash };
         citations.push(citation);
-        const sourceCitations = [];
-        if (includeSources || mode === "audit") for (const source of list(item.concept.frontmatter.sources)) {
-          if (typeof source?.id !== "string" || typeof source?.resource !== "string" || (source.source_hash !== undefined && !/^sha256:[0-9a-f]{64}$/.test(source.source_hash))) continue;
-          if (await this.policy.authorizeSource?.({ principal, mount: item.mount, concept: item.concept, source, queryMode: mode, capability: "read" }) === true) sourceCitations.push({ id: source.id, resource: source.resource, ...(source.source_hash ? { source_hash: source.source_hash } : {}) });
-        }
+        const sourceCitations = includeSources || mode === "audit" ? item.sourceCitations : [];
         results.push({ id: `kb://${item.mount.id}/${item.concept.id}`, title: typeof item.concept.frontmatter.title === "string" && item.concept.frontmatter.title ? item.concept.frontmatter.title : item.concept.id.split("/").at(-1),
           description: typeof item.concept.frontmatter.description === "string" ? item.concept.frontmatter.description : null, score: Number(item.normalized.toFixed(6)), trust: item.tier,
           freshness: item.isStale ? "stale" : "current", citation, source_citations: sourceCitations,
