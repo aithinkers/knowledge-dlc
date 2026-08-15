@@ -14,6 +14,7 @@ import { FederatedRetriever } from "../../packages/retrieval/index.mjs";
 import { validateReleaseEvidence, releaseEvidenceFiles, releaseEvidenceSchemas } from "../../scripts/release-evidence-validation.mjs";
 import { scrubbedReleaseEnvironment } from "../../scripts/release-evaluation-boundary.mjs";
 import { cleanRebuildIndexes } from "../../scripts/release-evidence-definition.mjs";
+import { readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
@@ -24,18 +25,16 @@ async function makeRemovable(path) {
   if (metadata.isDirectory()) { await chmod(path, 0o700); const directory = await opendir(path); for await (const entry of directory) await makeRemovable(resolve(path, entry.name)); }
   else if (!metadata.isSymbolicLink()) await chmod(path, 0o600);
 }
-async function copyFixtureTree(source, destination) {
-  const metadata = await lstat(source);
-  if (metadata.isSymbolicLink()) throw new Error("Release fixture trees cannot contain symlinks");
-  if (metadata.isDirectory()) {
-    await mkdir(destination, { recursive: true });
-    const directory = await opendir(source);
-    for await (const entry of directory) await copyFixtureTree(resolve(source, entry.name), resolve(destination, entry.name));
-    return;
+const basePrimaryFixtureFiles = Object.freeze([
+  "index.md", "knowledge-base.yaml", "policies/authentication.md", "policies/index.md", "policies/nightfall.md",
+  "policies/spoof.md", "references/index.md", "references/sources/authentication.md", "references/sources/index.md", "retrieval-catalog.json"
+]);
+async function copyFixtureTree(sourceRoot, destination) {
+  for (const relativePath of basePrimaryFixtureFiles) {
+    const target = resolve(destination, relativePath);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, await readTrustedFile(sourceRoot, relativePath), { flag: "wx", mode: 0o600 });
   }
-  if (!metadata.isFile()) throw new Error("Release fixture trees require regular files");
-  await mkdir(dirname(destination), { recursive: true });
-  await writeFile(destination, await readFile(source), { flag: "wx", mode: 0o600 });
 }
 async function listIndexFiles(directory, prefix = "") {
   const paths = []; const handle = await opendir(directory);
