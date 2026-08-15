@@ -79,10 +79,14 @@ this tranche and require separate preregistered evidence.
 The `Release matrix` workflow defines the six required Ubuntu, Windows, and
 macOS cells across Node 22.23.2 and 24.5.0 with npm 11.5.1. Every cell runs the
 full, offline replay, release evidence, statistical preregistration, clean
-rebuild, package, installed CLI, and installed export checks. The stable
-`Release matrix` aggregator rejects missing or substituted cells and records
-the observed platform differences. Passing workflow evidence is still required
-before release.
+rebuild, supply-chain, reproducible double-package, installed CLI, and installed
+export checks. Each protected cell records the exact candidate head plus
+observed package, manifest, SBOM, notices, and smoke evidence. The stable
+`Release matrix` aggregator runs trusted-base code and dependencies to reject
+missing or substituted cells and cross-platform evidence drift. A separate
+read-token job executes only the trusted-base live-state collector and never
+checks out or executes candidate code. Passing workflow evidence is still
+required before release.
 
 ## Live repository settings (verified 2026-08-15)
 

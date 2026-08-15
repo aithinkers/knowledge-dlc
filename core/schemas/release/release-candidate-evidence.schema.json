@@ -1,19 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kdlc.dev/schemas/release/release-candidate-evidence-1.json",
-  "type": "object", "additionalProperties": false,
-  "required": ["api_version", "version", "head_sha", "changelog", "artifacts", "supply_chain", "install_smoke", "matrix", "repository", "independent_review"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "version", "changelog"],
   "properties": {
     "api_version": {"const": "kdlc.dev/release-candidate-evidence/v1alpha1"},
     "version": {"type": "string", "pattern": "^[1-9][0-9]*\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"},
-    "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "changelog": {"$ref": "#/$defs/file"},
-    "artifacts": {"type": "object", "additionalProperties": false, "required": ["first_sha256", "second_sha256", "manifest", "checksums"], "properties": {"first_sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "second_sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "manifest": {"$ref": "#/$defs/file"}, "checksums": {"$ref": "#/$defs/file"}}},
-    "supply_chain": {"type": "object", "additionalProperties": false, "required": ["sbom", "notices", "provenance_decision"], "properties": {"sbom": {"$ref": "#/$defs/file"}, "notices": {"$ref": "#/$defs/file"}, "provenance_decision": {"$ref": "#/$defs/file"}}},
-    "install_smoke": {"type": "object", "additionalProperties": false, "required": ["passed", "record"], "properties": {"passed": {"const": true}, "record": {"$ref": "#/$defs/file"}}},
-    "matrix": {"type": "object", "additionalProperties": false, "required": ["run_id", "head_sha", "cells", "aggregator"], "properties": {"run_id": {"type": "integer", "minimum": 1}, "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "cells": {"const": ["ubuntu-node22", "ubuntu-node24", "windows-node22", "windows-node24", "macos-node22", "macos-node24"]}, "aggregator": {"const": "passed"}}},
-    "repository": {"$ref": "#/$defs/file"},
-    "independent_review": {"$ref": "#/$defs/file"}
-  },
-  "$defs": {"file": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {"path": {"type": "string", "pattern": "^(?:CHANGELOG\\.md|distribution/release/[A-Za-z0-9._/-]+)$"}, "sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}}}}
+    "changelog": {"type": "object", "additionalProperties": false, "required": ["path", "sha256"], "properties": {
+      "path": {"const": "CHANGELOG.md"},
+      "sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}
+    }}
+  }
 }

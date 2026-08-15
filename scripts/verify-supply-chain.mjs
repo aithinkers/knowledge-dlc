@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDATE_ROOT) : resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const writing = process.argv.slice(2).includes("--write");
 if (process.argv.slice(2).some((argument) => argument !== "--write")) throw new Error("usage: node scripts/verify-supply-chain.mjs [--write]");
 
@@ -57,7 +57,9 @@ const policy = await json("security/supply-chain-policy.json");
 const failures = [];
 
 if (policy.version !== 1 || !Array.isArray(policy.allowed_licenses) || !policy.allowed_licenses.length || typeof policy.package_manifest !== "string") failures.push("supply-chain policy is invalid");
-if (packageDocument.private !== true || !String(packageDocument.version).endsWith("-private")) failures.push("pre-release package must remain private and non-final");
+const prereleaseIdentity = packageDocument.private === true && packageDocument.version === "0.0.0-private";
+const candidateIdentity = packageDocument.private === false && /^[1-9][0-9]*\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u.test(packageDocument.version ?? "");
+if (!prereleaseIdentity && !candidateIdentity) failures.push("package must be the private prerelease or a strict stable release candidate");
 if (packageDocument.license !== "MIT") failures.push("root package license must agree with LICENSE");
 if (JSON.stringify(packageDocument.files) !== JSON.stringify(policy.package_files)) failures.push("package files allowlist drifted from supply-chain policy");
 if (lock.name !== packageDocument.name || lock.version !== packageDocument.version || lock.packages?.[""]?.version !== packageDocument.version) failures.push("package-lock root identity drift");

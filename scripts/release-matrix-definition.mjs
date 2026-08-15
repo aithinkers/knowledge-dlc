@@ -6,7 +6,7 @@ export const releaseMatrixCells = Object.freeze([
   Object.freeze({ cell: "macos-node22", runner: "macos-latest", os: "darwin", node: "22.23.2" }),
   Object.freeze({ cell: "macos-node24", runner: "macos-latest", os: "darwin", node: "24.5.0" }),
 ]);
-export const releaseMatrixCommandIds = Object.freeze(["full", "offline", "release", "statistical", "clean-rebuild", "pack", "cli", "import"]);
+export const releaseMatrixCommandIds = Object.freeze(["full", "offline", "release", "statistical", "clean-rebuild", "supply-chain", "pack", "cli", "import"]);
 export function releaseMatrixDifferences(os) {
   if (!["linux", "win32", "darwin"].includes(os)) throw new Error(`unsupported release matrix OS: ${os}`);
   return Object.freeze([

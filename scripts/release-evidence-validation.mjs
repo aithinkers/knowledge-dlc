@@ -27,33 +27,38 @@ const schemas = Object.freeze({
   report: "core/schemas/release/evaluation-report.schema.json",
 });
 
-export async function validateReleaseCandidateEvidence(root, { version, headSha, matrixRunId, trustedRepositorySnapshot, trustedReviewRecord } = {}) {
+export async function validateReleaseCandidateEvidence(root, { version, headSha, matrixResults, trustedRepositorySnapshot, trustedReviewRecord, precheck = false } = {}) {
   const failures = []; let evidence; let schema;
   try { schema = await json(root, "core/schemas/release/release-candidate-evidence.schema.json"); evidence = await json(root, "distribution/release/release-candidate-evidence.json"); }
   catch (error) { return [`release-candidate evidence is unavailable: ${error.message}`]; }
   const ajv = new Ajv2020({ allErrors: true, strict: true }); addFormats(ajv); ajv.addSchema(await json(root, schemas.common)); const validate = ajv.compile(schema);
   if (!validate(evidence)) return [`release-candidate evidence contract: ${ajv.errorsText(validate.errors)}`];
-  if (evidence.version !== version || evidence.head_sha !== headSha || evidence.matrix.head_sha !== headSha || evidence.matrix.run_id !== Number(matrixRunId)) failures.push("release-candidate evidence does not exact-bind version, head, and trusted matrix run");
-  if (evidence.artifacts.first_sha256 !== evidence.artifacts.second_sha256) failures.push("two independent package builds are not byte-identical");
-  for (const item of [evidence.changelog, evidence.artifacts.manifest, evidence.artifacts.checksums, ...Object.values(evidence.supply_chain), evidence.install_smoke.record, evidence.repository, evidence.independent_review]) {
+  if (evidence.version !== version) failures.push("release-candidate evidence does not exact-bind the package version");
+  for (const item of [evidence.changelog]) {
     try { if (digest(await bytes(root, item.path)) !== item.sha256) failures.push(`release-candidate evidence hash drift: ${item.path}`); }
     catch (error) { failures.push(`release-candidate evidence unavailable: ${item.path} (${error.message})`); }
   }
   try { if (!(await bytes(root, evidence.changelog.path)).toString("utf8").includes(version)) failures.push("changelog does not declare the candidate version"); } catch {}
-  try { const manifest = await json(root, evidence.artifacts.manifest.path); if (manifest.version !== version || !Array.isArray(manifest.files) || manifest.files.length === 0) failures.push("package manifest is empty or version-drifted"); } catch { failures.push("package manifest is invalid"); }
-  try { const checksums = await json(root, evidence.artifacts.checksums.path); if (checksums.version !== version || checksums.package_sha256 !== evidence.artifacts.first_sha256) failures.push("artifact checksums do not bind the reproducible package"); } catch { failures.push("artifact checksums are invalid"); }
-  try { const settings = await json(root, evidence.repository.path); if (settings.visibility !== "public" || settings.branch_protection !== true || settings.release_blocking_issues_closed !== true || !settings.required_checks?.includes("Release matrix")) failures.push("repository settings snapshot is not release-ready"); }
-  catch { failures.push("repository settings snapshot is invalid"); }
-  try { const review = await json(root, evidence.independent_review.path); if (review.decision !== "approved" || review.independent !== true || review.head_sha !== headSha) failures.push("independent review record is not an exact-head approval"); }
-  catch { failures.push("independent review record is invalid"); }
-  try { if (!trustedRepositorySnapshot || !trustedReviewRecord || !same(JSON.parse(await readFile(trustedRepositorySnapshot, "utf8")), await json(root, evidence.repository.path)) || !same(JSON.parse(await readFile(trustedReviewRecord, "utf8")), await json(root, evidence.independent_review.path))) failures.push("repository settings or independent review are not backed by trusted live GitHub state"); }
-  catch { failures.push("trusted live GitHub release state is unavailable"); }
-  try { const provenance = await json(root, evidence.supply_chain.provenance_decision.path); if (provenance.decision !== "passed" || provenance.version !== version) failures.push("supply-chain provenance decision is not passing and version-bound"); }
-  catch { failures.push("supply-chain provenance decision is invalid"); }
-  try { const sbom = await json(root, evidence.supply_chain.sbom.path); if (sbom.version !== version || !Array.isArray(sbom.packages) || sbom.packages.length === 0) failures.push("SBOM is empty or version-drifted"); } catch { failures.push("SBOM record is invalid"); }
-  try { if (!(await bytes(root, evidence.supply_chain.notices.path)).toString("utf8").trim()) failures.push("license notices are empty"); } catch {}
-  try { const smoke = await json(root, evidence.install_smoke.record.path); if (smoke.version !== version || smoke.cli !== true || smoke.imports !== true || smoke.passed !== true) failures.push("install smoke record is incomplete or version-drifted"); }
-  catch { failures.push("install smoke record is invalid"); }
+  if (precheck) return failures;
+  if (!headSha || !Array.isArray(matrixResults) || matrixResults.length !== 6) failures.push("trusted exact-head six-cell matrix evidence is unavailable");
+  else {
+    const observed = matrixResults.map(({ head_sha, observed_evidence }) => ({ head_sha, observed_evidence }));
+    if (observed.some(({ head_sha }) => head_sha !== headSha)) failures.push("matrix artifacts do not exact-bind the candidate head");
+    const packages = observed.map(({ observed_evidence }) => observed_evidence?.package);
+    if (packages.some((item) => !item || item.first_sha256 !== item.second_sha256) || !packages.every((item) => same(item, packages[0]))) failures.push("two-build package bytes/manifests are not identical in every release cell");
+    const supply = observed.map(({ observed_evidence }) => observed_evidence?.supply_chain);
+    if (supply.some((item) => !item) || !supply.every((item) => same(item, supply[0]))) failures.push("verified SBOM/notices bytes differ across release cells");
+    if (observed.some(({ observed_evidence }) => observed_evidence?.smoke?.cli !== true || observed_evidence?.smoke?.imports !== true)) failures.push("installed package CLI/import smoke was not observed in every release cell");
+  }
+  const expectedChecks = ["Candidate tests", "CodeQL (JavaScript/TypeScript)", "Dependency review", "Pull request traceability", "Release matrix", "Repository policy", "Secret history scan", "Supply-chain verification"].sort();
+  try {
+    const settings = JSON.parse(await readFile(trustedRepositorySnapshot, "utf8")); const ruleset = settings.ruleset;
+    if (settings.visibility !== "public" || settings.release_blocking_issues_closed !== true || ruleset?.active !== true || ruleset.default_branch !== true || ruleset.prevents_deletion !== true || ruleset.prevents_non_fast_forward !== true || ruleset.linear_history !== true || ruleset.strict_status_checks !== true || ruleset.direct_push_bypass !== false || ruleset.pull_request?.required_approvals < 1 || ruleset.pull_request.require_code_owner_review !== true || ruleset.pull_request.dismiss_stale_reviews !== true || ruleset.pull_request.require_last_push_approval !== true || ruleset.pull_request.require_thread_resolution !== true || !same(ruleset.pull_request.allowed_merge_methods, ["squash"]) || !same(ruleset.required_checks, expectedChecks)) failures.push("trusted live repository ruleset is not release-ready");
+  } catch { failures.push("trusted live repository ruleset is unavailable or invalid"); }
+  try {
+    const review = JSON.parse(await readFile(trustedReviewRecord, "utf8"));
+    if (review.decision !== "approved" || review.head_sha !== headSha || !["independent-agent-comment", "formal-review"].includes(review.evidence_kind) || !Number.isInteger(review.evidence_id) || typeof review.evidence_url !== "string" || !review.actor) failures.push("trusted live independent review is not an exact-head approval");
+  } catch { failures.push("trusted live independent review is unavailable or invalid"); }
   return failures;
 }
 
@@ -72,7 +77,7 @@ export function validateReleaseLifecycle({ manifest, lock, conformance, report, 
   return failures;
 }
 
-export async function validateReleaseEvidence(root = resolve(import.meta.dirname, "..")) {
+export async function validateReleaseEvidence(root = resolve(import.meta.dirname, ".."), runtimeEvidence = {}) {
   const failures = [];
   const statistical = await validateStatisticalEvidence(root); failures.push(...statistical.failures);
   const ajv = new Ajv2020({ allErrors: true, strict: true });
@@ -168,7 +173,7 @@ export async function validateReleaseEvidence(root = resolve(import.meta.dirname
     const erasure = traceability.requirements?.find(({ id }) => id === "FEAT-009");
     if (rel?.issue !== 10) failures.push("REL-001 traceability must remain bound to issue #10");
     failures.push(...validateReleaseLifecycle({ manifest, lock, conformance, report, rel, statisticalPhase: statistical.phase }));
-    if (conformance.release_status === "release-candidate") failures.push(...await validateReleaseCandidateEvidence(root, { version: manifest?.version, headSha: process.env.KDLC_HEAD_SHA, matrixRunId: process.env.GITHUB_RUN_ID, trustedRepositorySnapshot: process.env.KDLC_TRUSTED_REPOSITORY_SNAPSHOT, trustedReviewRecord: process.env.KDLC_TRUSTED_REVIEW_RECORD }));
+    if (conformance.release_status === "release-candidate") failures.push(...await validateReleaseCandidateEvidence(root, { version: manifest?.version, headSha: runtimeEvidence.headSha ?? process.env.KDLC_HEAD_SHA, matrixResults: runtimeEvidence.matrixResults, trustedRepositorySnapshot: runtimeEvidence.trustedRepositorySnapshot ?? process.env.KDLC_TRUSTED_REPOSITORY_SNAPSHOT, trustedReviewRecord: runtimeEvidence.trustedReviewRecord ?? process.env.KDLC_TRUSTED_REVIEW_RECORD, precheck: runtimeEvidence.precheck ?? process.env.KDLC_RELEASE_MATRIX_PRECHECK === "1" }));
     if (erasure?.issue !== 24 || !["implemented", "verified", "released"].includes(erasure.status) || !erasure.evidence?.tests?.includes("tests/governance/revocation-erasure.test.mjs")) failures.push("Governed conformance requires traceable merged FEAT-009 erasure evidence");
     for (const module of conformance.modules) for (const id of module.requirement_ids) {
       const traced = traceability.requirements?.find((entry) => entry.id === id);
