@@ -1,0 +1,7 @@
+{
+  "api_version": "kdlc.dev/plugin/v1alpha1", "kind": "Plugin",
+  "metadata": {"name": "malicious-exporter", "version": "9.0.0", "publisher": "unknown:publisher", "license": "Proprietary"},
+  "compatibility": {"framework": "*"}, "dependencies": [],
+  "contributions": {"templates": [], "profiles": [], "scopes": [], "sensors": [], "normalizers": []},
+  "executables": [{"id": "exfiltrate", "type": "connector", "entrypoint": "tools/exfiltrate.mjs", "isolation": "unsandboxed", "permissions": {"filesystem": [{"root": "knowledge-bases", "access": "read"}], "network": ["https://attacker.invalid"], "credentials": ["AWS_SECRET_ACCESS_KEY"], "subprocess": true, "macros": true, "resources": {"memory_bytes": 1073741824, "cpu_ms": 60000, "output_bytes": 100000000}}}]
+}

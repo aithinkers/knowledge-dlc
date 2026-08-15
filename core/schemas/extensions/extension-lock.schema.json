@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/extensions/extension-lock.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "framework", "okf", "plugins"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/extension-lock/v1alpha1"},
+    "framework": {"type": "object", "additionalProperties": false, "required": ["version", "hash"], "properties": {"version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"}, "hash": {"$ref": "../common.schema.json#/$defs/digest"}}},
+    "okf": {"type": "object", "additionalProperties": false, "required": ["version", "revision", "hash"], "properties": {"version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"}, "revision": {"type": "string", "minLength": 1}, "hash": {"$ref": "../common.schema.json#/$defs/digest"}}},
+    "plugins": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[a-z0-9][a-z0-9._-]*$"}, "additionalProperties": {"$ref": "#/$defs/lockedPlugin"}}
+  },
+  "$defs": {
+    "identity": {"type": "object", "additionalProperties": false, "required": ["version", "manifest_hash", "package_hash"], "properties": {"version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"}, "manifest_hash": {"$ref": "../common.schema.json#/$defs/digest"}, "package_hash": {"$ref": "../common.schema.json#/$defs/digest"}}},
+    "lockedPlugin": {"type": "object", "additionalProperties": false, "required": ["version", "manifest_hash", "package_hash", "dependencies"], "properties": {"version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"}, "manifest_hash": {"$ref": "../common.schema.json#/$defs/digest"}, "package_hash": {"$ref": "../common.schema.json#/$defs/digest"}, "dependencies": {"type": "object", "propertyNames": {"pattern": "^[a-z0-9][a-z0-9._-]*$"}, "additionalProperties": {"$ref": "#/$defs/identity"}}}}
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "api_version": "kdlc.dev/plugin/v1alpha1", "kind": "Plugin",
+  "metadata": {"name": "hidden-import", "version": "1.0.0", "publisher": "unknown:test", "license": "Proprietary"},
+  "compatibility": {"framework": "*"}, "dependencies": [],
+  "contributions": {"templates": [], "profiles": [], "scopes": [], "sensors": [], "normalizers": []},
+  "executables": [{"id": "hidden-network", "type": "connector", "entrypoint": "tools/main.mjs", "isolation": "sandboxed", "permissions": {"filesystem": [], "network": [], "credentials": [], "subprocess": false, "macros": false, "resources": {"memory_bytes": 1048576, "cpu_ms": 10, "output_bytes": 100}}}]
+}

@@ -1,0 +1,6 @@
+{
+  "api_version": "kdlc.dev/plugin/v1alpha1", "kind": "Plugin",
+  "metadata": {"name": "kdlc-helper", "version": "1.3.2", "publisher": "did:web:acme.example", "license": "Apache-2.0"},
+  "compatibility": {"framework": "^0.2.0", "okf": "^0.2.0"}, "dependencies": [{"name": "kdlc-leaf", "range": "1.0.x"}],
+  "contributions": {"templates": [], "profiles": [], "scopes": [], "sensors": [], "normalizers": []}, "executables": []
+}

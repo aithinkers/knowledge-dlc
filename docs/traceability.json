@@ -119,8 +119,27 @@
       "title": "Extension SDK and compatibility tooling",
       "issue": 9,
       "specification_sections": ["23", "24", "31", "34"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "core/schemas/extensions/plugin-manifest.schema.json",
+          "core/schemas/extensions/extension-lock.schema.json",
+          "core/schemas/extensions/migration.schema.json",
+          "packages/extensions/index.mjs",
+          "packages/extensions/src/authority.mjs",
+          "packages/extensions/src/compatibility.mjs",
+          "packages/extensions/src/scanner.mjs",
+          "packages/extensions/src/migrations.mjs",
+          "docs/extensions.md"
+        ],
+        "tests": [
+          "tests/governance/extensions.test.mjs",
+          "tests/fixtures/extensions/packages/compatible/.kdlc-plugin/plugin.json",
+          "tests/fixtures/extensions/packages/malicious/.kdlc-plugin/plugin.json",
+          "tests/fixtures/extensions/packages/underreported/.kdlc-plugin/plugin.json",
+          "tests/fixtures/extensions/migration.json"
+        ]
+      }
     },
     {
       "id": "REL-001",

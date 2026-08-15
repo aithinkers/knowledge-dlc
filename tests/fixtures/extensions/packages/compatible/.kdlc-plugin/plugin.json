@@ -1,0 +1,18 @@
+{
+  "api_version": "kdlc.dev/plugin/v1alpha1",
+  "kind": "Plugin",
+  "metadata": {"name": "acme-quality", "version": "1.4.0", "publisher": "did:web:acme.example", "license": "Apache-2.0"},
+  "compatibility": {"framework": ">=0.2.0 <0.3.0", "okf": "^0.2.0"},
+  "dependencies": [{"name": "kdlc-helper", "range": "^1.2.0"}],
+  "contributions": {
+    "templates": [{"api_version": "kdlc.dev/template/v1alpha1", "kind": "Template", "metadata": {"id": "acme-service", "version": "1.0.0"}, "files": [{"path": "purpose.md", "source": "templates/purpose.md", "merge": "create"}]}],
+    "profiles": [{"api_version": "kdlc.dev/profile/v1alpha1", "kind": "Profile", "metadata": {"id": "acme-controlled", "version": "1.1.0"}, "extends": "kdlc-base@0.2.0", "rules": {"citations": "required"}, "security": {"minimum_trust": "human-reviewed", "approval_gates": ["human-review", "policy-review"]}}],
+    "scopes": [{"api_version": "kdlc.dev/scope/v1alpha1", "kind": "Scope", "metadata": {"id": "acme-audit", "version": "1.0.0"}, "stages": ["extract-claims", "review-proposal"], "approval_gates": ["human-review"], "settings": {"depth": "standard"}}],
+    "sensors": [{"api_version": "kdlc.dev/sensor-extension/v1alpha1", "kind": "Sensor", "id": "anchor-audit", "version": "1.0.0", "stage_ids": ["extract-claims"], "severity": "error", "blocking": true, "deterministic": true, "executable_id": "sensor-audit"}],
+    "normalizers": [{"api_version": "kdlc.dev/normalizer-extension/v1alpha1", "kind": "Normalizer", "id": "acme.custom", "version": "1.0.0", "executable_id": "normalizer-custom", "accepted": {"media_types": ["application/x-acme"], "extensions": [".acme"]}, "locator_kinds": ["record"], "output_schema": "kdlc.dev/normalized-unit/v1", "default_security": {"network": false, "execute_code": false, "macros": false}}]
+  },
+  "executables": [
+    {"id": "normalizer-custom", "type": "normalizer", "entrypoint": "tools/normalizer.mjs", "isolation": "sandboxed", "permissions": {"filesystem": [{"root": "sources/staging", "access": "read"}], "network": [], "credentials": [], "subprocess": false, "macros": false, "resources": {"memory_bytes": 134217728, "cpu_ms": 5000, "output_bytes": 10000000}}},
+    {"id": "sensor-audit", "type": "sensor", "entrypoint": "tools/sensor.mjs", "isolation": "sandboxed", "permissions": {"filesystem": [{"root": "workflow/runs", "access": "read"}], "network": [], "credentials": [], "subprocess": false, "macros": false, "resources": {"memory_bytes": 67108864, "cpu_ms": 1000, "output_bytes": 1000000}}}
+  ]
+}

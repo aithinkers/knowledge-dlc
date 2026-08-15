@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/extensions/normalizer.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "kind", "id", "version", "executable_id", "accepted", "locator_kinds", "output_schema", "default_security"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/normalizer-extension/v1alpha1"}, "kind": {"const": "Normalizer"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9.-]*$"}, "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+    "executable_id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]*$"},
+    "accepted": {"type": "object", "additionalProperties": false, "required": ["media_types", "extensions"], "properties": {"media_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$"}}, "extensions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^\\.[A-Za-z0-9]+$"}}}},
+    "locator_kinds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}},
+    "output_schema": {"const": "kdlc.dev/normalized-unit/v1"},
+    "default_security": {"type": "object", "additionalProperties": false, "required": ["network", "execute_code", "macros"], "properties": {"network": {"const": false}, "execute_code": {"const": false}, "macros": {"const": false}}}
+  }
+}
