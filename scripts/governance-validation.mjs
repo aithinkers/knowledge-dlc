@@ -9,8 +9,6 @@ export const protectedHarnessFiles = Object.freeze([
   ".github/workflows/governance.yml",
   ".github/workflows/candidate-tests.yml",
   ".github/workflows/release-matrix.yml",
-  "package.json",
-  "package-lock.json",
   "scripts/governance-validation.mjs",
   "scripts/verify-governance.mjs",
   "scripts/release-matrix-definition.mjs",

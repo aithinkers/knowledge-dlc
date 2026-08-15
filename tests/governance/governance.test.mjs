@@ -273,8 +273,7 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
       "distribution/release/statistical/profile.json"
     ]) assert.ok(failures.includes(`protected harness file differs from trusted base: ${path}`));
     assert.ok(failures.includes("protected npm script differs from trusted base: check:statistical-evidence"));
-    assert.ok(failures.includes("protected harness file differs from trusted base: package.json"));
-    assert.ok(failures.includes("protected harness file differs from trusted base: package-lock.json"));
+    assert.ok(!failures.some((failure) => failure.includes("protected harness file differs from trusted base: package")));
     assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-release.yml#pass'));
     assert.ok(failures.includes("dynamic job name is forbidden outside a protected workflow: spoof-expression.yml#pass"));
     assert.ok(failures.includes('reserved check name "Release matrix" appears in another workflow: spoof-escaped.yml#pass'));

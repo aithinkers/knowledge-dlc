@@ -17,9 +17,17 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.deepEqual(releaseMatrixCommandIds, ["full", "offline", "release", "statistical", "clean-rebuild", "pack", "cli", "import"]);
   const workflow = await readFile(resolve(root, ".github/workflows/release-matrix.yml"), "utf8");
   const attributes = await readFile(resolve(root, ".gitattributes"), "utf8");
-  parseYamlArtifact(workflow);
+  const parsedWorkflow = parseYamlArtifact(workflow);
   assert.match(attributes, /^\* text=auto eol=lf$/m);
   assert.match(workflow, /release-matrix:\r?\n    name: Release matrix/); assert.match(workflow, /npm install --global npm@11\.5\.1/); assert.match(workflow, /needs\.matrix\.result != 'success'/);
+  const aggregatorSteps = parsedWorkflow.jobs["release-matrix"].steps;
+  const trustedCheckout = aggregatorSteps.find((step) => step.name === "Check out trusted release verifier");
+  assert.equal(trustedCheckout.with.ref, "${{ github.event.pull_request.base.sha || github.sha }}");
+  assert.equal(trustedCheckout.with.path, "trusted");
+  assert.ok(aggregatorSteps.some((step) => step.run === "npm ci --ignore-scripts --prefix trusted"));
+  const trustedVerification = aggregatorSteps.find((step) => step.name === "Verify results with trusted code and locked dependencies").run;
+  assert.match(trustedVerification, /cd trusted && node scripts\/verify-release-matrix\.mjs \.\.\/matrix-results/);
+  assert.match(trustedVerification, /if test -f trusted\/scripts\/verify-release-matrix\.mjs/);
 });
 
 test("REL-001 release matrix aggregator rejects missing or substituted cells", async (context) => {
