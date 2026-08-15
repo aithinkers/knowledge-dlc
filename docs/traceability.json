@@ -492,6 +492,24 @@
       }
     },
     {
+      "id": "REQ-SEC-001",
+      "title": "Harden Kiro execute_bash allowlist against command injection",
+      "issue": 71,
+      "specification_sections": [
+        "5.7",
+        "27.1"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/agents/definitions/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/kiro-adapter.test.mjs"
+        ]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
