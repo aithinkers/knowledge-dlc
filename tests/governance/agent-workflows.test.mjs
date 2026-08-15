@@ -196,10 +196,36 @@ test("FEAT-004 approved human review binds the exact packet and permits stable p
   assert.equal(publication.intent.packet_hash, receipt.packet_hash);
   assert.equal(publication.intent.review_hash, receipt.review.hash);
   assert.equal(validator.validate("publicationIntent", publication.intent).valid, true);
+  for (const reviewedAt of ["2028-02-29T00:00:00-00:00", "2028-02-29T00:00:00+14:01", "2028-02-29T00:00:00+23:59"]) {
+    assert.throws(() => createReviewReceipt({ packet: review.packet, decision: "approved", session: principals.establishReviewSession("reviewer-123", "trust-reviewer"), receiptId: "rr_invalid_time", reviewedAt, validator }), (error) => error.code === "KDLC_ARTIFACT_INVALID" && error.details.field === "reviewed_at");
+  }
+  const timestampBefore = structuredClone(output.proposals[0]); timestampBefore.concept.before = structuredClone(timestampBefore.concept.after); timestampBefore.concept.before.frontmatter.stale_after = "2030-01-01T00:00:00Z";
+  assert.equal(validator.validate("conceptProposal", timestampBefore).valid, false);
+  for (const side of ["before", "after"]) {
+    const invalidPacket = structuredClone(review.packet); invalidPacket.concept[side] = structuredClone(review.packet.concept.after); invalidPacket.concept[side].frontmatter.stale_after = "2030-02-30";
+    assert.equal(validator.validate("governedReviewPacket", invalidPacket).valid, false);
+  }
+  const impossible = structuredClone(current); impossible.concept.frontmatter.stale_after = "2030-02-30";
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: "rr_approved", current: impossible }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("missing-future-freshness"));
+  const timestampShaped = structuredClone(output.proposals[0]); timestampShaped.concept.after.frontmatter.stale_after = "2030-01-01T00:00:00Z";
+  assert.equal(validator.validate("conceptProposal", timestampShaped).valid, false);
+  const invalidGeneration = structuredClone(current); invalidGeneration.concept.frontmatter.generated.at = "2026-02-30T00:00:00Z";
+  await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: "rr_approved", current: invalidGeneration }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("missing-generation"));
   await assert.rejects(() => harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_REVIEW_PACKET_IMMUTABLE");
   await assert.rejects(() => harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_approved", expectedReceiptId: "rr_approved" }), (error) => error.code === "KDLC_RECEIPT_IMMUTABLE");
   assert.throws(() => createReviewReceipt({ packet: review.packet, decision: "approved", reviewer: { actor: "human:forged", principal_mode: "local" }, receiptId: "rr_forged", reviewedAt: clock.now(), validator }), (error) => error.code === "KDLC_SESSION_INVALID");
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receipt: { ...receipt, id: "rr_forged" }, current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("receipt-missing"));
+});
+
+test("FEAT-004 workflow event creation rejects unknown and out-of-profile offsets", async () => {
+  for (const instant of ["2028-02-29T00:00:00-00:00", "2028-02-29T00:00:00+14:01", "2028-02-29T00:00:00+23:59"]) {
+    const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
+    const context = reviewContext();
+    const harness = await GovernedAgentWorkflows.create({ validator, clock: { now: () => instant }, session: principals.establishReviewSession("reviewer-123", "trust-reviewer"), reviewContextSession: trustedReviewContext("wf_ingest", context) });
+    await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: await fixture("ingest"), normalizedEvidence: await normalizedFixture("ingest") });
+    await harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" });
+    await assert.rejects(() => harness.decide({ workflowId: "wf_ingest", proposalId: "pr_alpha", decision: "approved", receiptId: "rr_bad_clock" }), (error) => error.code === "KDLC_WORKFLOW_CLOCK_INVALID" && error.details.field === "decided_at");
+  }
 });
 
 test("FEAT-004 stable publication fails closed and later decisions revoke approval", async () => {
@@ -324,7 +350,7 @@ test("FEAT-004 review packets require exact claims, applicable governance, dynam
   store.substitute(receiptPath, substitutedReceipt);
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.code === "KDLC_PUBLICATION_DENIED" && error.details.failures.includes("active-decision-drift"));
   store.clearSubstitution(receiptPath);
-  current.concept.frontmatter.stale_after = "2031-01-01T00:00:00Z";
+  current.concept.frontmatter.stale_after = "2031-01-01";
   await assert.rejects(() => harness.preparePublication({ workflowId: "wf_ingest", proposalId: "pr_alpha", receiptId: receipt.id, current }), (error) => error.details.failures.includes("freshness-authorization-invalid"));
   const forgedAuthorization = { api_version: "kdlc.dev/freshness-authorization/v1alpha1", subject: output.proposals[0].target.subject, field: "stale_after", value_hash: artifactHash(current.concept.frontmatter.stale_after), packet_hash: artifactHash(review.packet), policy: context.resolved.policies[1], authorized_by: "human:attacker", authorized_at: clock.now() };
   assert.equal(validator.validate("freshnessAuthorization", forgedAuthorization).valid, true);

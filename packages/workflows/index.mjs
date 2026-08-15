@@ -1,6 +1,6 @@
 import { AGENT_WORKFLOW_SCHEMA_PATHS, CapabilityRuntime, RecordedModelRuntime, RuntimeTrustAuthority, resolveAuthenticatedReviewSession, resolveTrustedReviewContext } from "../agents/index.mjs";
 import { createContractValidator } from "../contracts/index.mjs";
-import { artifactHash, canonicalJson } from "../core/index.mjs";
+import { artifactHash, canonicalJson, isRfc3339Instant } from "../core/index.mjs";
 import { assessPublication, createReviewPacket, createReviewReceipt, GovernanceError, reconcileDirectEdit } from "../governance/index.mjs";
 import { NodeFileStore } from "../lifecycle/src/store.mjs";
 
@@ -9,6 +9,12 @@ const PUT_MANY = Symbol("put-many");
 const STORE_REVIEW = Symbol("store-review");
 const STORE_DECISION = Symbol("store-decision");
 const STORE_FRESHNESS = Symbol("store-freshness");
+
+function strictInstant(clock, field) {
+  const value = clock.now();
+  if (!isRfc3339Instant(value)) throw new GovernanceError("KDLC_WORKFLOW_CLOCK_INVALID", `Workflow ${field} requires a strict RFC3339 known instant`, { field });
+  return value;
+}
 
 export class MemoryArtifactStore {
   constructor() { memoryStoreStates.set(this, new Map()); }
@@ -250,10 +256,11 @@ export class GovernedAgentWorkflows {
   async decide({ workflowId, proposalId, decision, receiptId, expectedReceiptId = null }) {
     const { role } = resolveAuthenticatedReviewSession(this.#session);
     const packet = await this.#get(role, `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`);
-    const receipt = createReviewReceipt({ packet, decision, session: this.#session, receiptId, reviewedAt: this.#clock.now(), validator: this.#validator });
+    const decidedAt = strictInstant(this.#clock, "decided_at");
+    const receipt = createReviewReceipt({ packet, decision, session: this.#session, receiptId, reviewedAt: decidedAt, validator: this.#validator });
     const path = `workflow/runs/${workflowId}/receipts/${receiptId}.json`;
     const decisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`;
-    const unsignedDecision = { api_version: "kdlc.dev/review-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), receipt_id: receiptId, receipt_hash: artifactHash(receipt), decision, decided_at: this.#clock.now() };
+    const unsignedDecision = { api_version: "kdlc.dev/review-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), receipt_id: receiptId, receipt_hash: artifactHash(receipt), decision, decided_at: decidedAt };
     const activeDecision = { ...unsignedDecision, trust_proof: this.#trustAuthority.issueReviewProof({ workflowId, receipt, decision: unsignedDecision, session: this.#session }) };
     const validation = this.#validator.validate("reviewDecision", activeDecision);
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Review decision failed schema validation", { errors: validation.errors });
@@ -270,12 +277,13 @@ export class GovernedAgentWorkflows {
     const packet = await this.#get(role, `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`);
     if (packet.governance_requirements.freshness.mode !== "separate") throw new GovernanceError("KDLC_FRESHNESS_AUTHORITY_DENIED", "The applicable profile does not use separate freshness authorization");
     const policy = packet.resolved.policies.find(({ id }) => id === packet.governance_requirements.freshness.policy_id);
-    const authorization = { api_version: "kdlc.dev/freshness-authorization/v1alpha1", subject: packet.target.subject, field: "stale_after", value_hash: artifactHash(concept?.frontmatter?.stale_after), packet_hash: artifactHash(packet), policy: structuredClone(policy), authorized_by: reviewer.actor, authorized_at: this.#clock.now() };
+    const authorizedAt = strictInstant(this.#clock, "authorized_at");
+    const authorization = { api_version: "kdlc.dev/freshness-authorization/v1alpha1", subject: packet.target.subject, field: "stale_after", value_hash: artifactHash(concept?.frontmatter?.stale_after), packet_hash: artifactHash(packet), policy: structuredClone(policy), authorized_by: reviewer.actor, authorized_at: authorizedAt };
     const validation = this.#validator.validate("freshnessAuthorization", authorization);
     if (!validation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness authorization failed schema validation", { errors: validation.errors });
     const path = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-authorization.json`;
     const decisionPath = `workflow/runs/${workflowId}/reviews/${proposalId}/freshness-decision.json`;
-    const unsignedDecision = { api_version: "kdlc.dev/freshness-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), authorization_hash: artifactHash(authorization), value_hash: authorization.value_hash, policy: structuredClone(policy), authorized_by: reviewer.actor, activated_at: this.#clock.now() };
+    const unsignedDecision = { api_version: "kdlc.dev/freshness-decision/v1alpha1", proposal_id: proposalId, packet_hash: artifactHash(packet), authorization_hash: artifactHash(authorization), value_hash: authorization.value_hash, policy: structuredClone(policy), authorized_by: reviewer.actor, activated_at: authorizedAt };
     const freshnessDecision = { ...unsignedDecision, trust_proof: this.#trustAuthority.issueFreshnessProof({ workflowId, authorization, decision: unsignedDecision, session: this.#session }) };
     const decisionValidation = this.#validator.validate("freshnessDecision", freshnessDecision);
     if (!decisionValidation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Freshness decision failed schema validation", { errors: decisionValidation.errors });
@@ -301,7 +309,8 @@ export class GovernedAgentWorkflows {
       review: receipt && decisionState ? this.#trustAuthority.verifyReview({ workflowId, receipt, decision: decisionState }) : false,
       freshness: freshnessAuthorization && freshnessDecision ? this.#trustAuthority.verifyFreshness({ workflowId, authorization: freshnessAuthorization, decision: freshnessDecision }) : false
     };
-    const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, runtimeTrust, current, validator: this.#validator, now: this.#clock.now() });
+    const preparedAt = strictInstant(this.#clock, "prepared_at");
+    const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, runtimeTrust, current, validator: this.#validator, now: preparedAt });
     if (!assessment.allowed) throw new GovernanceError("KDLC_PUBLICATION_DENIED", "Publication policy gates failed", { failures: assessment.failures });
     const intent = {
       api_version: "kdlc.dev/publication-intent/v1alpha1",
@@ -311,7 +320,7 @@ export class GovernedAgentWorkflows {
       packet_hash: receipt.packet_hash,
       review_hash: receipt.review.hash,
       subject: proposal.target.subject,
-      prepared_at: this.#clock.now()
+      prepared_at: preparedAt
     };
     const intentValidation = this.#validator.validate("publicationIntent", intent);
     if (!intentValidation.valid) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Publication intent failed schema validation", { errors: intentValidation.errors });

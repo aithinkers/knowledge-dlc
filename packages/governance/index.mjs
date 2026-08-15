@@ -1,4 +1,4 @@
-import { artifactHash, BASE_REVIEW_FIELDS, canonicalJson, reviewHash } from "../core/index.mjs";
+import { artifactHash, BASE_REVIEW_FIELDS, canonicalJson, isGregorianDate, isRfc3339Instant, reviewHash, utcDate } from "../core/index.mjs";
 import { resolveAuthenticatedReviewSession } from "../agents/index.mjs";
 
 export class GovernanceError extends Error {
@@ -79,6 +79,7 @@ export function createReviewPacket({ proposal, claims, evidence, sensors, impact
 
 export function createReviewReceipt({ packet, decision, session, receiptId, reviewedAt, validator }) {
   requireValid(validator, "governedReviewPacket", packet);
+  if (!isRfc3339Instant(reviewedAt)) throw new GovernanceError("KDLC_ARTIFACT_INVALID", "Review receipt timestamp must be a strict RFC3339 known instant", { contract: "reviewReceipt", field: "reviewed_at" });
   const { reviewer } = resolveAuthenticatedReviewSession(session);
   const receipt = {
     api_version: "kdlc.dev/review-receipt/v1alpha1",
@@ -109,9 +110,10 @@ function stableConceptFailures(concept, now) {
   const frontmatter = concept?.frontmatter ?? {};
   const failures = [];
   for (const field of ["type", "title", "description", "status"]) if (typeof frontmatter[field] !== "string" || frontmatter[field].length === 0) failures.push(`missing-${field}`);
-  if (typeof frontmatter.generated?.by !== "string" || typeof frontmatter.generated?.at !== "string" || !Number.isFinite(Date.parse(frontmatter.generated.at))) failures.push("missing-generation");
+  if (typeof frontmatter.generated?.by !== "string" || !isRfc3339Instant(frontmatter.generated?.at)) failures.push("missing-generation");
   if (!Array.isArray(frontmatter.sources) || frontmatter.sources.length === 0) failures.push("missing-source");
-  if (frontmatter.freshness !== "timeless" && (typeof frontmatter.stale_after !== "string" || !Number.isFinite(Date.parse(frontmatter.stale_after)) || Date.parse(frontmatter.stale_after) <= Date.parse(now))) failures.push("missing-future-freshness");
+  const today = utcDate(now);
+  if (frontmatter.freshness !== "timeless" && (!isGregorianDate(frontmatter.stale_after) || !today || frontmatter.stale_after <= today)) failures.push("missing-future-freshness");
   return failures;
 }
 

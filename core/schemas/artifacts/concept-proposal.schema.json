@@ -26,8 +26,8 @@
       "additionalProperties": false,
       "required": ["before", "after"],
       "properties": {
-        "before": {"anyOf": [{"type": "object"}, {"type": "null"}]},
-        "after": {"type": "object", "required": ["frontmatter", "body"], "properties": {"frontmatter": {"type": "object"}, "body": {"type": "string"}}, "additionalProperties": false}
+        "before": {"anyOf": [{"type": "object", "properties": {"frontmatter": {"type": "object", "properties": {"stale_after": {"$ref": "../common.schema.json#/$defs/date"}}}}}, {"type": "null"}]},
+        "after": {"type": "object", "required": ["frontmatter", "body"], "properties": {"frontmatter": {"type": "object", "properties": {"stale_after": {"$ref": "../common.schema.json#/$defs/date"}}}, "body": {"type": "string"}}, "additionalProperties": false}
       }
     },
     "claim_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^clm_[a-z0-9]+$"}},
