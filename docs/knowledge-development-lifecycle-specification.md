@@ -305,8 +305,19 @@ kdlc/
   docs/
 ```
 
-The build system SHALL generate every `dist/<harness>/` tree from `core/` and
-the corresponding adapter. CI SHALL fail when generated output differs from a
+The tree above is the reference layout. An implementation MAY organize the
+same authored content differently — for example as package workspaces — only
+when the complete mapping from the reference paths to the implemented paths is
+recorded in an architecture decision record and kept current. The reference
+implementation records its mapping in
+`docs/decisions/0002-repository-layout-mapping.md`: schemas and profiles stay
+under `core/`, stage/agent/sensor/tool/normalizer/server sources live under
+`packages/`, and generated harness output lives under `distribution/<harness>/`
+in place of `dist/<harness>/`.
+
+The build system SHALL generate every generated-harness tree
+(`dist/<harness>/` or its recorded equivalent) from the authored core and the
+corresponding adapter. CI SHALL fail when generated output differs from a
 fresh build.
 
 ### 9.2 User project workspace
