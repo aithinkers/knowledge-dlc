@@ -1,0 +1,6 @@
+{
+  "principal": "human:fixture-reader",
+  "classifications": ["public", "internal"],
+  "compartments": ["engineering"],
+  "query_modes": ["wiki-only", "sources-only", "trusted-only", "fresh-only", "exploratory", "audit", "refresh"]
+}

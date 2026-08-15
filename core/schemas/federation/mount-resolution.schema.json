@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/federation/mount-resolution.schema.json",
+  "title": "K-DLC verified mount resolution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["alias", "id", "uri", "resolved_ref", "manifest_hash", "tree_hash", "mode", "access", "root"],
+  "properties": {
+    "alias": {"$ref": "../common.schema.json#/$defs/dnsName"},
+    "id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
+    "version": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+    "uri": {"$ref": "../common.schema.json#/$defs/resource"},
+    "requested_ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+    "resolved_ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+    "manifest_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "mode": {"enum": ["read-only", "propose", "draft", "maintain", "publish"]},
+    "access": {"$ref": "../common.schema.json#/$defs/access"},
+    "role": {"enum": ["primary", "dependency"]},
+    "priority": {"type": "integer"},
+    "root": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}
+  }
+}
