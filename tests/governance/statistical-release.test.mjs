@@ -83,6 +83,7 @@ test("REQ-EVAL-001 prompt, capture, gold, and corpus share the strict response a
 
 test("REQ-EVAL-001 evaluator gold rejects missing decisive public evidence and misaligned keys", async () => {
   const state = await loadPreregistration(root);
+  const validateGold = state.ajv.getSchema("https://kdlc.dev/schemas/release/statistical-gold-1.json"); const multipleAnswers = structuredClone(state.documents.gold); multipleAnswers.cases[0].expected.accepted_answers.push("thirty days"); assert.equal(validateGold(multipleAnswers), false);
   const missing = structuredClone(state.documents.corpus); missing.cases[0].context.evidence = [];
   assert.throws(() => validateGoldSemantics(missing, state.documents.gold), /current authorized evidence/);
   const reordered = structuredClone(state.documents.gold); [reordered.cases[0], reordered.cases[1]] = [reordered.cases[1], reordered.cases[0]];
