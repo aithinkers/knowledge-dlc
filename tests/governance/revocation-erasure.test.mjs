@@ -56,12 +56,12 @@ class Ids {
   next(prefix) { this.value += 1; return `${prefix}_${String(this.value).padStart(6, "0")}`; }
 }
 
-async function fixture(context, { holds = [], immediate = ["privacy-delete"], fault, surfaces: supplied, externalProcessors = {} } = {}) {
+async function fixture(context, { holds = [], immediate = ["privacy-delete"], fault, surfaces: supplied, externalProcessors = {}, trustedClock = clock } = {}) {
   const root = await mkdtemp(join(tmpdir(), "kdlc-erasure-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const store = new NodeFileStore(root);
   const ids = new Ids();
-  const audit = new AuditWriter({ store, clock, ids });
+  const audit = new AuditWriter({ store, clock: trustedClock, ids });
   const surfaces = supplied ?? [
     { id: "original", kind: "original", path: "sources/original/private.txt", strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] },
     { id: "normalized", kind: "normalized", path: "sources/normalized/private.json", strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: ["original"] },
@@ -77,7 +77,7 @@ async function fixture(context, { holds = [], immediate = ["privacy-delete"], fa
   const governanceEvents = [];
   const governanceAuthority = new GovernanceControlAuthority({
     authenticate: async (credential) => credential === "records-credential" ? { actor: "human:privacy-officer", roles: ["records"] } : null,
-    clock,
+    clock: trustedClock,
     audit: { append: async (event) => { governanceEvents.push(structuredClone(event)); } },
   });
   const authority = new RetentionDecisionAuthority({
@@ -86,12 +86,12 @@ async function fixture(context, { holds = [], immediate = ["privacy-delete"], fa
     holds,
     key: Buffer.alloc(32, 7),
     keyId: "retention-authority",
-    clock,
+    clock: trustedClock,
   });
-  const governance = await GovernanceControlEngine.create({ policy: governancePolicy, clock, audit: { append: async (event) => { governanceEvents.push(structuredClone(event)); } }, authority: governanceAuthority, erasureVerifier: authority.evidenceVerifier() });
+  const governance = await GovernanceControlEngine.create({ policy: governancePolicy, clock: trustedClock, audit: { append: async (event) => { governanceEvents.push(structuredClone(event)); } }, authority: governanceAuthority, erasureVerifier: authority.evidenceVerifier() });
   const governanceSession = await governanceAuthority.openSession("records-credential");
   const inventory = new SurfaceInventory({ store, list: async () => structuredClone(surfaces) });
-  const engine = new RevocationEngine({ store, clock, ids, audit, authority, inventory, fault, externalProcessors });
+  const engine = new RevocationEngine({ store, clock: trustedClock, ids, audit, authority, inventory, fault, externalProcessors });
   return { root, store, ids, audit, authority, governanceAuthority, governanceSession, governance, governanceEvents, inventory, engine, surfaces };
 }
 
@@ -329,6 +329,25 @@ test("FEAT-009 audit/receipt finalization crash gaps recover forward exactly onc
   }
 });
 
+test("FEAT-009 completion outbox freezes receipt and audit hashes across an advancing-clock crash", async (context) => {
+  let tick = 0;
+  const base = Date.parse("2026-08-14T15:00:00.000Z");
+  const advancing = { now: () => new Date(base + tick++ * 1000).toISOString(), millis: () => base + tick * 1000 };
+  let crashed = false;
+  const state = await fixture(context, { trustedClock: advancing, fault: async ({ phase }) => {
+    if (phase === "after-audit-before-receipt" && !crashed) { crashed = true; throw new Error("advancing-clock-crash"); }
+  } });
+  const started = await state.engine.start(await request(state));
+  await assert.rejects(state.engine.run("wf_erase", started.job.job_id), /advancing-clock-crash/);
+  const persisted = await state.store.readJson(state.engine.planPath("wf_erase", started.job.job_id));
+  const frozenHash = artifactHash(persisted.finalization.receipt);
+  const receipt = await state.engine.run("wf_erase", started.job.job_id);
+  assert.equal(artifactHash(receipt), frozenHash);
+  assert.equal(receipt.completed_at, persisted.finalization.receipt.completed_at);
+  const events = (await state.store.readText("workflow/runs/wf_erase/audit.jsonl")).trim().split("\n").map(JSON.parse);
+  assert.equal(events.filter(({ action }) => action === "erasure.completed").length, 1);
+});
+
 test("FEAT-009 same-ID path substitution and post-audit late copies cannot receive a receipt", async (context) => {
   for (const substitution of ["same-id", "new-id"]) {
     let state;
@@ -360,20 +379,73 @@ test("FEAT-009 shipped complete project inventory rejects unknown files and oper
   const root = await mkdtemp(join(tmpdir(), "kdlc-project-inventory-"));
   context.after(() => removeTree(root));
   const store = new NodeFileStore(root);
-  await store.writeTextAtomic("sources/private.txt", "private\n");
+  const originalBytes = Buffer.from("private\n");
+  const originalHash = byteHash(originalBytes);
+  await store.writeTextAtomic("sources/private.txt", originalBytes.toString());
+  await store.writeJsonAtomic(".kdlc/provenance-evidence/original.json", { source_id: source.id, source_hash: originalHash });
   assert.throws(() => new ProjectProvenanceInventory({ store, governedRoots: ["sources"] }), (error) => error.code === "KDLC_ERASURE_INPUT_INVALID");
   const inventory = new ProjectProvenanceInventory({ store });
-  const surfaces = [{ id: "original", kind: "original", path: "sources/private.txt", strategy: "purge", bindings: { source_ids: [source.id], source_hashes: [source.hash] }, depends_on: [] }];
-  await inventory.replaceManifest(surfaces, { clock });
+  const descriptors = [{ id: "original", kind: "original", path: "sources/private.txt", strategy: "purge", evidence_paths: [".kdlc/provenance-evidence/original.json"] }];
+  await assert.rejects(inventory.commitManifest([{ ...descriptors[0], bindings: { source_ids: [], source_hashes: [] } }], { clock }),
+    (error) => error.code === "KDLC_ERASURE_INCOMPLETE");
+  await inventory.commitManifest(descriptors, { clock });
   assert.equal((await inventory.snapshot()).surfaces.length, 1);
   await store.writeTextAtomic("sources/unknown.txt", "untracked\n");
   await assert.rejects(inventory.snapshot(), (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && error.details.unknown.includes("sources/unknown.txt"));
+
+  const external = new ProjectProvenanceInventory({ store, externalProcessors: { vault: {
+    async inventory() { return [{ object_id: "external-secret", bindings: { source_ids: [source.id], source_hashes: [originalHash] }, depends_on: [] }]; },
+    async verifyInventory() { return true; },
+  } } });
+  await assert.rejects(external.commitManifest(descriptors, { clock, owner: "external-omission" }),
+    (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && /omitted/.test(error.message));
 
   const state = await fixture(context);
   const operation = new GovernedErasureOperation({ engine: state.engine, governanceControls: state.governance });
   const result = await operation.execute(await request(state, { workflowId: "wf_adapter", idempotencyKey: "adapter-erase" }));
   assert.equal(result.status, "erased");
   assert.equal(state.authority.evidenceVerifier().resolve(result.completion).receipt_hash, artifactHash(result.receipt));
+});
+
+test("FEAT-009 production namespace blocks uncoordinated final-commit copies", async (context) => {
+  const state = await fixture(context);
+  const projectInventory = new ProjectProvenanceInventory({ store: state.store });
+  await projectInventory.ensureNamespace();
+  state.inventory.finalize = projectInventory.finalize.bind(projectInventory);
+  const started = await state.engine.start(await request(state));
+  const originalWrite = state.store.writeJsonAtomic.bind(state.store);
+  let lateWrite;
+  state.store.writeJsonAtomic = async (path, value) => {
+    if (path === state.engine.receiptPath("wf_erase", started.job.job_id) && !lateWrite)
+      lateWrite = state.store.writeTextAtomic("backups/uncoordinated-late.txt", "SECRET-123\n").then(() => null, (error) => error);
+    return originalWrite(path, value);
+  };
+  const receipt = await state.engine.run("wf_erase", started.job.job_id);
+  assert.equal(receipt.result, "erased");
+  assert.equal((await lateWrite)?.code, "KDLC_HASH_CONFLICT");
+  assert.equal(await state.store.exists("backups/uncoordinated-late.txt"), false);
+});
+
+test("FEAT-009 cooperative provenance updates cannot reintroduce a revoked source", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-cooperative-late-"));
+  context.after(() => removeTree(root));
+  const store = new NodeFileStore(root);
+  const bytes = Buffer.from("private\n");
+  const hash = byteHash(bytes);
+  await store.writeTextAtomic("sources/private.txt", bytes.toString());
+  await store.writeJsonAtomic(".kdlc/provenance-evidence/original.json", { source_id: source.id, source_hash: hash });
+  const inventory = new ProjectProvenanceInventory({ store });
+  const descriptors = [{ id: "original", kind: "original", path: "sources/private.txt", strategy: "purge", evidence_paths: [".kdlc/provenance-evidence/original.json"] }];
+  await inventory.commitManifest(descriptors, { clock });
+  const guard = new RevocationGuard({ store });
+  await store.writeJsonAtomic(guard.path(source.id), {
+    api_version: "kdlc.dev/revocation-barrier/v1alpha1", source: { id: source.id, hash }, state: "erased",
+    workflow_id: "wf_late", job_id: "job_late", impact_hash: artifactHash("impact"), decision_hash: artifactHash("decision"), activated_at: now,
+  });
+  await store.writeJsonAtomic("backups/cooperative.json", { source_id: source.id, source_hash: hash, secret: "SECRET-123" });
+  await assert.rejects(inventory.commitManifest([...descriptors, { id: "late", kind: "backup", path: "backups/cooperative.json", strategy: "purge" }], { clock, owner: "late-update" }),
+    (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  await assert.rejects(inventory.snapshot(), (error) => error.code === "KDLC_ERASURE_INCOMPLETE" && error.details.unknown.includes("backups/cooperative.json"));
 });
 
 test("FEAT-009 verification detects a late partial copy and refuses success until it is removed from the trusted inventory", async (context) => {
@@ -460,6 +532,21 @@ test("FEAT-009 a legal hold activated after planning stops purge before any copy
   await assert.rejects(state.engine.run("wf_erase", started.job.job_id), (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
   assert.equal(await state.store.exists("sources/original/private.txt"), true);
   assert.equal((await state.engine.jobs.get(started.job.job_id)).state, "queued");
+});
+
+test("FEAT-009 a hold activated at the destructive boundary prevents the first deletion", async (context) => {
+  const activeHolds = [];
+  let activated = false;
+  const state = await fixture(context, { holds: () => structuredClone(activeHolds), fault: async ({ phase }) => {
+    if (phase === "before-surface" && !activated) {
+      activated = true;
+      activeHolds.push({ id: "boundary-hold", source_id: source.id, status: "active", kinds: ["audit"] });
+    }
+  } });
+  const started = await state.engine.start(await request(state));
+  await assert.rejects(state.engine.run("wf_erase", started.job.job_id), (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  for (const surface of state.surfaces) assert.equal(await state.store.exists(surface.path), true, surface.id);
+  assert.equal(await state.store.exists(state.engine.receiptPath("wf_erase", started.job.job_id)), false);
 });
 
 test("FEAT-009 external processors require minimized receipts and verified idempotent deletion", async (context) => {

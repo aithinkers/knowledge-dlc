@@ -59,8 +59,8 @@ export class RetentionDecisionAuthority {
       throw invalid("A trusted retention decision signing authority and clock are required");
     this.#governanceAuthority = governanceAuthority;
     this.#policies = new Map(policies.map((policy) => [`${policy.id}@${policy.version}`, structuredClone(policy)]));
-    if (typeof holds !== "function" && !Array.isArray(holds)) throw invalid("Trusted legal holds are invalid");
-    this.#holdsProvider = typeof holds === "function" ? holds : () => structuredClone(holds);
+    if (typeof holds !== "function" && !Array.isArray(holds) && typeof holds?.list !== "function") throw invalid("Trusted legal holds are invalid");
+    this.#holdsProvider = typeof holds?.list === "function" ? () => holds.list() : typeof holds === "function" ? holds : () => structuredClone(holds);
     this.#key = Buffer.from(key);
     this.#keyId = keyId;
     this.#clock = clock;
@@ -73,8 +73,8 @@ export class RetentionDecisionAuthority {
     return structuredClone(resolved);
   }
 
-  #activeHolds(sourceId, impactedKinds) {
-    const holds = this.#holdsProvider();
+  async #activeHolds(sourceId, impactedKinds) {
+    const holds = await this.#holdsProvider();
     if (!Array.isArray(holds) || holds.some((hold) => !hold || !ID.test(hold.id ?? "") ||
       !ID.test(hold.source_id ?? "") || !["active", "released"].includes(hold.status) ||
       (hold.kinds !== undefined && (!Array.isArray(hold.kinds) || hold.kinds.some((kind) => !SURFACE_KINDS.has(kind))))))
@@ -91,7 +91,7 @@ export class RetentionDecisionAuthority {
     return createHmac("sha256", this.#key).update(canonicalJson(value)).digest("hex");
   }
 
-  decide({ authorization, request, impact }) {
+  async decide({ authorization, request, impact }) {
     const authenticated = this.resolve(authorization);
     if (!request || !["revoke", "erase"].includes(request.action) || !ID.test(request.reason ?? "") ||
       !ID.test(request.policy_id ?? "") || !ID.test(request.policy_version ?? "") ||
@@ -106,7 +106,7 @@ export class RetentionDecisionAuthority {
     const now = this.#clock.now();
     if (!validTime(now)) throw invalid("Trusted authority clock is invalid");
     const impactedKinds = new Set(impact.nodes.map(({ kind }) => kind));
-    const activeHolds = this.#activeHolds(request.source_id, impactedKinds);
+    const activeHolds = await this.#activeHolds(request.source_id, impactedKinds);
     const retentionBlocks = request.action === "erase" &&
       !policy.immediate_erasure_reasons.includes(request.reason)
       ? impact.nodes.filter(({ retained_until: retainedUntil }) => retainedUntil && Date.parse(retainedUntil) > Date.parse(now))
@@ -214,10 +214,32 @@ export class RetentionDecisionAuthority {
     } });
   }
 
-  revalidate(decision, impact) {
+  async revalidate(decision, impact) {
     if (!this.verify(decision, impact)) return false;
     if (decision.action !== "erase") return true;
     const kinds = new Set(impact.nodes.map(({ kind }) => kind));
-    return this.#activeHolds(decision.source.id, kinds).length === 0;
+    return (await this.#activeHolds(decision.source.id, kinds)).length === 0;
+  }
+}
+
+export class GovernedLegalHoldRegistry {
+  constructor({ store, clock, authenticate }) {
+    if (!store || !clock?.now || !clock?.millis || typeof authenticate !== "function") throw invalid("Governed legal-hold registry requires storage, clock, and authentication");
+    Object.assign(this, { store, clock, authenticate });
+    this.path = "governance/legal-holds.json";
+  }
+
+  async list() { return await this.store.exists(this.path) ? this.store.readJson(this.path) : []; }
+
+  async activate(credential, hold) {
+    const actor = await this.authenticate(credential);
+    if (!ACTOR.test(actor?.actor ?? "") || !actor.roles?.includes("records")) throw denied("Legal-hold activation requires authenticated records authority");
+    return this.store.withMutationNamespace({ owner: `legal-hold:${actor.actor}`, clock: this.clock }, async () => {
+      const holds = await this.list();
+      if (holds.some(({ id }) => id === hold?.id)) throw invalid("Legal-hold identity already exists");
+      const next = [...holds, { ...structuredClone(hold), status: "active", activated_by: actor.actor, activated_at: this.clock.now() }];
+      await this.store.writeJsonAtomic(this.path, next);
+      return Object.freeze(structuredClone(next.at(-1)));
+    });
   }
 }

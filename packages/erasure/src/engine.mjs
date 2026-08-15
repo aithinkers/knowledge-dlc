@@ -83,6 +83,10 @@ export class RevocationEngine {
   }
 
   coordinateInventory(action) {
+    if (typeof this.inventory.finalize === "function") return this.inventory.finalize({
+      owner: `erasure-inventory:${this.ids.next("coord")}`,
+      clock: this.clock,
+    }, action);
     return this.store.withMutex("governance/erasure-inventory-lock", {
       owner: `erasure-inventory:${this.ids.next("coord")}`,
       clock: this.clock,
@@ -199,7 +203,7 @@ export class RevocationEngine {
       const snapshot = await this.inventory.snapshot();
       const source = { id: sourceId, hash: sourceHash };
       const impact = resolveImpact(snapshot, source);
-      const decision = this.authority.decide({ authorization, request, impact });
+      const decision = await this.authority.decide({ authorization, request, impact });
       if (decision.authority.actor !== authenticated.authority || decision.authorization_hash !== artifactHash(authenticated)) throw denied("Retention decision authority identity drifted");
       if (!this.authority.verify(decision, impact)) throw denied("Retention decision proof is invalid");
       const created = await this.jobs.create({
@@ -346,13 +350,16 @@ export class RevocationEngine {
       this.#assertPlan(plan, workflowId, jobId);
       if (!this.authority.verify(plan.decision, plan.impact)) throw denied("Persisted retention decision proof is invalid");
       if (!plan.decision.allowed) return this.store.readJson(this.blockedPath(workflowId, jobId));
-      if (typeof this.authority.revalidate !== "function" || !this.authority.revalidate(plan.decision, plan.impact))
+      if (typeof this.authority.revalidate !== "function" || !(await this.authority.revalidate(plan.decision, plan.impact)))
         throw denied("Retention decision is no longer authorized under current legal holds");
       if (await this.store.exists(this.receiptPath(workflowId, jobId))) {
         const receipt = await this.store.readJson(this.receiptPath(workflowId, jobId));
         if (typeof this.authority.verifyReceipt !== "function" || !this.authority.verifyReceipt(receipt))
           throw incomplete("Erasure receipt trust proof is invalid");
-        const verification = await this.#verify(plan);
+        const verification = await this.coordinateInventory(async () => {
+          if (!(await this.authority.revalidate(plan.decision, plan.impact))) throw denied("Retention decision is no longer authorized under current legal holds");
+          return this.#verify(plan);
+        });
         if (receipt.verification_hash !== artifactHash(verification))
           throw incomplete("Completed erasure verification no longer matches every known copy");
         await this.#installBarrier(plan, plan.request.action === "erase" ? "erased" : "revoked");
@@ -370,8 +377,12 @@ export class RevocationEngine {
       const completed = new Set(plan.completed_surface_ids);
       for (const surface of plan.surfaces) {
         if (completed.has(surface.id)) continue;
-        await this.fault({ phase: "before-surface", surface: surface.id, plan: structuredClone(plan) });
-        const externalReceipt = await this.#treatSurface(plan, surface);
+        const mutationPath = surface.path ?? ".kdlc/cache/external-provenance-mutation";
+        const externalReceipt = await this.store.mutateGoverned(mutationPath, async () => {
+          await this.fault({ phase: "before-surface", surface: surface.id, plan: structuredClone(plan) });
+          if (!(await this.authority.revalidate(plan.decision, plan.impact)))
+            throw denied("Retention decision is no longer authorized under current legal holds");
+        }, () => this.#treatSurface(plan, surface));
         await this.fault({ phase: "after-surface-before-checkpoint", surface: surface.id, plan: structuredClone(plan) });
         if (externalReceipt) plan.external_receipts[surface.id] = structuredClone(externalReceipt);
         await this.audit.append(workflowId, {
@@ -401,8 +412,17 @@ export class RevocationEngine {
       await this.store.writeJsonAtomic(planPath, plan);
       await this.fault({ phase: "before-verification", plan: structuredClone(plan) });
       const receipt = await this.coordinateInventory(async () => {
+        if (!(await this.authority.revalidate(plan.decision, plan.impact)))
+          throw denied("Retention decision is no longer authorized under current legal holds");
         const verification = await this.#verify(plan);
-        const candidate = {
+        let candidate = plan.finalization?.receipt;
+        let auditEvent = plan.finalization?.audit_event;
+        if (candidate) {
+          if (!this.authority.verifyReceipt(candidate) || candidate.verification_hash !== artifactHash(verification) ||
+            artifactHash(candidate) !== auditEvent?.receipt_hash)
+            throw incomplete("Persisted erasure finalization outbox is invalid or stale");
+        } else {
+          candidate = {
           api_version: "kdlc.dev/erasure-receipt/v1alpha1",
           job_id: jobId,
           workflow_id: workflowId,
@@ -417,28 +437,39 @@ export class RevocationEngine {
             by_kind: Object.fromEntries([...new Set(plan.surfaces.map(({ kind }) => kind))].sort().map((kind) => [kind, plan.surfaces.filter((surface) => surface.kind === kind).length])),
           },
           completed_at: this.clock.now(),
-        };
-        if (typeof this.authority.attestReceipt !== "function") throw denied("Erasure receipt authority is unavailable");
-        candidate.proof = this.authority.attestReceipt(candidate);
-        await this.audit.append(workflowId, {
-          actor: plan.decision.authority.actor,
-          action: plan.request.action === "erase" ? "erasure.completed" : "source.revocation-completed",
-          subject: opaque(plan.source.id),
-          input_hash: artifactHash(plan.impact),
-          receipt_hash: artifactHash(candidate),
-          result: candidate.result,
-          policy_version: `${plan.decision.policy.id}@${plan.decision.policy.version}`,
-          idempotency_key: `erasure-complete:${jobId}`,
-        });
+          };
+          if (typeof this.authority.attestReceipt !== "function") throw denied("Erasure receipt authority is unavailable");
+          candidate.proof = this.authority.attestReceipt(candidate);
+          auditEvent = {
+            actor: plan.decision.authority.actor,
+            action: plan.request.action === "erase" ? "erasure.completed" : "source.revocation-completed",
+            subject: opaque(plan.source.id),
+            input_hash: artifactHash(plan.impact),
+            receipt_hash: artifactHash(candidate),
+            result: candidate.result,
+            policy_version: `${plan.decision.policy.id}@${plan.decision.policy.version}`,
+            idempotency_key: `erasure-complete:${jobId}`,
+          };
+          plan.finalization = { receipt: structuredClone(candidate), audit_event: structuredClone(auditEvent), audit_committed: false };
+          plan.updated_at = candidate.completed_at;
+          await this.store.writeJsonAtomic(planPath, plan);
+        }
+        await this.audit.append(workflowId, auditEvent);
+        if (!plan.finalization.audit_committed) {
+          plan.finalization.audit_committed = true;
+          await this.store.writeJsonAtomic(planPath, plan);
+        }
         await this.fault({ phase: "after-audit-before-receipt", plan: structuredClone(plan), receipt: structuredClone(candidate) });
+        if (!(await this.authority.revalidate(plan.decision, plan.impact)))
+          throw denied("Retention decision is no longer authorized under current legal holds");
         const finalVerification = await this.#verify(plan);
         if (artifactHash(finalVerification) !== candidate.verification_hash)
           throw incomplete("Erasure inventory changed before receipt commit");
         await this.store.writeJsonAtomic(this.receiptPath(workflowId, jobId), candidate);
+        await this.#installBarrier(plan, plan.request.action === "erase" ? "erased" : "revoked", true);
         return candidate;
       });
       await this.fault({ phase: "after-receipt-before-finalization", plan: structuredClone(plan), receipt: structuredClone(receipt) });
-      await this.#installBarrier(plan, plan.request.action === "erase" ? "erased" : "revoked");
       plan.state = "completed";
       plan.updated_at = receipt.completed_at;
       await this.store.writeJsonAtomic(planPath, plan);
