@@ -150,8 +150,8 @@ export class McpProjectServer {
     this.engineFactory = engineFactory;
     this.engines = new Map();
   }
-  engine(principal = this.principal) {
-    const key = JSON.stringify({
+  cacheKey(principal) {
+    return JSON.stringify({
       actor: principal.actor,
       principal_mode: principal.principal_mode ?? null,
       issuer: principal.issuer ?? null,
@@ -160,11 +160,20 @@ export class McpProjectServer {
       os_username: principal.os_username ?? null,
       scopes: [...new Set(principal.scopes)].sort(),
     });
+  }
+  engine(principal = this.principal) {
+    const key = this.cacheKey(principal);
     if (!this.engines.has(key)) {
       const options = this.localBootstrap && principal === this.principal ? { root: this.root } : { root: this.root, principal };
       this.engines.set(key, this.engineFactory(options));
     }
     return this.engines.get(key);
+  }
+  async evict(principal, expected) {
+    const key = this.cacheKey(principal);
+    if (this.engines.get(key) !== expected) return;
+    this.engines.delete(key);
+    await expected.close?.();
   }
   async close() {
     await Promise.all(
@@ -296,10 +305,12 @@ export class McpProjectServer {
             new Error("Tool input failed schema validation"),
             { code: -32602 },
           );
-        const envelope = await this.engine(principal).envelope(
+        const selectedEngine = this.engine(principal);
+        const envelope = await selectedEngine.envelope(
           tool.operation,
           input,
         );
+        if (tool.name === "project_init" && envelope.ok && selectedEngine.principal?.bootstrap_init_only) await this.evict(principal, selectedEngine);
         result = {
           content: [{ type: "text", text: JSON.stringify(envelope) }],
           structuredContent: envelope,

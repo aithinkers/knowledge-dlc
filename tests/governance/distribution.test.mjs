@@ -830,6 +830,9 @@ test("FEAT-006 local CLI bootstrap is init-only and remote principals cannot sel
   const defaultLocal = new McpProjectServer({ root: defaultLocalRoot, projectId: "local.default" });
   const localInit = await defaultLocal.request({ jsonrpc: "2.0", id: 98, method: "tools/call", params: { name: "project_init", arguments: { project_id: "local.default" } } });
   assert.equal(localInit.result.structuredContent.ok, true);
+  const localGet = await defaultLocal.request({ jsonrpc: "2.0", id: 97, method: "tools/call", params: { name: "project_get", arguments: {} } });
+  assert.equal(localGet.result.structuredContent.ok, true);
+  assert.equal(localGet.result.structuredContent.result.project.id, "local.default");
   await defaultLocal.close();
   const defaultServer = new McpProjectServer({ root: defaultRemoteRoot, projectId: "remote.default", principal: { actor: "human:remote", principal_mode: "served", issuer: "https://issuer.invalid", subject: "remote", scopes: ["mutate"] } });
   const remoteInit = await defaultServer.request({ jsonrpc: "2.0", id: 99, method: "tools/call", params: { name: "project_init", arguments: { project_id: "remote.default" } } });
