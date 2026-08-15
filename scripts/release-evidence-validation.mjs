@@ -8,6 +8,7 @@ import addFormats from "ajv-formats";
 import { descriptors } from "../packages/normalizers/index.mjs";
 import { artifactHash } from "../packages/core/index.mjs";
 import { readTrustedFile } from "./supply-chain-validation.mjs";
+import { evaluateAdminSettingsAttestation } from "./release-state-derivation.mjs";
 import { conformanceModules, mandatoryProfileRequirements, mandatoryReleaseCases } from "./release-evidence-definition.mjs";
 import { validateStatisticalEvidence } from "./statistical-evidence-validation.mjs";
 
@@ -27,7 +28,7 @@ const schemas = Object.freeze({
   report: "core/schemas/release/evaluation-report.schema.json",
 });
 
-export async function validateReleaseCandidateEvidence(root, { version, headSha, matrixResults, trustedRepositorySnapshot, trustedReviewRecord, precheck = false } = {}) {
+export async function validateReleaseCandidateEvidence(root, { version, headSha, matrixResults, trustedRepositorySnapshot, trustedReviewRecord, repository = process.env.GITHUB_REPOSITORY, now = new Date().toISOString(), precheck = false } = {}) {
   const failures = []; let evidence; let schema;
   try { schema = await json(root, "core/schemas/release/release-candidate-evidence.schema.json"); evidence = await json(root, "distribution/release/release-candidate-evidence.json"); }
   catch (error) { return [`release-candidate evidence is unavailable: ${error.message}`]; }
@@ -55,7 +56,9 @@ export async function validateReleaseCandidateEvidence(root, { version, headSha,
   const expectedChecks = ["Candidate tests", "CodeQL (JavaScript/TypeScript)", "Dependency review", "Pull request traceability", "Release matrix", "Repository policy", "Secret history scan", "Supply-chain verification"].sort();
   try {
     const settings = JSON.parse(await readFile(trustedRepositorySnapshot, "utf8")); const ruleset = settings.ruleset;
-    if (settings.visibility !== "public" || settings.actions?.default_workflow_permissions !== "read" || settings.actions.can_approve_pull_request_reviews !== false || settings.release_blocking_issues_closed !== true || ruleset?.active !== true || ruleset.default_branch !== true || ruleset.prevents_deletion !== true || ruleset.prevents_non_fast_forward !== true || ruleset.linear_history !== true || ruleset.strict_status_checks !== true || ruleset.direct_push_bypass !== false || ruleset.pull_request?.required_approvals < 1 || ruleset.pull_request.require_code_owner_review !== true || ruleset.pull_request.dismiss_stale_reviews !== true || ruleset.pull_request.require_last_push_approval !== true || ruleset.pull_request.require_thread_resolution !== true || !same(ruleset.pull_request.allowed_merge_methods, ["squash"]) || !same(ruleset.required_checks, expectedChecks)) failures.push("trusted live repository ruleset is not release-ready");
+    const admin = evaluateAdminSettingsAttestation(JSON.stringify(settings.admin_attestation?.record), { repository, now });
+    if (settings.admin_attestation?.status !== "current" || admin.status !== "current" || !same(settings.actions, admin.attestation?.settings)
+      || settings.visibility !== "public" || settings.release_blocking_issues_closed !== true || ruleset?.active !== true || ruleset.default_branch !== true || ruleset.prevents_deletion !== true || ruleset.prevents_non_fast_forward !== true || ruleset.linear_history !== true || ruleset.strict_status_checks !== true || ruleset.direct_push_bypass !== false || ruleset.pull_request?.required_approvals < 1 || ruleset.pull_request.require_code_owner_review !== true || ruleset.pull_request.dismiss_stale_reviews !== true || ruleset.pull_request.require_last_push_approval !== true || ruleset.pull_request.require_thread_resolution !== true || !same(ruleset.pull_request.allowed_merge_methods, ["squash"]) || !same(ruleset.required_checks, expectedChecks)) failures.push("trusted live repository ruleset or admin attestation is not release-ready");
   } catch { failures.push("trusted live repository ruleset is unavailable or invalid"); }
   try {
     const review = JSON.parse(await readFile(trustedReviewRecord, "utf8"));

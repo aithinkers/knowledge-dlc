@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+
+import canonicalize from "canonicalize";
+
+import { isRfc3339Instant } from "../packages/core/src/temporal.mjs";
+
 function globPattern(pattern) {
   if (/[\[\]]/u.test(pattern)) throw new Error("unsupported ruleset character-set pattern");
   let source = "";
@@ -35,4 +41,36 @@ export function deriveRulesetState(rulesets, { baseRef, defaultBranch }) {
     strict_status_checks: statuses.some(({ strict_required_status_checks_policy }) => strict_required_status_checks_policy === true), required_checks: [...new Set(statuses.flatMap(({ required_status_checks }) => (required_status_checks ?? []).map(({ context }) => context)))].sort(),
     direct_push_bypass: applicable.some(({ bypass_actors }) => (bypass_actors ?? []).some(({ bypass_mode }) => bypass_mode === "always"))
   };
+}
+const ADMIN_ATTESTATION_VERSION = "kdlc.dev/admin-settings-attestation/v1alpha1";
+const ADMIN_CAPTURE_METHOD = "owner-live-admin-api-and-manual-ui";
+const ADMIN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+const digest = (value) => `sha256:${createHash("sha256").update(canonicalize(value)).digest("hex")}`;
+
+export function issueAdminSettingsAttestation({ repository, capturedAt, confirmedAt, actor, settings }) {
+  const payload = { api_version: ADMIN_ATTESTATION_VERSION, repository, captured_at: capturedAt,
+    settings: structuredClone(settings), manual_cross_check: { confirmed: true, confirmed_at: confirmedAt, method: ADMIN_CAPTURE_METHOD, actor } };
+  return Object.freeze({ ...payload, canonical_sha256: digest(payload) });
+}
+
+export function evaluateAdminSettingsAttestation(serialized, { repository, now = new Date().toISOString(), maxAgeMs = ADMIN_MAX_AGE_MS } = {}) {
+  if (typeof serialized !== "string" || serialized.trim() === "") return { status: "unavailable", attestation: null };
+  let value; try { value = JSON.parse(serialized); } catch { return { status: "invalid", attestation: null }; }
+  const manual = value?.manual_cross_check; const settings = value?.settings;
+  const validShape = exactKeys(value, ["api_version", "repository", "captured_at", "settings", "manual_cross_check", "canonical_sha256"])
+    && exactKeys(settings, ["default_workflow_permissions", "can_approve_pull_request_reviews"])
+    && exactKeys(manual, ["confirmed", "confirmed_at", "method", "actor"]);
+  const payload = validShape ? { api_version: value.api_version, repository: value.repository, captured_at: value.captured_at,
+    settings: value.settings, manual_cross_check: value.manual_cross_check } : null;
+  const captured = Date.parse(value?.captured_at), confirmed = Date.parse(manual?.confirmed_at), current = Date.parse(now);
+  const authentic = validShape && value.api_version === ADMIN_ATTESTATION_VERSION && value.repository === repository
+    && isRfc3339Instant(value.captured_at) && isRfc3339Instant(manual.confirmed_at) && isRfc3339Instant(now)
+    && manual.confirmed === true && manual.method === ADMIN_CAPTURE_METHOD && typeof manual.actor === "string" && manual.actor.length > 0
+    && Number.isFinite(captured) && Number.isFinite(confirmed) && confirmed >= captured && confirmed - captured <= 60 * 60 * 1000
+    && value.canonical_sha256 === digest(payload);
+  if (!authentic) return { status: "invalid", attestation: null };
+  if (captured > current || current - captured > maxAgeMs) return { status: "stale", attestation: structuredClone(value) };
+  const policyReady = settings.default_workflow_permissions === "read" && settings.can_approve_pull_request_reviews === false;
+  return { status: policyReady ? "current" : "weakened", attestation: structuredClone(value) };
 }
