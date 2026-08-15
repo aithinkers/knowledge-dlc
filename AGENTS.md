@@ -138,6 +138,24 @@ to SHA-256
 `683eedf931a101b61316a73518df8b296fa71c225302a1b78632ed7eb49eeb52`
 solely to install dependencies from the trusted base `package-lock.json` with
 `npm ci --ignore-scripts --prefix trusted` before the trusted collector runs.
+The authorized pre-contract base is
+`264daf94f05cb9c853d83a04fafb9de5f699521b`, with these exact trusted
+dependency inputs:
+
+- `package-lock.json` SHA-256
+  `39c5ddf336cf0a0b454068fcbf7e9befa1a584184469b08b553681d5d0091938`;
+- `package.json` SHA-256
+  `8c86aeb56238423df987e820734cde29c5bf3de68fcc38002c9c00ff69932df3`;
+- `.npmrc` SHA-256
+  `c990f3fbba71e8c50b487ddc948fcc226d946783c8220992943b00b34ac41aaf`.
+
+After this AGENTS-only contract merges, PR #49 may target only the descendant
+base produced by merging this contract's independently approved exact head into
+that pre-contract base. The base-tree delta from the pre-contract base must be
+limited to this AGENTS.md contract, and all three dependency-input hashes above
+must remain exact. Any intervening package, lockfile, npm configuration,
+dependency-closure, workflow, or other base drift invalidates this authority;
+PR #49 must then stop and obtain a new exact contract rather than rebase.
 The token-bearing job must retain exactly one base-SHA checkout; dependency
 installation must receive neither `GH_TOKEN` nor the owner attestation, and no
 candidate package, lockfile, lifecycle script, checkout, or executable may be
