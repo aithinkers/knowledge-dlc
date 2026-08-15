@@ -28,6 +28,19 @@ nondisclosure.
 The statement preserves package version `0.0.0-private`, `private: true`, and a
 machine-readable `not-ready` release status.
 
+## Known conformance gaps disclosed before release
+
+- Specification §26 lists ~24 deterministic sensor categories. The sensor
+  runtime (determinism checks, severity, auditable waivers) and the seven
+  governance-gate sensors (§27.4–§27.7) are implemented and tested; the
+  remaining §26 sensor definitions (OKF conformance, link/alias/orphan/index
+  checks, claim-sidecar consistency, lock-file drift, and related lint
+  sensors) are not yet implemented. Tracked as FEAT-015 (issue #75); the
+  FEAT-008 traceability entry is scoped accordingly. `kdlc lint` currently
+  validates the project manifest only.
+- Codex and Kiro harness surfaces run from this repository checkout; a
+  self-contained packaged runner is future work (see issue #73 notes).
+
 ## Repository settings requiring final evidence or action
 
 These items require repository-owner evidence or administration before release.

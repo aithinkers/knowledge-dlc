@@ -317,10 +317,7 @@
       "title": "Built-in governance sensors and policy enforcement",
       "issue": 23,
       "specification_sections": [
-        "26",
-        "27.1",
-        "27.2",
-        "27.3",
+        "26 (sensor runtime and governance-gate sensors only; remaining definitions tracked by FEAT-015)",
         "27.4",
         "27.5",
         "27.6",
@@ -525,6 +522,41 @@
         ],
         "tests": [
           "tests/governance/getting-started.test.mjs"
+        ]
+      }
+    },
+    {
+      "id": "FEAT-015",
+      "title": "Implement the remaining section 26 core sensor definitions",
+      "issue": 75,
+      "specification_sections": [
+        "26"
+      ],
+      "status": "planned",
+      "evidence": {
+        "implementation": [
+          "packages/lifecycle/src/sensors.mjs"
+        ],
+        "tests": [
+          "tests/governance/lifecycle.test.mjs"
+        ]
+      }
+    },
+    {
+      "id": "REQ-TRACE-001",
+      "title": "Correct FEAT-008 section 26 scope and disclose the sensor-definition gap",
+      "issue": 74,
+      "specification_sections": [
+        "26"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "docs/release-readiness.md",
+          "docs/traceability.json"
+        ],
+        "tests": [
+          "tests/governance/governance.test.mjs"
         ]
       }
     },
