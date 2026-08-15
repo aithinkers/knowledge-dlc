@@ -234,7 +234,7 @@
       "title": "Bind administration-only release settings through owner attestation",
       "issue": 44,
       "specification_sections": ["35", "36"],
-      "status": "implemented",
+      "status": "in-progress",
       "evidence": {
         "implementation": [
           ".github/workflows/release-matrix.yml",
