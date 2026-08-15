@@ -31,7 +31,7 @@ function noDisclosure() {
 function livingReference(value) { return typeof value === "string" ? value.replace(/@[^/]+\//, "/") : null; }
 function sourceRecord(source) {
   if (typeof source?.id !== "string" || typeof source?.resource !== "string" || (source.source_hash !== undefined && !/^sha256:[0-9a-f]{64}$/.test(source.source_hash))) return null;
-  return { id: source.id, resource: source.resource, ...(source.source_hash ? { source_hash: source.source_hash } : {}) };
+  return { id: source.id, resource: source.resource, ...(source.source_hash ? { source_hash: source.source_hash } : {}), ...(source.access ? { access: source.access } : {}), ...(source.rights ? { rights: source.rights } : {}) };
 }
 function fileIdentity(metadata) { return { dev: metadata.dev, ino: metadata.ino, size: metadata.size, mtimeMs: metadata.mtimeMs }; }
 function deepFreeze(value, seen = new WeakSet()) {
@@ -209,12 +209,13 @@ export class FederatedRetriever {
       for (const item of selected) {
         if (item.isStale && staleBehavior === "fail") return noDisclosure();
         const qualified = `kb://${item.mount.id}@${item.mount.resolved_ref}/${item.concept.id}`;
-        const citation = { concept: qualified, knowledge_base_id: item.mount.id, revision: item.mount.resolved_ref, tree_hash: item.mount.tree_hash };
+        const governance = { ...(item.concept.frontmatter.access ? { access: item.concept.frontmatter.access } : {}), ...(item.concept.frontmatter.rights ? { rights: item.concept.frontmatter.rights } : {}) };
+        const citation = { concept: qualified, knowledge_base_id: item.mount.id, revision: item.mount.resolved_ref, tree_hash: item.mount.tree_hash, ...governance };
         citations.push(citation);
         const sourceCitations = includeSources || mode === "audit" ? item.sourceCitations : [];
         results.push({ id: `kb://${item.mount.id}/${item.concept.id}`, title: typeof item.concept.frontmatter.title === "string" && item.concept.frontmatter.title ? item.concept.frontmatter.title : item.concept.id.split("/").at(-1),
           description: typeof item.concept.frontmatter.description === "string" ? item.concept.frontmatter.description : null, score: Number(item.normalized.toFixed(6)), trust: item.tier,
-          freshness: item.isStale ? "stale" : "current", citation, source_citations: sourceCitations,
+          freshness: item.isStale ? "stale" : "current", citation, source_citations: sourceCitations, ...governance,
           applicability: item.concept.frontmatter.applicability ?? null });
         if (item.isStale) warnings.push({ code: "KDLC_STALE", subject: `kb://${item.mount.id}/${item.concept.id}` });
         for (const relationship of list(item.concept.frontmatter.relationships)) {

@@ -1,7 +1,7 @@
 import { AGENT_WORKFLOW_SCHEMA_PATHS, CapabilityRuntime, RecordedModelRuntime, RuntimeTrustAuthority, resolveAuthenticatedReviewSession, resolveTrustedReviewContext } from "../agents/index.mjs";
 import { createContractValidator } from "../contracts/index.mjs";
 import { artifactHash, canonicalJson, isRfc3339Instant } from "../core/index.mjs";
-import { assessPublication, createReviewPacket, createReviewReceipt, GovernanceError, reconcileDirectEdit } from "../governance/index.mjs";
+import { assessPublication, BUILT_IN_GOVERNANCE_SENSORS, createReviewPacket, createReviewReceipt, GovernanceControlEngine, GovernanceError, reconcileDirectEdit } from "../governance/index.mjs";
 import { NodeFileStore } from "../lifecycle/src/store.mjs";
 
 const PUT = Symbol("put");
@@ -15,6 +15,7 @@ function strictInstant(clock, field) {
   if (!isRfc3339Instant(value)) throw new GovernanceError("KDLC_WORKFLOW_CLOCK_INVALID", `Workflow ${field} requires a strict RFC3339 known instant`, { field });
   return value;
 }
+const builtInControlIds = new Set(BUILT_IN_GOVERNANCE_SENSORS.map(({ id }) => id));
 
 export class MemoryArtifactStore {
   constructor() { memoryStoreStates.set(this, new Map()); }
@@ -150,8 +151,9 @@ export class GovernedAgentWorkflows {
   #validator;
   #clock;
   #trustAuthority;
+  #governanceControls;
 
-  constructor({ store, capabilities, models, session, reviewRequirements, reviewContextSession, validator, trustAuthority, clock = { now: () => new Date().toISOString() } }) {
+  constructor({ store, capabilities, models, session, reviewRequirements, reviewContextSession, validator, trustAuthority, governanceControls, clock = { now: () => new Date().toISOString() } }) {
     this.#store = store;
     this.#capabilities = capabilities;
     this.#models = models;
@@ -160,10 +162,11 @@ export class GovernedAgentWorkflows {
     this.#reviewContextSession = reviewContextSession;
     this.#validator = validator;
     this.#trustAuthority = trustAuthority;
+    this.#governanceControls = governanceControls;
     this.#clock = clock;
   }
 
-  static async create({ store = new MemoryArtifactStore(), capabilities, models, session, reviewRequirements = { sensor_ids: ["source-anchor-valid"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }, reviewContextSession, validator, trustAuthority, clock } = {}) {
+  static async create({ store = new MemoryArtifactStore(), capabilities, models, session, reviewRequirements = { sensor_ids: ["source-anchor-valid"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }, reviewContextSession, validator, trustAuthority, governanceControls, clock } = {}) {
     const contracts = validator ?? await createContractValidator(undefined, AGENT_WORKFLOW_SCHEMA_PATHS);
     return new GovernedAgentWorkflows({
       store,
@@ -174,6 +177,7 @@ export class GovernedAgentWorkflows {
       reviewContextSession,
       validator: contracts,
       trustAuthority: resolveTrustAuthority(store, trustAuthority),
+      governanceControls,
       clock
     });
   }
@@ -198,8 +202,39 @@ export class GovernedAgentWorkflows {
   #validateReviewContext(context, normalizedEvidence) {
     const validation = this.#validator.validate("reviewContext", context);
     if (!validation.valid) throw new GovernanceError("KDLC_REVIEW_CONTEXT_INVALID", "Trusted review context failed schema validation", { errors: validation.errors });
-    if (context.sensors.some((sensor) => sensor.producer !== "kdlc-sensor-runtime/0.2.0" || !/^sha256:[a-f0-9]{64}$/.test(sensor.execution_hash ?? ""))) throw new GovernanceError("KDLC_SENSOR_UNTRUSTED", "Review context contains a sensor result without trusted execution provenance");
+    if (context.sensors.some((sensor) => !["kdlc-sensor-runtime/0.2.0", "kdlc-governance-runtime/1"].includes(sensor.producer) || !/^sha256:[a-f0-9]{64}$/.test(sensor.execution_hash ?? ""))) throw new GovernanceError("KDLC_SENSOR_UNTRUSTED", "Review context contains a sensor result without trusted execution provenance");
     if (context.evidence.some((item) => item.source_id !== normalizedEvidence.source_id || item.source_hash !== normalizedEvidence.source_hash || !normalizedEvidence.units.some((unit) => canonicalJson(unit.locator) === canonicalJson(item.locator) && unit.text === item.excerpt))) throw new GovernanceError("KDLC_EVIDENCE_UNTRUSTED", "Review evidence is not an exact persisted normalized unit");
+  }
+
+  #usesGovernedControls() { return this.#reviewRequirements.sensor_ids.some((id) => builtInControlIds.has(id)); }
+
+  #governanceInput({ proposal, claims, context, subject, concept }) {
+    const evidence = context.evidence;
+    const bySource = new Map(evidence.map((item) => [item.source_id, item]));
+    return {
+      subject,
+      content: concept,
+      materials: evidence.map((item) => ({ id: item.source_id, source_hash: item.source_hash, access: item.access, rights: item.rights, ...(item.source_class ? { source_class: item.source_class } : {}) })),
+      derived_access: concept?.frontmatter?.access,
+      target: { scope: concept?.frontmatter?.status === "stable" ? "public" : "workspace", commercial: false },
+      transformation: "derivative",
+      claims: claims.map((claim) => ({ id: claim.id, consequential: claim.consequential === true, conflict: claim.status === "conflict", sources: [{
+        source_id: claim.source_id, source_hash: claim.source_hash, source_class: bySource.get(claim.source_id)?.source_class ?? "unknown"
+      }] })),
+      proposal_id: proposal?.id
+    };
+  }
+
+  async #evaluateGovernedReview({ proposal, claims, context, waivers = [] }) {
+    if (!this.#usesGovernedControls()) return context;
+    if (!(this.#governanceControls instanceof GovernanceControlEngine)) throw new GovernanceError("KDLC_GOVERNANCE_CONTROLS_REQUIRED", "The applicable profile requires trusted built-in governance controls");
+    const report = await this.#governanceControls.evaluate("review", this.#governanceInput({ proposal, claims, context, subject: proposal.target.subject, concept: proposal.concept.after }), { waivers });
+    this.#governanceControls.assertAllowed(report);
+    const requested = new Set(this.#reviewRequirements.sensor_ids.filter((id) => builtInControlIds.has(id)));
+    const governed = report.results.filter(({ id }) => requested.has(id)).map((result) => structuredClone(result));
+    if (governed.length !== requested.size) throw new GovernanceError("KDLC_REVIEW_GOVERNANCE_INCOMPLETE", "The trusted control report does not cover every required built-in sensor");
+    const sensors = [...context.sensors.filter(({ id }) => !builtInControlIds.has(id)), ...governed];
+    return { ...context, sensors };
   }
 
   async #loadBoundReviewInputs(workflowId, proposal) {
@@ -242,11 +277,12 @@ export class GovernedAgentWorkflows {
     return Object.freeze({ claims: structuredClone(output.claims), proposals: structuredClone(proposals), model: structuredClone(output.model) });
   }
 
-  async assembleReview({ workflowId, proposalId }) {
+  async assembleReview({ workflowId, proposalId, governanceWaivers = [] }) {
     const proposalPath = `workflow/runs/${workflowId}/proposals/${proposalId}.json`;
     const proposal = await this.#get("conductor", proposalPath);
     const { claims, context } = await this.#loadBoundReviewInputs(workflowId, proposal);
-    const result = createReviewPacket({ proposal, claims, ...context, requirements: this.#reviewRequirements, validator: this.#validator });
+    const governedContext = await this.#evaluateGovernedReview({ proposal, claims, context, waivers: governanceWaivers });
+    const result = createReviewPacket({ proposal, claims, ...governedContext, requirements: this.#reviewRequirements, validator: this.#validator });
     const packetPath = `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`;
     const stored = await this.#store[STORE_REVIEW]({ path: packetPath, value: result.packet, receiptPrefix: `workflow/runs/${workflowId}/receipts/`, proposalId });
     if (!stored) throw new GovernanceError("KDLC_REVIEW_PACKET_IMMUTABLE", `Proposal ${proposalId} already has a decision`);
@@ -293,11 +329,12 @@ export class GovernedAgentWorkflows {
     return Object.freeze({ authorization: structuredClone(authorization), decision: structuredClone(freshnessDecision), path });
   }
 
-  async preparePublication({ workflowId, proposalId, receiptId, current }) {
+  async preparePublication({ workflowId, proposalId, receiptId, current, governanceWaivers = [] }) {
     const proposal = await this.#get("conductor", `workflow/runs/${workflowId}/proposals/${proposalId}.json`);
     const packet = await this.#get("conductor", `workflow/runs/${workflowId}/reviews/${proposalId}/packet.json`);
     const { claims, context } = await this.#loadBoundReviewInputs(workflowId, proposal);
-    const regenerated = createReviewPacket({ proposal, claims, ...context, requirements: this.#reviewRequirements, validator: this.#validator });
+    const governedContext = await this.#evaluateGovernedReview({ proposal, claims, context, waivers: governanceWaivers });
+    const regenerated = createReviewPacket({ proposal, claims, ...governedContext, requirements: this.#reviewRequirements, validator: this.#validator });
     if (regenerated.packet_hash !== artifactHash(packet)) throw new GovernanceError("KDLC_REVIEW_INPUT_DRIFT", "Persisted packet no longer exactly matches its approved inputs");
     const receipt = receiptId ? await this.#get("conductor", `workflow/runs/${workflowId}/receipts/${receiptId}.json`) : null;
     const decisionState = await this.#store.has(`workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`) ? await this.#get("conductor", `workflow/runs/${workflowId}/reviews/${proposalId}/decision.json`) : null;
@@ -309,6 +346,10 @@ export class GovernedAgentWorkflows {
       review: receipt && decisionState ? this.#trustAuthority.verifyReview({ workflowId, receipt, decision: decisionState }) : false,
       freshness: freshnessAuthorization && freshnessDecision ? this.#trustAuthority.verifyFreshness({ workflowId, authorization: freshnessAuthorization, decision: freshnessDecision }) : false
     };
+    if (this.#usesGovernedControls()) {
+      if (!(this.#governanceControls instanceof GovernanceControlEngine)) throw new GovernanceError("KDLC_GOVERNANCE_CONTROLS_REQUIRED", "The applicable profile requires trusted built-in governance controls");
+      await this.#governanceControls.authorizePublication(this.#governanceInput({ proposal, claims, context, subject: proposal.target.subject, concept: current?.concept }), { waivers: governanceWaivers });
+    }
     const preparedAt = strictInstant(this.#clock, "prepared_at");
     const assessment = assessPublication({ proposal, packet, receipt, decisionState, freshnessAuthorization, freshnessDecision, runtimeTrust, current, validator: this.#validator, now: preparedAt });
     if (!assessment.allowed) throw new GovernanceError("KDLC_PUBLICATION_DENIED", "Publication policy gates failed", { failures: assessment.failures });

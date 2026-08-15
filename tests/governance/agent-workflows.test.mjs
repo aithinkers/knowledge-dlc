@@ -65,6 +65,20 @@ async function approvedHarness() {
   return { validator, store, harness, recording, output, context, review, receipt: decision.receipt, decision: decision.decision };
 }
 
+test("FEAT-008 workflow profiles requiring built-in controls fail closed without the trusted engine", async () => {
+  const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
+  const context = reviewContext();
+  const harness = await GovernedAgentWorkflows.create({
+    validator,
+    clock,
+    session: principals.establishReviewSession("reviewer-123", "trust-reviewer"),
+    reviewContextSession: trustedReviewContext("wf_ingest", context),
+    reviewRequirements: { sensor_ids: ["secret-pattern"], policy_ids: ["team-policy"], substantive_fields: [], freshness: { mode: "reviewed" } }
+  });
+  await harness.runRecorded({ task: "ingest", workflowId: "wf_ingest", recording: await fixture("ingest"), normalizedEvidence: await normalizedFixture("ingest") });
+  await assert.rejects(harness.assembleReview({ workflowId: "wf_ingest", proposalId: "pr_alpha" }), (error) => error.code === "KDLC_GOVERNANCE_CONTROLS_REQUIRED");
+});
+
 test("FEAT-004 role and stage descriptors enforce runtime path capabilities", async (t) => {
   const validator = await createContractValidator(root, AGENT_WORKFLOW_SCHEMA_PATHS);
   await assert.rejects(() => createContractValidator(root, { claim: "core/schemas/artifacts/concept-proposal.schema.json" }), /cannot replace core contract/);

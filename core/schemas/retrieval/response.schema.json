@@ -38,12 +38,14 @@
         "freshness": {"enum": ["current", "stale"]},
         "citation": {"$ref": "#/$defs/citation"},
         "source_citations": {"type": "array", "items": {"$ref": "#/$defs/sourceCitation"}},
+        "access": {"$ref": "../common.schema.json#/$defs/access"},
+        "rights": {"$ref": "../artifacts/concept-extensions.schema.json#/properties/rights"},
         "applicability": true
       }
     },
     "sourceCitation": {
       "type": "object", "additionalProperties": false, "required": ["id", "resource"],
-      "properties": {"id": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}, "resource": {"$ref": "../common.schema.json#/$defs/resource"}, "source_hash": {"$ref": "../common.schema.json#/$defs/digest"}}
+      "properties": {"id": {"$ref": "../common.schema.json#/$defs/nonEmptyString"}, "resource": {"$ref": "../common.schema.json#/$defs/resource"}, "source_hash": {"$ref": "../common.schema.json#/$defs/digest"}, "access": {"$ref": "../common.schema.json#/$defs/access"}, "rights": {"$ref": "../manifests/source-record.schema.json#/properties/rights"}}
     },
     "conflict": {
       "type": "object", "additionalProperties": false, "required": ["subject", "target", "relationship", "applicability"],
@@ -61,6 +63,8 @@
         "knowledge_base_id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
         "revision": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
         "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"}
+        ,"access": {"$ref": "../common.schema.json#/$defs/access"}
+        ,"rights": {"$ref": "../artifacts/concept-extensions.schema.json#/properties/rights"}
       }
     }
   }
