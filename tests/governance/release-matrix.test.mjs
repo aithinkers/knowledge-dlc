@@ -16,7 +16,9 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.deepEqual(new Set(releaseMatrixCells.map(({ os }) => os)), new Set(["linux", "win32", "darwin"]));
   assert.deepEqual(releaseMatrixCommandIds, ["full", "offline", "release", "statistical", "clean-rebuild", "pack", "cli", "import"]);
   const workflow = await readFile(resolve(root, ".github/workflows/release-matrix.yml"), "utf8");
+  const attributes = await readFile(resolve(root, ".gitattributes"), "utf8");
   parseYamlArtifact(workflow);
+  assert.match(attributes, /^\* text=auto eol=lf$/m);
   assert.match(workflow, /release-matrix:\r?\n    name: Release matrix/); assert.match(workflow, /npm install --global npm@11\.5\.1/); assert.match(workflow, /needs\.matrix\.result != 'success'/);
 });
 
