@@ -121,6 +121,7 @@ export class ServedPrincipalMapper {
         actor: record.actor,
         scopes: [...new Set(record.scopes)].sort(),
         issuer: record.issuer ?? null,
+        subject: record.subject ?? null,
         principal_mode: "served",
       });
     }

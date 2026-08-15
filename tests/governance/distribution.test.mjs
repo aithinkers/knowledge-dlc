@@ -464,14 +464,16 @@ test("FEAT-006 generated Claude and Codex adapter fixtures execute the governed 
   const engine = new KdlcEngine({ root, clock });
   await engine.execute("init", { project_id: "fixture.project" });
   const fixtures = [
-    resolve(repository, "distribution/claude-code/run.mjs"),
-    resolve(repository, "distribution/codex/run.mjs"),
+    { path: resolve(repository, "packages/cli/bin.mjs"), structured: false },
+    { path: resolve(repository, "distribution/claude-code/run.mjs"), structured: true },
+    { path: resolve(repository, "distribution/codex/run.mjs"), structured: true },
   ];
+  const userArguments = ["absent; $(touch SHOULD_NOT_EXIST)"];
   const envelopes = [];
   for (const fixture of fixtures) {
     const child = spawn(
       process.execPath,
-      [fixture, "status", "--output", "json"],
+      [fixture.path, "query", "--output", "json", ...(fixture.structured ? ["--host-args-json", JSON.stringify(userArguments)] : userArguments)],
       { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
     );
     let stdout = "";
@@ -483,9 +485,32 @@ test("FEAT-006 generated Claude and Codex adapter fixtures execute the governed 
     const envelope = JSON.parse(stdout);
     envelopes.push(envelope);
     assert.equal(envelope.ok, true);
-    assert.equal(envelope.operation, "status");
+    assert.equal(envelope.operation, "query");
+    assert.equal(envelope.result.status, "not_found");
   }
   assert.deepEqual(envelopes[0], envelopes[1]);
+  assert.deepEqual(envelopes[1], envelopes[2]);
+  await assert.rejects(() => readFile(resolve(root, "SHOULD_NOT_EXIST")), (error) => error.code === "ENOENT");
+  const policyPath = resolve(root, ".kdlc/principal-policy.json");
+  const policy = JSON.parse(await readFile(policyPath, "utf8"));
+  policy.principals.push({ id: "served-fixture", actor: "human:served-fixture", principal_mode: "served", issuer: "https://id.example", subject: "served-fixture", review_roles: [], scopes: ["read"], clearance: "public", compartments: [] });
+  await writeFile(policyPath, `${JSON.stringify(policy)}\n`, { mode: 0o600 });
+  const server = new McpProjectServer({ root, projectId: "fixture.project", engineFactory: createLocalProjectEngine });
+  const input = new PassThrough(), output = new PassThrough(); let stdio = "";
+  output.setEncoding("utf8"); output.on("data", (chunk) => { stdio += chunk; });
+  const serving = serveStdio(server, { input, output });
+  input.end(`${JSON.stringify({ jsonrpc: "2.0", id: 70, method: "tools/call", params: { name: "kb_search", arguments: { query: userArguments[0] } } })}\n`);
+  await serving;
+  const stdioEnvelope = JSON.parse(stdio).result.structuredContent;
+  assert.deepEqual(stdioEnvelope.result, envelopes[0].result);
+  const mapper = new ServedPrincipalMapper([{ token: "fixture-token", actor: "human:served-fixture", issuer: "https://id.example", subject: "served-fixture", scopes: ["read"] }]);
+  const http = await createStreamableHttpServer({ server, principalMapper: mapper });
+  const endpoint = `http://127.0.0.1:${http.address().port}/mcp`;
+  const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer fixture-token", "content-type": "application/json", accept: "application/json", "mcp-protocol-version": "2025-06-18" }, body: JSON.stringify({ jsonrpc: "2.0", id: 71, method: "tools/call", params: { name: "kb_search", arguments: { query: userArguments[0] } } }) });
+  const httpEnvelope = (await response.json()).result.structuredContent;
+  assert.deepEqual(httpEnvelope.result, envelopes[0].result);
+  await new Promise((resolveClose) => http.close(resolveClose));
+  await server.close();
 });
 
 test("FEAT-006 served HTTP maps principals and scopes server-side before disclosure", async (t) => {

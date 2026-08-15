@@ -1,5 +1,6 @@
 ---
 description: Run the governed K-DLC publish operation
+argument-hint: JSON string array
 ---
 
-Invoke the argument vector ["node", "distribution/claude-code/run.mjs", "publish", "--output", "json", ...hostArgumentVector] directly without a shell. Preserve every user argument as one argv element and return the exact versioned envelope. Do not infer success when `ok` is false.
+Invoke the argument vector ["node", "distribution/claude-code/run.mjs", "publish", "--output", "json", "--host-args-json", {{host.arguments_json}}] directly without a shell. The host MUST bind `{{host.arguments_json}}` to JSON.stringify(userArgumentVector) as one argv element. Return the exact versioned envelope and do not infer success when `ok` is false.
