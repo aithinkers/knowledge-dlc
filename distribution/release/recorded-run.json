@@ -1,0 +1,20 @@
+{
+  "api_version": "kdlc.dev/recorded-release-run/v1alpha1",
+  "id": "pre-release-recorded-1",
+  "corpus_hash": "sha256:bfc338d55679aaa48b78d0f8773eeca6b2e7b0bf2c1a2764bee0c17610e51454",
+  "profile_hash": "sha256:69982a5c19c58be5bc88dfb0266e0bac82bc2351297f65f23fc0e3a32d31aeae",
+  "runtime": {"node": "24.5.0", "npm": "11.5.1"},
+  "external_network_calls": 0,
+  "live_model_calls": 0,
+  "results": [
+    {"case_id": "recorded-ingest", "status": "passed", "observations": ["Recorded ingest fixtures validate and replay without a model provider."], "evidence": ["tests/governance/agent-workflows.test.mjs"]},
+    {"case_id": "governed-publication", "status": "passed", "observations": ["Approval and publication bind exact persisted review inputs and invalidate on drift."], "evidence": ["tests/governance/agent-workflows.test.mjs"]},
+    {"case_id": "adversarial-governance", "status": "passed", "observations": ["Recorded injection, falsehood, rights, and authority-spoofing cases fail closed."], "evidence": ["tests/governance/governed-controls.test.mjs"]},
+    {"case_id": "bounded-normalization", "status": "passed", "observations": ["Structural profiles remain bounded and unsafe inputs quarantine."], "evidence": ["tests/governance/normalization.test.mjs"]},
+    {"case_id": "federated-nondisclosure", "status": "passed", "observations": ["Pre-query authorization, integrity, conflict, and nondisclosure cases pass."], "evidence": ["tests/governance/federation-retrieval.test.mjs"]},
+    {"case_id": "durable-concurrency", "status": "passed", "observations": ["Cross-instance and crash boundaries preserve durable serialization."], "evidence": ["tests/governance/lifecycle-concurrency.test.mjs"]},
+    {"case_id": "transport-equivalence", "status": "passed", "observations": ["Recorded governed workflow semantics agree across shipped transports and adapters."], "evidence": ["tests/governance/distribution.test.mjs"]},
+    {"case_id": "clean-rebuild", "status": "passed", "observations": ["Clean deterministic index generation reproduces committed bytes."], "evidence": ["tests/governance/core-runtime.test.mjs"]},
+    {"case_id": "governed-revocation-erasure", "status": "passed", "observations": ["Merged FEAT-009 evidence covers exact impact, authorization, durable erasure, late-copy fencing, legal hold, crash recovery, and retrieval nondisclosure."], "evidence": ["tests/governance/revocation-erasure.test.mjs"]}
+  ]
+}

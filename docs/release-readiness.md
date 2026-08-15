@@ -11,6 +11,23 @@ metadata. Publishing, version finalization, tags, release artifacts,
 conformance claims, deterministic/statistical release reports, and work that
 depends on issues #8, #23, or #24 remain outside this tranche.
 
+## Second tranche
+
+The second tranche adds strict machine-readable pre-release conformance and
+deterministic evaluation evidence under `distribution/release/`. The structural
+record binds eight offline cases to exact committed fixture bytes and reports
+zero live model or external network calls. It is intentionally not a final statistical
+quality report: the versioned multi-trial suite and confidence intervals remain
+release-blocking.
+
+The conformance statement declares the implemented surface without erasing
+known gaps. `Core`, `Lifecycle`, `Governed`, `Federated`, and `Served` are
+implemented. The Governed declaration is bound to merged FEAT-009 tests for
+revocation impact, legal hold, durable erasure, propagation, and retrieval
+nondisclosure.
+The statement preserves package version `0.0.0-private`, `private: true`, and a
+machine-readable `not-ready` release status.
+
 ## Repository settings still required
 
 These settings require repository-owner administration after the corresponding
@@ -37,8 +54,9 @@ workflows have merged. They are not changed or claimed by this document.
 
 ## Final REL-001 blockers
 
-Issue #10 remains open until every dependency is closed through reviewed pull
-requests; conformance and evaluation evidence is accurate and published;
+Issue #10 remains open until the separate statistical evaluation report with
+repeated trials, confidence intervals, and profile thresholds passes;
+conformance and evaluation evidence is independently reviewed and published;
 version, changelog, packages, SBOM, notices, and artifacts agree; current public
 visibility and post-release verification are recorded; and an independent
 release verifier confirms the evidence.

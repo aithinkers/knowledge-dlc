@@ -1,0 +1,20 @@
+{
+  "api_version": "kdlc.dev/conformance-statement/v1alpha1",
+  "specification": {"name": "K-DLC", "version": "0.2.0"},
+  "implementation": {"name": "knowledge-dlc", "version": "0.0.0-private", "private": true},
+  "release_status": "not-ready",
+  "modules": [
+    {"name": "Core", "status": "implemented", "requirement_ids": ["FEAT-001", "FEAT-003"], "evidence": ["tests/governance/core-contracts.test.mjs", "tests/governance/core-runtime.test.mjs", "tests/governance/normalization.test.mjs"]},
+    {"name": "Lifecycle", "status": "implemented", "requirement_ids": ["FEAT-002"], "evidence": ["tests/governance/lifecycle-concurrency.test.mjs", "tests/governance/lifecycle.test.mjs"]},
+    {"name": "Governed", "status": "implemented", "requirement_ids": ["FEAT-004", "FEAT-008", "FEAT-009"], "evidence": ["tests/governance/agent-workflows.test.mjs", "tests/governance/governed-controls.test.mjs", "tests/governance/revocation-erasure.test.mjs"]},
+    {"name": "Federated", "status": "implemented", "requirement_ids": ["FEAT-005"], "evidence": ["tests/governance/federation-retrieval.test.mjs"]},
+    {"name": "Served", "status": "implemented", "requirement_ids": ["FEAT-006"], "evidence": ["tests/governance/distribution.test.mjs"]}
+  ],
+  "format_profiles": ["markdown", "text", "csv", "pdf", "docx", "xlsx", "pptx", "drawio", "gif", "vsdx"],
+  "tools": ["project_init", "project_get", "project_list_mounts", "kb_search", "kb_fetch", "kb_trace", "kb_conflicts", "kb_gaps", "source_excerpt", "job_status", "ingest_start", "proposal_create", "review_submit", "publish_request", "job_cancel"],
+  "transports": ["stdio", "streamable-http"],
+  "pending_requirements": [
+    {"id": "REL-001", "issue": 10, "reason": "Statistical evaluation, final artifact/version agreement, external protections, and independent release verification remain pending.", "release_blocking": true}
+  ],
+  "evidence": ["distribution/release/evaluation-report.json", "docs/traceability.json", "docs/release-readiness.md"]
+}

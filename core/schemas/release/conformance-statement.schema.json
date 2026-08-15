@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/release/conformance-statement-1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "specification", "implementation", "release_status", "modules", "format_profiles", "tools", "transports", "pending_requirements", "evidence"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/conformance-statement/v1alpha1"},
+    "specification": {
+      "type": "object", "additionalProperties": false, "required": ["name", "version"],
+      "properties": {"name": {"const": "K-DLC"}, "version": {"const": "0.2.0"}}
+    },
+    "implementation": {
+      "type": "object", "additionalProperties": false, "required": ["name", "version", "private"],
+      "properties": {"name": {"const": "knowledge-dlc"}, "version": {"const": "0.0.0-private"}, "private": {"const": true}}
+    },
+    "release_status": {"const": "not-ready"},
+    "modules": {
+      "type": "array", "minItems": 5, "maxItems": 5,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["name", "status", "requirement_ids", "evidence"],
+        "properties": {
+          "name": {"enum": ["Core", "Lifecycle", "Governed", "Federated", "Served"]},
+          "status": {"enum": ["implemented", "partial"]},
+          "requirement_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:FEAT|REQ-[A-Z]+)-[0-9]{3}$"}},
+          "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "format_profiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["markdown", "text", "csv", "pdf", "docx", "xlsx", "pptx", "drawio", "gif", "vsdx"]}},
+    "tools": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
+    "transports": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["stdio", "streamable-http"]}},
+    "pending_requirements": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "issue", "reason", "release_blocking"],
+        "properties": {"id": {"type": "string", "pattern": "^(?:FEAT|REL)-[0-9]{3}$"}, "issue": {"type": "integer", "minimum": 1}, "reason": {"type": "string", "minLength": 1}, "release_blocking": {"const": true}}
+      }
+    },
+    "evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  }
+}

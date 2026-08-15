@@ -186,8 +186,24 @@
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,
       "specification_sections": ["33", "35", "36"],
-      "status": "planned",
-      "evidence": {"implementation": [], "tests": []}
+      "status": "in-progress",
+      "evidence": {
+        "implementation": [
+          "core/schemas/release/conformance-statement.schema.json",
+          "core/schemas/release/evaluation-corpus.schema.json",
+          "core/schemas/release/evaluation-profile.schema.json",
+          "core/schemas/release/recorded-run.schema.json",
+          "core/schemas/release/evaluation-report.schema.json",
+          "distribution/release/conformance-statement.json",
+          "distribution/release/evaluation-corpus.json",
+          "distribution/release/evaluation-profile.json",
+          "distribution/release/recorded-run.json",
+          "distribution/release/evaluation-report.json",
+          "scripts/run-release-evaluation.mjs",
+          "scripts/verify-release-evidence.mjs"
+        ],
+        "tests": ["tests/governance/release-evidence.test.mjs"]
+      }
     }
   ]
 }

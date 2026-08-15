@@ -1,0 +1,22 @@
+{
+  "api_version": "kdlc.dev/release-evaluation-profile/v1alpha1",
+  "id": "kdlc-mvp-pre-release",
+  "version": 1,
+  "corpus": {
+    "id": "kdlc-mvp-recorded",
+    "version": 1,
+    "sha256": "sha256:bfc338d55679aaa48b78d0f8773eeca6b2e7b0bf2c1a2764bee0c17610e51454"
+  },
+  "mode": "recorded-only",
+  "structural_thresholds": {
+    "minimum_pass_rate": 1,
+    "security_failures_allowed": 0,
+    "live_model_calls_allowed": 0
+  },
+  "statistical_suite": {
+    "status": "pending",
+    "required_trials": 30,
+    "confidence": 0.95,
+    "reason": "A reviewed multi-trial model-quality corpus and confidence-interval report remain required before release."
+  }
+}

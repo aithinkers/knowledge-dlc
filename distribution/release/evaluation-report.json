@@ -1,0 +1,15 @@
+{
+  "api_version": "kdlc.dev/release-evaluation-report/v1alpha1",
+  "release_status": "not-ready",
+  "run_hash": "sha256:b46a4cb769f5fc537c3968b114e310a6b07b7040ffffb30896dfb823d9767ab1",
+  "summary": {"total": 9, "passed": 9, "failed": 0, "security_failures": 0, "structural_gate": "passed"},
+  "statistical_suite": {"status": "pending", "release_blocking": true},
+  "pending_release_evidence": [
+    "statistical-quality-report",
+    "final-version-changelog-artifact-agreement",
+    "release-tag-and-package",
+    "current-public-state-verification",
+    "external-protection-settings",
+    "independent-release-verification"
+  ]
+}
