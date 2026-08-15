@@ -143,6 +143,17 @@
       }
     },
     {
+      "id": "FEAT-008",
+      "title": "Built-in governance sensors and policy enforcement",
+      "issue": 23,
+      "specification_sections": ["26", "27.1", "27.2", "27.3", "27.4", "27.5", "27.6", "27.7", "35.10", "35.11"],
+      "status": "verified",
+      "evidence": {
+        "implementation": ["packages/governance/src/controls.mjs", "packages/workflows/index.mjs", "core/schemas/governance/sensor-descriptor.schema.json", "core/schemas/governance/control-report.schema.json", "core/schemas/artifacts/claim.schema.json", "core/schemas/retrieval/response.schema.json", "packages/retrieval/src/retriever.mjs"],
+        "tests": ["tests/governance/governed-controls.test.mjs", "tests/governance/agent-workflows.test.mjs", "tests/fixtures/governance/adversarial.json"]
+      }
+    },
+    {
       "id": "REL-001",
       "title": "Prepare reviewed private-to-public MVP release",
       "issue": 10,

@@ -1,6 +1,8 @@
 import { artifactHash, BASE_REVIEW_FIELDS, canonicalJson, isGregorianDate, isRfc3339Instant, reviewHash, utcDate } from "../core/index.mjs";
 import { resolveAuthenticatedReviewSession } from "../agents/index.mjs";
 
+export * from "./src/controls.mjs";
+
 export class GovernanceError extends Error {
   constructor(code, message, details = {}) {
     super(message);

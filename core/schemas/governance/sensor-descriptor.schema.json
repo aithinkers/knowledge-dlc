@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/v1alpha1/governance/sensor-descriptor.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "id", "version", "severity", "blocking", "deterministic", "gates"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/governance-sensor/v1alpha1"},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
+    "version": {"type": "integer", "minimum": 1},
+    "severity": {"enum": ["info", "warning", "error"]},
+    "blocking": {"const": true},
+    "deterministic": {"const": true},
+    "gates": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"enum": ["ingest", "review", "retrieval", "model-route", "publication", "erasure"]}
+    }
+  }
+}

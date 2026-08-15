@@ -4,7 +4,7 @@
   "title": "K-DLC workflow claim",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "text", "source_id", "source_hash", "extraction", "status"],
+  "required": ["id", "text", "source_id", "source_hash", "extraction", "access", "rights", "status"],
   "properties": {
     "id": {"type": "string", "pattern": "^clm_[a-z0-9]+$"},
     "text": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
@@ -24,6 +24,8 @@
     },
     "extraction": {"enum": ["explicit", "inferred", "computed"]},
     "applicability": {"type": "object", "minProperties": 1, "additionalProperties": true},
+    "access": {"$ref": "../common.schema.json#/$defs/access"},
+    "rights": {"$ref": "../manifests/source-record.schema.json#/properties/rights"},
     "status": {"enum": ["candidate", "accepted", "rejected", "merged", "superseded", "conflict"]}
   }
 }

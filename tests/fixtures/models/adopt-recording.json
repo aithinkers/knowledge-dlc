@@ -5,7 +5,7 @@
   "model": {"provider": "recorded", "model": "fixture-model-1", "prompt": "adopt-existing-v1", "recorded_at": "2026-08-14T12:05:00Z"},
   "input_hashes": {"normalized_evidence": "sha256:ed9e33eba4571e3c11fcfeb7ecb7cb1990b24c8df2228da923ace9f4150af738"},
   "claims": [
-    {"id":"clm_beta","text":"The service is maintained by the platform team.","source_id":"src_beta","source_hash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","locator":{"heading":"Ownership"},"extraction":"explicit","status":"accepted"}
+    {"id":"clm_beta","text":"The service is maintained by the platform team.","source_id":"src_beta","source_hash":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","locator":{"heading":"Ownership"},"extraction":"explicit","access":{"classification":"public"},"rights":{"license":"LicenseRef-Internal","redistribution":"prohibited","derivative_use":"allowed","commercial_use":"prohibited"},"status":"accepted"}
   ],
   "proposals": [
     {

@@ -25,6 +25,7 @@ import {
 import { FederationResolver } from "../federation/index.mjs";
 import { createExtensionValidator, previewMigration } from "../extensions/index.mjs";
 import { PrincipalAuthority, ReviewContextAuthority, RuntimeTrustAuthority } from "../agents/index.mjs";
+import { GovernanceControlAuthority, GovernanceControlEngine } from "../governance/index.mjs";
 import { NodeFileStore } from "../lifecycle/src/index.mjs";
 import { normalize } from "../normalizers/index.mjs";
 import { FederatedRetriever } from "../retrieval/index.mjs";
@@ -830,7 +831,7 @@ export function createLocalProjectEngine(options = {}) {
       project,
     );
   };
-  const prepareRetriever = async () => {
+  const prepareRetriever = async (query, queryModes) => {
     const { mounts } = await resolveMounts();
     const order = { public: 0, internal: 1, confidential: 2, restricted: 3 };
     const allowed = (access) =>
@@ -844,30 +845,44 @@ export function createLocalProjectEngine(options = {}) {
       authorizeConcept: async ({ concept }) => allowed(concept.access),
       authorizeSource: async ({ source }) => allowed(source.access),
     };
+    const clock = { now: () => new Date().toISOString() };
+    const auditStore = new NodeFileStore(root);
+    let auditTail = Promise.resolve();
+    const audit = { append: (event) => {
+      const write = auditTail.then(() => auditStore.appendExclusive(".kdlc/audit/governance-retrieval.jsonl", `${canonicalJson(event)}\n`));
+      auditTail = write.catch(() => {});
+      return write;
+    } };
+    const governancePolicy = {
+      api_version: "kdlc.dev/governance-policy/v1alpha1", id: "kdlc-local-retrieval", version: 1,
+      minimum_independent_sources: 1, required_erasure_surfaces: [], waiver_authorities: {},
+      declassification_authorities: {}, erasure_policy_refs: {}, external_models: {}
+    };
+    const authority = new GovernanceControlAuthority({ authenticate: async () => null, clock, audit });
+    const governanceControls = await GovernanceControlEngine.create({ policy: governancePolicy, clock, audit, authority });
     const retriever = new FederatedRetriever({
       mounts,
       policy: pdp,
+      governanceControls,
       minimumDurationMs: 25,
       authorizationTtlMs: 300_000,
     });
-    const authorization = await retriever.prepareAuthorization({ principal });
-    return { retriever, authorization, expires_at: Date.now() + 300_000 };
+    const authorization = await retriever.prepareAuthorization({ principal, query, queryModes });
+    return { retriever, authorization };
   };
-  const startRetriever = () => prepareRetriever().catch((error) => ({ error, expires_at: 0 }));
-  let retrievalSnapshot = policy ? startRetriever() : null;
-  const authorizedRetriever = async () => {
-    const prepared = await retrievalSnapshot;
-    if (prepared?.error) throw prepared.error;
-    if (!prepared || Date.now() >= prepared.expires_at) throw missing("Retrieval authorization requires an explicit refresh");
-    return prepared;
+  const authorizedRetriever = async (query, queryModes) => {
+    if (!policy) throw missing("Retrieval authorization requires an authenticated principal policy");
+    return prepareRetriever(query, queryModes);
   };
   const search = async (input) => {
-    const { retriever, authorization } = await authorizedRetriever();
+    const query = input.query ?? input.question;
+    const mode = input.mode ?? "wiki-only";
+    const { retriever, authorization } = await authorizedRetriever(query, [mode]);
     return retriever.search({
       authorization,
       principal,
-      query: input.query ?? input.question,
-      mode: input.mode ?? "wiki-only",
+      query,
+      mode,
       minimumTrust: policy.minimum_trust,
       staleBehavior: policy.stale_behavior,
       includeSources: true,
@@ -875,7 +890,7 @@ export function createLocalProjectEngine(options = {}) {
   };
   const fetchConcept = async ({ uri }) => {
     if (!/^kb:\/\/[^/]+\/.+/.test(uri ?? "")) throw inputError("A canonical kb URI is required");
-    const { retriever, authorization } = await authorizedRetriever();
+    const { retriever, authorization } = await authorizedRetriever(uri, ["audit"]);
     const result = await retriever.fetch({ authorization, principal, uri, mode: "audit" });
     if (result.status !== "ok") throw missing("Requested concept is unavailable");
     return result;
@@ -1068,8 +1083,6 @@ export function createLocalProjectEngine(options = {}) {
         },
         refresh: async () => {
           const resolved = await resolveMounts();
-          retrievalSnapshot = startRetriever();
-          await retrievalSnapshot;
           return {
             lock: resolved.lock,
             mounts: resolved.mounts.map(({ alias, id, resolved_ref }) => ({
@@ -1087,10 +1100,5 @@ export function createLocalProjectEngine(options = {}) {
     principal,
     handlers: { ...handlers, ...(options.handlers ?? {}) },
   });
-  const closeEngine = engine.close.bind(engine);
-  engine.close = async () => {
-    if (retrievalSnapshot) await retrievalSnapshot;
-    await closeEngine();
-  };
   return engine;
 }
