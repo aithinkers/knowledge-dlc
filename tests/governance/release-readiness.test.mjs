@@ -66,7 +66,8 @@ test("REL-001 npm updates, installed licenses, dependency graph, and exact packa
   assert.deepEqual(exactPackageManifestFailures(packageFiles.files.filter((path) => path !== "package.json"), packageFiles.files), ["missing emitted package file: package.json"]);
   assert.equal(normalizeNpmPackPath("distribution\\release\\evaluation-report.json"), "distribution/release/evaluation-report.json");
   assert.deepEqual(npmCommandInvocation({ platform: "win32", environment: { npm_execpath: "C:\\hostedtoolcache\\node\\node_modules\\npm\\bin\\npm-cli.js" }, node: "C:\\node.exe" }), { command: "C:\\node.exe", prefix: ["C:\\hostedtoolcache\\node\\node_modules\\npm\\bin\\npm-cli.js"] });
-  assert.deepEqual(npmCommandInvocation({ platform: "win32", environment: {}, node: "C:\\hostedtoolcache\\node\\node.exe" }), { command: "C:\\hostedtoolcache\\node\\node.exe", prefix: ["C:\\hostedtoolcache\\node\\node_modules\\npm\\bin\\npm-cli.js"] });
+  assert.deepEqual(npmCommandInvocation({ platform: "win32", environment: { KDLC_NPM_CLI: "C:\\npm\\prefix\\node_modules\\npm\\bin\\npm-cli.js" }, node: "C:\\hostedtoolcache\\node\\node.exe" }), { command: "C:\\hostedtoolcache\\node\\node.exe", prefix: ["C:\\npm\\prefix\\node_modules\\npm\\bin\\npm-cli.js"] });
+  assert.throws(() => npmCommandInvocation({ platform: "win32", environment: {}, node: "C:\\hostedtoolcache\\node\\node.exe" }), /trusted Windows npm CLI/);
   assert.throws(() => npmCommandInvocation({ platform: "win32", environment: { npm_execpath: "npm.cmd" } }), /trusted Windows npm CLI/);
   assert.deepEqual(installedMetadataFailures({ identity: { name: "example" }, entry: { version: "1.0.0" }, metadata: { name: "example", version: "1.0.1", license: "GPL-3.0" }, allowedLicenses: policy.allowed_licenses }), [
     "installed identity differs from lock: example@1.0.0", "installed license is not allowlisted: example@1.0.0 (GPL-3.0)"

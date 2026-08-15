@@ -51,7 +51,7 @@ export function normalizeNpmPackPath(path) {
 
 export function npmCommandInvocation({ platform = process.platform, environment = process.env, node = process.execPath } = {}) {
   if (platform !== "win32") return { command: "npm", prefix: [] };
-  const cli = environment.npm_execpath ?? win32.resolve(win32.dirname(node), "node_modules/npm/bin/npm-cli.js");
+  const cli = environment.KDLC_NPM_CLI ?? environment.npm_execpath;
   if (typeof cli !== "string" || !win32.isAbsolute(cli) || !/[\\/]npm-cli\.js$/iu.test(cli)) throw new Error("trusted Windows npm CLI path is unavailable");
   return { command: node, prefix: [cli] };
 }
