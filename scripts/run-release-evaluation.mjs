@@ -16,6 +16,7 @@ const root = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDAT
 const temporaryReadRoot = process.platform === "darwin" ? "/var" : tmpdir();
 const temporaryReadArguments = [...new Set([temporaryReadRoot, realpathSync(tmpdir())])].map((path) => `--allow-fs-read=${path}`);
 const temporaryWriteArguments = [...new Set([tmpdir(), realpathSync(tmpdir())])].map((path) => `--allow-fs-write=${path}`);
+const testIsolationArgument = Number(process.versions.node.split(".")[0]) >= 24 ? "--test-isolation=none" : "--experimental-test-isolation=none";
 const failures = await validateReleaseEvidence(root);
 if (failures.length) throw new Error(`release evidence failed validation: ${failures.join("; ")}`);
 const run = JSON.parse(await readFile(resolve(root, "distribution/release/recorded-run.json"), "utf8"));
@@ -30,7 +31,7 @@ for (const recorded of run.results) {
   const boundaryReport = resolve(boundaryRoot, "observations.json");
   try {
     const pattern = `^(?:${releaseCase.executable_evidence.test_ids.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`;
-    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", resolve(root, "scripts/release-offline-guard.mjs"), "--test", "--test-isolation=none", "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
+    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", resolve(root, "scripts/release-offline-guard.mjs"), "--test", testIsolationArgument, "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
       cwd: root,
       env: scrubbedReleaseEnvironment(boundaryReport, { root, allowNormalizer }),
       maxBuffer: 32 * 1024 * 1024,

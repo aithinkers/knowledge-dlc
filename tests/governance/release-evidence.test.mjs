@@ -196,7 +196,7 @@ test("REL-001 emitted package smoke includes exact release contracts and evidenc
   const destination = await mkdtemp(resolve(tmpdir(), "kdlc-release-package-"));
   context.after(() => rm(destination, { recursive: true, force: true }));
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  const { stdout } = await execute(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await execute(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: root, maxBuffer: 16 * 1024 * 1024, ...(process.platform === "win32" ? { shell: true } : {}) });
   const packed = JSON.parse(stdout);
   assert.equal(packed.length, 1);
   const paths = new Set(packed[0].files.map(({ path }) => path));

@@ -82,7 +82,7 @@ test("FEAT-002 jobs reuse unchanged idempotency keys and cancel cooperatively", 
 
 test("FEAT-002 lease locks reject contenders and require audited stale recovery", async (context) => {
   const f = await fixture(); context.after(f.cleanup); const locks = new LeaseLockManager(f);
-  await locks.acquire("kb:concept", { owner: "wf:a", process: "100", leaseMs: 1000 });
+  await locks.acquire("kb:concept", { owner: "wf:a", process: "2147483647", leaseMs: 1000 });
   await assert.rejects(locks.acquire("kb:concept", { owner: "wf:b", process: "101", leaseMs: 1000 }), (error) => error.code === "KDLC_HASH_CONFLICT");
   await assert.rejects(locks.breakStale("kb:concept", { actor: "admin", reason: "test", workflowId: "wf" }), (error) => error.code === "KDLC_HASH_CONFLICT");
   f.clock.advance(1001); await locks.breakStale("kb:concept", { actor: "admin", reason: "expired process", workflowId: "wf" });

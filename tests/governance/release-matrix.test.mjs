@@ -17,7 +17,7 @@ test("REL-001 release matrix declares exact six platform/runtime cells and stabl
   assert.deepEqual(releaseMatrixCommandIds, ["full", "offline", "release", "statistical", "clean-rebuild", "pack", "cli", "import"]);
   const workflow = await readFile(resolve(root, ".github/workflows/release-matrix.yml"), "utf8");
   parseYamlArtifact(workflow);
-  assert.match(workflow, /release-matrix:\n    name: Release matrix/); assert.match(workflow, /npm install --global npm@11\.5\.1/); assert.match(workflow, /needs\.matrix\.result != 'success'/);
+  assert.match(workflow, /release-matrix:\r?\n    name: Release matrix/); assert.match(workflow, /npm install --global npm@11\.5\.1/); assert.match(workflow, /needs\.matrix\.result != 'success'/);
 });
 
 test("REL-001 release matrix aggregator rejects missing or substituted cells", async (context) => {

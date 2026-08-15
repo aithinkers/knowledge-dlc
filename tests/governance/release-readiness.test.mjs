@@ -111,9 +111,15 @@ test("REL-001 package evidence reads are descriptor-pinned, no-follow, ancestry-
   await rm(resolve(directory, "package"), { recursive: true, force: true });
   await rename(resolve(directory, "package.old"), resolve(directory, "package"));
 
-  const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
-  const before = (await readdir(descriptorDirectory)).length;
-  for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
-  const after = (await readdir(descriptorDirectory)).length;
-  assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
+  if (process.platform === "win32") {
+    for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
+    await rename(resolve(directory, "package/metadata.json"), resolve(directory, "package/metadata.closed"));
+    await rename(resolve(directory, "package/metadata.closed"), resolve(directory, "package/metadata.json"));
+  } else {
+    const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd";
+    const before = (await readdir(descriptorDirectory)).length;
+    for (let attempt = 0; attempt < 20; attempt += 1) await assert.rejects(readTrustedFile(directory, "package/metadata.json", { afterOpen: async () => { throw new Error("controlled failure"); } }), /controlled failure/);
+    const after = (await readdir(descriptorDirectory)).length;
+    assert.ok(after <= before + 1, `file descriptors leaked: before=${before}, after=${after}`);
+  }
 });

@@ -25,13 +25,13 @@ async function parentIdentity(root, target) {
 
 export async function readTrustedFile(root, relativePath, { afterOpen } = {}) {
   if (typeof relativePath !== "string" || !relativePath || isAbsolute(relativePath) || relativePath.split(/[\\/]/u).some((part) => !part || part === "." || part === "..")) throw new Error("trusted file path is invalid");
-  if (!Number.isInteger(constants.O_NOFOLLOW)) throw new Error("this platform cannot enforce no-follow package reads");
+  const noFollow = Number.isInteger(constants.O_NOFOLLOW) ? constants.O_NOFOLLOW : 0;
   const canonicalRoot = await realpath(root); const target = resolve(canonicalRoot, relativePath);
   if (!inside(canonicalRoot, target)) throw new Error("trusted file path escapes its root");
   const beforeParents = await parentIdentity(canonicalRoot, target);
   let handle;
   try {
-    handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(target, constants.O_RDONLY | noFollow);
     const opened = await handle.stat();
     if (!opened.isFile()) throw new Error("trusted file is not regular");
     if (afterOpen) await afterOpen({ target, fd: handle.fd });
