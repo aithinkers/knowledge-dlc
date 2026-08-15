@@ -210,6 +210,104 @@ test("FEAT-006 running cancellation wins the completion race", async (t) => {
   await engine.close();
 });
 
+test("FEAT-006 two engines claim one queued attempt exactly once", async (t) => {
+  const root = await temporary(t);
+  const setup = new KdlcEngine({ root, clock });
+  await setup.execute("init", { project_id: "fixture.project" });
+  const queued = await setup.execute("ingest", {
+    sources: ["source.md"],
+    idempotency_key: "two-engine",
+  });
+  await setup.close();
+  let calls = 0,
+    release;
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const handler = async () => {
+    calls++;
+    entered();
+    await blocked;
+    return { ok: true };
+  };
+  const first = new KdlcEngine({ root, clock, handlers: { ingest: handler } });
+  const second = new KdlcEngine({ root, clock, handlers: { ingest: handler } });
+  await Promise.all([first.execute("jobs"), second.execute("jobs")]);
+  await started;
+  release();
+  await Promise.all([first.drain(), second.drain()]);
+  const final = await first.execute("job_status", { id: queued.id });
+  assert.equal(final.state, "completed");
+  assert.equal(calls, 1);
+  assert.equal(final.attempts.length, 1);
+  await Promise.all([first.close(), second.close()]);
+});
+
+test("FEAT-006 cooperative cancellation exception finalizes cancelled", async (t) => {
+  const root = await temporary(t);
+  let enter, release;
+  const entered = new Promise((resolve) => {
+    enter = resolve;
+  });
+  const blocked = new Promise((resolve) => {
+    release = resolve;
+  });
+  const engine = new KdlcEngine({
+    root,
+    clock,
+    handlers: {
+      ingest: async () => {
+        enter();
+        await blocked;
+        throw Object.assign(new Error("stop"), { code: "KDLC_CANCELLED" });
+      },
+    },
+  });
+  await engine.execute("init", { project_id: "fixture.project" });
+  const job = await engine.execute("ingest", {
+    sources: ["source.md"],
+    idempotency_key: "cancel-throw",
+  });
+  await entered;
+  await engine.execute("job_cancel", { id: job.id });
+  release();
+  await engine.drain();
+  const final = await engine.execute("job_status", { id: job.id });
+  assert.equal(final.state, "cancelled");
+  assert.equal(final.error, null);
+  await engine.close();
+});
+
+test("FEAT-006 engine scopes deny direct read-only mutation and review paths", async (t) => {
+  const root = await temporary(t);
+  const admin = new KdlcEngine({ root, clock });
+  await admin.execute("init", { project_id: "fixture.project" });
+  const readOnly = new KdlcEngine({
+    root,
+    clock,
+    principal: { actor: "human:reader", scopes: ["read"] },
+    handlers: {
+      ingest: () => ({}),
+      review_submit: () => ({}),
+      publish_request: () => ({}),
+    },
+  });
+  for (const [operation, input] of [
+    ["ingest", { sources: ["x"], idempotency_key: "x" }],
+    ["review_submit", {}],
+    ["publish_request", {}],
+  ]) {
+    const envelope = await readOnly.envelope(operation, input);
+    assert.equal(envelope.error.code, "KDLC_POLICY_DENIED");
+  }
+  await readOnly.close();
+  await admin.close();
+});
+
 test("FEAT-006 dead worker lease recovers with one externally idempotent effect", async (t) => {
   const root = await temporary(t);
   const setup = new KdlcEngine({ root });

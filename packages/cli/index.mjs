@@ -52,6 +52,41 @@ export const EXIT = Object.freeze({
   internal: 7,
 });
 const longOperations = new Set(["adopt", "ingest", "refresh"]);
+const operationScopes = Object.freeze({
+  init: "mutate",
+  project_init: "mutate",
+  adopt: "mutate",
+  ingest: "mutate",
+  refresh: "mutate",
+  ingest_start: "mutate",
+  job_cancel: "mutate",
+  reconcile_edits: "mutate",
+  "reconcile-edits": "mutate",
+  migrate: "mutate",
+  review: "review",
+  proposal_create: "mutate",
+  review_submit: "review",
+  review_packet: "review",
+  publish: "publish",
+  publish_request: "publish",
+  query: "read",
+  status: "read",
+  lint: "read",
+  trace: "read",
+  conflicts: "read",
+  gaps: "read",
+  doctor: "read",
+  jobs: "read",
+  project_get: "read",
+  project_list_mounts: "read",
+  kb_search: "read",
+  kb_fetch: "read",
+  kb_trace: "read",
+  kb_conflicts: "read",
+  kb_gaps: "read",
+  source_excerpt: "read",
+  job_status: "read",
+});
 const digest = (value) =>
   `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
 const portable = (value) =>
@@ -99,7 +134,7 @@ export class KdlcEngine {
     root = process.cwd(),
     principal = {
       actor: "process:local",
-      scopes: ["read", "mutate", "publish"],
+      scopes: ["read", "mutate"],
     },
     clock = { now: () => new Date().toISOString() },
     handlers = {},
@@ -194,6 +229,13 @@ export class KdlcEngine {
       ].includes(operation)
     )
       throw inputError(`Unknown operation: ${operation}`);
+    const requiredScope = operationScopes[operation];
+    if (requiredScope && !this.principal.scopes.includes(requiredScope))
+      throw new EngineError(
+        "KDLC_POLICY_DENIED",
+        "Principal lacks the required operation scope",
+        EXIT.policy,
+      );
     if (
       this.principal.principal_mode === "served" &&
       ["ingest", "adopt", "ingest_start"].includes(operation)
@@ -426,8 +468,12 @@ export class KdlcEngine {
       state: "running",
       result_hash: null,
     };
+    let claimed = false;
     let current = await this.mutateJob(job.id, async () => {
       const value = await this.job(job.id);
+      if (["completed", "failed", "cancelled", "parked"].includes(value.state))
+        return value;
+      if (!["queued", "running"].includes(value.state)) return value;
       if (value.cancellation_requested) return value;
       const updated = {
         ...value,
@@ -437,9 +483,10 @@ export class KdlcEngine {
         updated_at: this.clock.now(),
       };
       await atomicJson(path, updated);
+      claimed = true;
       return updated;
     });
-    if (current.cancellation_requested) return current;
+    if (!claimed || current.cancellation_requested) return current;
     try {
       const result = await this.handlers[job.operation](
         structuredClone(input),
@@ -479,19 +526,27 @@ export class KdlcEngine {
     } catch (error) {
       current = await this.mutateJob(job.id, async () => {
         const value = await this.job(job.id);
+        const cancelled =
+          value.cancellation_requested || error?.code === "KDLC_CANCELLED";
         const updated = {
           ...value,
           revision: (value.revision ?? 0) + 1,
           attempts: value.attempts.map((entry) =>
             entry.lease_id === leaseId
-              ? { ...entry, state: "failed", finished_at: this.clock.now() }
+              ? {
+                  ...entry,
+                  state: cancelled ? "cancelled" : "failed",
+                  finished_at: this.clock.now(),
+                }
               : entry,
           ),
-          state: "failed",
-          error: {
-            code: error.code ?? "KDLC_INTERNAL",
-            message: "Job execution failed",
-          },
+          state: cancelled ? "cancelled" : "failed",
+          error: cancelled
+            ? null
+            : {
+                code: error.code ?? "KDLC_INTERNAL",
+                message: "Job execution failed",
+              },
           updated_at: this.clock.now(),
         };
         await atomicJson(path, updated);
@@ -664,7 +719,7 @@ export function createLocalProjectEngine(options = {}) {
   const root = resolve(options.root ?? process.cwd());
   const principal = options.principal ?? {
     actor: "process:local",
-    scopes: ["read", "mutate", "publish"],
+    scopes: ["read", "mutate"],
   };
   const resolveMounts = async () => {
     const project = parseYamlArtifact(
