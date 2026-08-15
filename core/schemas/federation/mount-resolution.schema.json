@@ -4,7 +4,7 @@
   "title": "K-DLC verified mount resolution",
   "type": "object",
   "additionalProperties": false,
-  "required": ["alias", "id", "uri", "resolved_ref", "manifest_hash", "tree_hash", "mode", "access", "root"],
+  "required": ["alias", "id", "uri", "resolved_ref", "manifest_hash", "tree_hash", "catalog_hash", "retrieval_catalog", "mode", "access", "root"],
   "properties": {
     "alias": {"$ref": "../common.schema.json#/$defs/dnsName"},
     "id": {"$ref": "../common.schema.json#/$defs/knowledgeBaseId"},
@@ -14,6 +14,19 @@
     "resolved_ref": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
     "manifest_hash": {"$ref": "../common.schema.json#/$defs/digest"},
     "tree_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "catalog_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+    "retrieval_catalog": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "path", "byte_hash", "access"],
+        "properties": {
+          "id": {"$ref": "../common.schema.json#/$defs/nonEmptyString"},
+          "path": {"type": "string", "pattern": "^[^/\\\\](?:.*[^/])?\\.md$"},
+          "byte_hash": {"$ref": "../common.schema.json#/$defs/digest"},
+          "access": {"$ref": "../common.schema.json#/$defs/access"}
+        }
+      }
+    },
     "mode": {"enum": ["read-only", "propose", "draft", "maintain", "publish"]},
     "access": {"$ref": "../common.schema.json#/$defs/access"},
     "role": {"enum": ["primary", "dependency"]},

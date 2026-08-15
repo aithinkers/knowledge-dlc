@@ -1,0 +1,9 @@
+{
+  "version": "kdlc-retrieval-catalog-1",
+  "concepts": [
+    {"id":"policies/authentication","path":"policies/authentication.md","byte_hash":"sha256:4df849834922dbf2120dbef5ed2d86f27c86bffc820357ba3d2a14f11ef56000","access":{"classification":"internal","compartments":["engineering"]}},
+    {"id":"policies/nightfall","path":"policies/nightfall.md","byte_hash":"sha256:b62e1974df3bb895baef7366665368089f6716c9600f584ed6f1ae4693cc6796","access":{"classification":"restricted","compartments":["nightfall"]}},
+    {"id":"policies/spoof","path":"policies/spoof.md","byte_hash":"sha256:b48df8474df67307fe96aa2d8e225edc25f8b0bbe38d6cf10c1abc6fdcf89fee","access":{"classification":"internal","compartments":["engineering"]}},
+    {"id":"references/sources/authentication","path":"references/sources/authentication.md","byte_hash":"sha256:173ed4cc89b96c4e7c729998301b9ec5e7c6d185719e4e736b988b3d3e28b39b","access":{"classification":"internal","compartments":["engineering"]}}
+  ]
+}

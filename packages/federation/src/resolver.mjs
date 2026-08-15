@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from "node:
 import { promisify } from "node:util";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { artifactHash, byteHash } from "../../core/index.mjs";
+import { artifactHash, byteHash, canonicalJson, parseMarkdownConcept } from "../../core/index.mjs";
 import { createContractValidator, parseAndValidateContract, validateProjectSemantics } from "../../contracts/index.mjs";
 import { NodeFileStore } from "../../lifecycle/src/index.mjs";
 import { federationFail } from "./errors.mjs";
@@ -35,6 +35,37 @@ async function readManifest(root) {
     federationFail("KDLC_FEDERATION_MANIFEST", "Mounted knowledge-base manifest has no valid stable ID");
   }
   return { manifest, manifest_hash: byteHash(bytes) };
+}
+
+async function readRetrievalCatalog(root) {
+  let bytes; let value;
+  try { bytes = await readFile(join(root, "retrieval-catalog.json")); value = JSON.parse(bytes.toString("utf8")); }
+  catch (error) { federationFail("KDLC_RETRIEVAL_CATALOG", "Mounted base lacks a valid retrieval catalog", { cause: error?.code }); }
+  if (value?.version !== "kdlc-retrieval-catalog-1" || !Array.isArray(value.concepts)) federationFail("KDLC_RETRIEVAL_CATALOG", "Mounted retrieval catalog has an invalid shape");
+  const ids = new Set(); const paths = new Set();
+  const concepts = value.concepts.map((entry) => {
+    const safePath = typeof entry?.path === "string" && entry.path.endsWith(".md") && !entry.path.startsWith("/") && !entry.path.includes("\\")
+      && entry.path.split("/").every((part) => part && part !== "." && part !== "..");
+    const expectedId = safePath ? entry.path.slice(0, -3) : null;
+    const access = entry?.access;
+    const validAccess = access && typeof access === "object" && !Array.isArray(access) && typeof access.classification === "string"
+      && (access.compartments === undefined || (Array.isArray(access.compartments) && access.compartments.every((item) => typeof item === "string")));
+    if (!safePath || entry?.id !== expectedId || !/^sha256:[0-9a-f]{64}$/.test(entry?.byte_hash ?? "") || !validAccess || ids.has(entry.id) || paths.has(entry.path)) {
+      federationFail("KDLC_RETRIEVAL_CATALOG", "Mounted retrieval catalog contains an invalid or duplicate concept entry");
+    }
+    ids.add(entry.id); paths.add(entry.path);
+    return Object.freeze({ id: entry.id, path: entry.path, byte_hash: entry.byte_hash,
+      access: Object.freeze({ classification: access.classification, ...(access.compartments ? { compartments: Object.freeze([...access.compartments]) } : {}) }) });
+  });
+  for (const concept of concepts) {
+    let conceptBytes; let parsed;
+    try { conceptBytes = await readFile(join(root, concept.path)); parsed = parseMarkdownConcept(conceptBytes); }
+    catch { federationFail("KDLC_RETRIEVAL_CATALOG", "Mounted retrieval catalog references invalid concept content"); }
+    if (byteHash(conceptBytes) !== concept.byte_hash || canonicalJson(parsed.frontmatter.access ?? null) !== canonicalJson(concept.access)) {
+      federationFail("KDLC_RETRIEVAL_CATALOG", "Mounted retrieval catalog does not bind concept bytes and access metadata");
+    }
+  }
+  return { catalog_hash: byteHash(bytes), retrieval_catalog: Object.freeze(concepts) };
 }
 
 async function runGit(args, cwd) {
@@ -130,6 +161,7 @@ export class FederationResolver {
       const sourceTree = await describeTree(sourceRoot);
       if (resolvedRef === "pending-tree-hash") resolvedRef = sourceTree.tree_hash;
       const { manifest, manifest_hash } = await readManifest(sourceRoot);
+      const { catalog_hash, retrieval_catalog } = await readRetrievalCatalog(sourceRoot);
       const cacheKey = artifactHash({ id: manifest.metadata.id, resolved_ref: resolvedRef, tree_hash: sourceTree.tree_hash }).slice(7);
       const root = join(this.cacheRoot, cacheKey);
       return await this.cacheStore.withMutex(`.coordination/federation-${cacheKey}`, {
@@ -156,9 +188,11 @@ export class FederationResolver {
         }
         const verified = await describeTree(root);
         if (verified.tree_hash !== sourceTree.tree_hash) { await quarantine(root); federationFail("KDLC_CACHE_DRIFT", "Cached mount failed final tree verification"); }
+        const cachedCatalog = await readRetrievalCatalog(root);
+        if (cachedCatalog.catalog_hash !== catalog_hash) { await quarantine(root); federationFail("KDLC_CACHE_DRIFT", "Cached retrieval catalog drifted"); }
         return Object.freeze({ alias: mount.name, id: manifest.metadata.id, version: manifest.metadata.version, uri: mount.uri,
           ...(mount.ref ? { requested_ref: mount.ref } : {}), resolved_ref: resolvedRef, manifest_hash, tree_hash: verified.tree_hash,
-          mode: mount.mode, role: mount.role ?? "dependency", priority: mount.priority ?? 0, access: manifest.access, root });
+          catalog_hash, retrieval_catalog, mode: mount.mode, role: mount.role ?? "dependency", priority: mount.priority ?? 0, access: manifest.access, root });
       });
     } finally { await rm(temporary, { recursive: true, force: true }); }
   }
@@ -186,10 +220,11 @@ export class FederationResolver {
   }
 
   async verify(mount) {
-    const tree = await describeTree(mount.root); const manifest = await readManifest(mount.root);
-    if (tree.tree_hash !== mount.tree_hash || manifest.manifest_hash !== mount.manifest_hash || manifest.manifest.metadata.id !== mount.id) {
-      federationFail("KDLC_CACHE_DRIFT", "Locked mount no longer matches its verified identity");
-    }
-    return true;
+    try {
+      const tree = await describeTree(mount.root); const manifest = await readManifest(mount.root);
+      const catalog = await readRetrievalCatalog(mount.root);
+      if (tree.tree_hash !== mount.tree_hash || manifest.manifest_hash !== mount.manifest_hash || catalog.catalog_hash !== mount.catalog_hash || manifest.manifest.metadata.id !== mount.id) throw new Error("identity mismatch");
+      return true;
+    } catch { federationFail("KDLC_CACHE_DRIFT", "Locked mount no longer matches its verified identity"); }
   }
 }

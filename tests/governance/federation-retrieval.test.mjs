@@ -3,6 +3,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { chmod, cp, lstat, mkdtemp, opendir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -91,6 +92,13 @@ test("FEAT-005 rejects duplicate stable IDs, cache drift, unsafe Git entries, an
   await symlink(join(root, "primary", "index.md"), join(root, "unsafe-local", "escape.md"));
   await assert.rejects(resolver.resolveMount({ name: "unsafe", uri: "./unsafe-local", mode: "read-only" }), federationCode("KDLC_FEDERATION_SYMLINK"));
 
+  await cp(join(fixtures, "base-primary"), join(root, "downgraded-access"), { recursive: true });
+  const catalogPath = join(root, "downgraded-access", "retrieval-catalog.json");
+  const downgradedCatalog = JSON.parse(await readFile(catalogPath, "utf8"));
+  downgradedCatalog.concepts.find(({ id }) => id === "policies/nightfall").access = { classification: "internal", compartments: ["engineering"] };
+  await writeFile(catalogPath, `${JSON.stringify(downgradedCatalog)}\n`);
+  await assert.rejects(resolver.resolveMount({ name: "downgrade", uri: "./downgraded-access", mode: "read-only" }), federationCode("KDLC_RETRIEVAL_CATALOG"));
+
   const oldGit = resolved.mounts.find(({ alias }) => alias === "legacy");
   await writeFile(join(root, "legacy-source", "new.md"), "---\ntype: Reference\n---\nnew\n");
   await execFile("git", ["-C", join(root, "legacy-source"), "add", "."]); await execFile("git", ["-C", join(root, "legacy-source"), "commit", "-q", "-m", "next"]);
@@ -125,6 +133,13 @@ test("FEAT-005 traverses hierarchical indexes and retrieves across mounts with q
   assert.equal(response.conflicts.length, 2);
   assert.deepEqual(response.results.find(({ id }) => id.startsWith("kb://acme.primary/")).source_citations.map(({ id }) => id), ["auth-source"]);
   const contracts = await createContractValidator(); assert.equal(contracts.validate("retrievalResponse", response).valid, true);
+
+  const zeroScoreConflict = await retriever.search({ principal: { id: "human:reader" }, query: "phishing-resistant", mode: "wiki-only", limit: 1 });
+  assert.deepEqual(zeroScoreConflict.results.map(({ id }) => id), [
+    "kb://acme.primary/policies/authentication", "kb://acme.legacy/policies/authentication"
+  ]);
+  assert.equal(zeroScoreConflict.results[1].score, 0);
+  assert.equal(zeroScoreConflict.conflicts.length, 2);
 });
 
 test("FEAT-005 applies query-mode, trust, freshness, and access filters before disclosure", async (context) => {
@@ -140,13 +155,22 @@ test("FEAT-005 applies query-mode, trust, freshness, and access filters before d
   await assert.rejects(retriever.search({ principal: {}, query: "authentication", mode: "vector-only" }), retrievalCode("KDLC_QUERY_MODE"));
 });
 
-test("FEAT-005 makes absent and unauthorized results externally indistinguishable with equal timing floor", async (context) => {
+test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized response timing", async (context) => {
   const root = await workspace(context); const { mounts } = await new FederationResolver({ projectRoot: root, now: fixedNow }).resolveProject(project(root));
-  const waits = []; const retriever = new FederatedRetriever({ mounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z"),
-    minimumDurationMs: 25, monotonic: () => 0, wait: async (duration) => { waits.push(duration); } });
-  const unauthorized = await retriever.search({ principal: {}, query: "Project Nightfall", mode: "wiki-only" });
-  const absent = await retriever.search({ principal: {}, query: "Project Zephyr", mode: "wiki-only" });
-  assert.deepEqual(unauthorized, absent); assert.deepEqual(waits, [25, 25]);
+  const reads = [];
+  const retriever = new FederatedRetriever({ mounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75,
+    readConcept: async (path) => { reads.push(path); if (path.endsWith("/policies/nightfall.md")) throw new Error("unauthorized body opened"); return readFile(path); } });
+  const durations = []; let unauthorized; let absent;
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    let started = performance.now(); unauthorized = await retriever.search({ principal: {}, query: "Project Nightfall", mode: "wiki-only" });
+    durations.push(performance.now() - started);
+    started = performance.now(); absent = await retriever.search({ principal: {}, query: "Project Zephyr", mode: "wiki-only" });
+    durations.push(performance.now() - started);
+    assert.deepEqual(unauthorized, absent);
+  }
+  assert.equal(reads.some((path) => path.endsWith("/policies/nightfall.md")), false);
+  assert.equal(durations.every((duration) => duration >= 65), true, `floor was not enforced: ${durations.join(", ")}`);
+  for (let index = 0; index < durations.length; index += 2) assert.equal(Math.abs(durations[index] - durations[index + 1]) < 40, true, `timing classes diverged: ${durations.join(", ")}`);
   assert.deepEqual(Object.keys(absent), ["status", "results", "citations", "conflicts", "warnings", "timing_class"]);
   const contracts = await createContractValidator(); assert.equal(contracts.validate("retrievalResponse", absent).valid, true);
 });

@@ -1,0 +1,6 @@
+{
+  "version": "kdlc-retrieval-catalog-1",
+  "concepts": [
+    {"id":"policies/authentication","path":"policies/authentication.md","byte_hash":"sha256:5d4be3c9440ab5c5252e1b9913635abed81d6c1f818f4595ac9a03b1fca6bc21","access":{"classification":"internal","compartments":["engineering"]}}
+  ]
+}
