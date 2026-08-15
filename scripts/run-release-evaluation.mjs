@@ -39,12 +39,16 @@ for (const recorded of run.results) {
     });
     const pass = Number(/(?:#|ℹ)\s*pass\s+(\d+)/.exec(stdout)?.[1] ?? -1); const skipped = Number(/(?:#|ℹ)\s*skipped\s+(\d+)/.exec(stdout)?.[1] ?? 0);
     if (pass !== releaseCase.executable_evidence.test_ids.length || skipped !== 0) throw new Error("zero, missing, or unrelated applicable tests");
-  } catch { status = "failed"; }
+  } catch (error) {
+    status = "failed";
+    const detail = String(error?.stderr ?? error?.message ?? error).trim().split(/\r?\n/u).slice(-8).join(" | ");
+    failures.push(`${recorded.case_id}: offline execution failed (${detail || "no diagnostic"})`);
+  }
   try {
     const observed = JSON.parse(await readFile(boundaryReport, "utf8"));
     externalNetworkCalls += observed.external_network_calls; liveModelCalls += observed.live_model_calls;
     if (observed.external_network_calls !== 0 || observed.live_model_calls !== 0 || observed.blocked_process_calls !== 0) status = "failed";
-  } catch { status = "failed"; }
+  } catch (error) { status = "failed"; failures.push(`${recorded.case_id}: boundary report failed (${error?.code ?? error?.message ?? "unknown"})`); }
   await rm(boundaryRoot, { recursive: true, force: true });
   results.push({ case_id: recorded.case_id, status });
   if (status !== recorded.status) failures.push(`${recorded.case_id}: executed status ${status} differs from recorded status ${recorded.status}`);
