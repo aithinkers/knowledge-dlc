@@ -4,6 +4,7 @@ import { artifactHash, canonicalJson } from "../../core/index.mjs";
 import { denied, invalid } from "./errors.mjs";
 
 const sessions = new WeakMap();
+const governanceEvidence = new WeakMap();
 const ACTOR = /^(?:human|process):[A-Za-z0-9._@/-]+$/;
 const ID = /^[A-Za-z0-9._-]{1,128}$/;
 const HASH = /^sha256:[a-f0-9]{64}$/;
@@ -182,6 +183,50 @@ export class RetentionDecisionAuthority {
     let actual;
     try { actual = Buffer.from(proof.mac, "hex"); } catch { return false; }
     return actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected);
+  }
+
+  issueGovernanceEvidence({ receipt, decision, impact }) {
+    if (!this.verify(decision, impact) || !this.verifyReceipt(receipt) ||
+      receipt.action !== "erase" || receipt.result !== "erased" || decision.action !== "erase" || decision.allowed !== true ||
+      receipt.impact_hash !== artifactHash(impact) || receipt.decision_hash !== artifactHash(decision) ||
+      receipt.source?.id !== impact.source?.id || receipt.source?.hash !== impact.source?.hash ||
+      decision.source?.id !== impact.source?.id || decision.source?.hash !== impact.source?.hash)
+      throw denied("Governance erasure evidence requires an exact verified purge receipt");
+    const evidence = Object.freeze({
+      api_version: "kdlc.dev/verified-erasure-evidence/v1alpha1",
+      subject: artifactHash(receipt.source),
+      source: Object.freeze(structuredClone(receipt.source)),
+      action: receipt.action,
+      result: receipt.result,
+      workflow_id: receipt.workflow_id,
+      job_id: receipt.job_id,
+      receipt_hash: artifactHash(receipt),
+      impact_hash: artifactHash(impact),
+      decision_hash: artifactHash(decision),
+      verification_hash: receipt.verification_hash,
+      legal_hold: false,
+      propagation_verified: true,
+      inventory: impact.nodes.map((node) => Object.freeze({
+        surface: node.kind,
+        known_copy: true,
+        status: node.strategy === "tombstone" ? "tombstoned" : "purged",
+      })),
+      completed_at: receipt.completed_at,
+    });
+    const token = Object.freeze({ kind: "kdlc-verified-erasure-evidence-1" });
+    governanceEvidence.set(token, Object.freeze({ authority: this, evidence }));
+    return token;
+  }
+
+  resolveGovernanceEvidence(token) {
+    const state = governanceEvidence.get(token);
+    if (!state || state.authority !== this) throw denied("Verified erasure evidence is not bound to this authority");
+    return structuredClone(state.evidence);
+  }
+
+  evidenceVerifier() {
+    const authority = this;
+    return Object.freeze({ resolve(token) { return authority.resolveGovernanceEvidence(token); } });
   }
 
   revalidate(decision, impact) {

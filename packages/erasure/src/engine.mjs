@@ -417,4 +417,12 @@ export class RevocationEngine {
       return receipt;
     });
   }
+
+  async issueGovernanceEvidence(workflowId, jobId) {
+    const receipt = await this.run(workflowId, jobId);
+    if (receipt?.result !== "erased") throw denied("Only completed erasure can produce governance evidence");
+    const plan = await this.store.readJson(this.planPath(workflowId, jobId));
+    this.#assertPlan(plan, workflowId, jobId);
+    return this.authority.issueGovernanceEvidence({ receipt, decision: plan.decision, impact: plan.impact });
+  }
 }

@@ -144,6 +144,30 @@ test("FEAT-009 erasure barriers retrieval, treats every local copy, minimizes au
   assert.equal(audit.includes(source.id), false);
 });
 
+test("FEAT-008 FEAT-009 exposes only instance-bound evidence derived from a verified durable purge", async (context) => {
+  const state = await fixture(context);
+  const started = await state.engine.start(request(state.session));
+  await state.engine.run("wf_erase", started.job.job_id);
+  const token = await state.engine.issueGovernanceEvidence("wf_erase", started.job.job_id);
+  const evidence = state.authority.evidenceVerifier().resolve(token);
+  assert.equal(evidence.subject, artifactHash(source));
+  assert.equal(evidence.action, "erase");
+  assert.equal(evidence.result, "erased");
+  assert.equal(evidence.impact_hash, artifactHash(started.impact));
+  assert.equal(evidence.decision_hash, artifactHash(started.decision));
+  assert.equal(evidence.propagation_verified, true);
+  assert.equal(evidence.legal_hold, false);
+  assert.deepEqual([...new Set(evidence.inventory.map(({ surface }) => surface))].sort(),
+    ["audit", "cache", "claim", "concept", "index", "normalized", "original", "proposal"]);
+  assert.equal(evidence.inventory.find(({ surface }) => surface === "concept").status, "tombstoned");
+  assert.equal(evidence.inventory.find(({ surface }) => surface === "original").status, "purged");
+  assert.throws(() => state.authority.evidenceVerifier().resolve(Object.freeze({ kind: "kdlc-verified-erasure-evidence-1" })),
+    (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+  const other = await fixture(context);
+  assert.throws(() => other.authority.evidenceVerifier().resolve(token),
+    (error) => error.code === "KDLC_ERASURE_POLICY_DENIED");
+});
+
 test("FEAT-009 the shipped project engine enforces a newly installed barrier without restart", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "kdlc-erasure-cli-"));
   context.after(() => removeTree(root));
