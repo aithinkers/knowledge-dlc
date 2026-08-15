@@ -5,7 +5,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 import { loadRoleDescriptors } from "../../packages/agents/index.mjs";
-import { AGENT_DEFINITIONS, renderAgentMarkdown } from "../../packages/agents/definitions/index.mjs";
+import { AGENT_DEFINITIONS, renderAgentMarkdown, renderCodexAgentMarkdown, renderCodexAgentToml } from "../../packages/agents/definitions/index.mjs";
 
 const execute = promisify(execFile);
 const SPEC_ROLES = [
@@ -49,6 +49,22 @@ test("FEAT-010 every role has one authored harness agent definition", () => {
     if (definition.role.endsWith("-reviewer")) {
       assert.ok(markdown.includes("review-only"), "reviewer prompts must state review-only constraint");
     }
+  }
+});
+
+test("FEAT-012 generated Codex agents match a fresh build and keep §27.1 guidance", async () => {
+  await execute(process.execPath, ["packages/adapters/generate.mjs", "--check"]);
+  for (const definition of AGENT_DEFINITIONS) {
+    const markdown = await readFile(`distribution/codex/.codex/agents/${definition.role}.md`, "utf8");
+    const toml = await readFile(`distribution/codex/.codex/agents/${definition.role}.toml`, "utf8");
+    assert.equal(markdown, renderCodexAgentMarkdown(definition));
+    assert.equal(toml, renderCodexAgentToml(definition));
+    for (const rendered of [markdown, toml]) {
+      assert.ok(rendered.includes("untrusted data"), "must delimit source content per §27.1");
+      assert.ok(rendered.includes("prompt text never"), "must state runtime permission enforcement");
+      if (definition.role.endsWith("-reviewer")) assert.ok(rendered.includes("review-only"));
+    }
+    assert.ok(!toml.split('developer_instructions = """')[1].includes('"""\n#'), "TOML body must not terminate early");
   }
 });
 
