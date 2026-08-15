@@ -207,6 +207,7 @@ function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJ
 function quarantineManifest(sourceId, sourceHash, normalizedAt, settings, error) {
   return { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: sourceHash, normalized_at: normalizedAt, status: "quarantined", format: null, normalizer: null, settings: plainObject(settings) ? serializable(settings) : {}, coverage: { discovered: 0, emitted: 0 }, omissions: [], quality_warnings: [], outputs: [], security, quarantine: { code: String(error.code ?? "malformed"), message: String(error.message ?? "Normalizer failed safely"), details: serializable(error.details) } };
 }
+const semanticsHash = ({ descriptor, units, probabilisticUnits, manifest }) => byteHash(canonicalJson({ descriptor, units, probabilisticUnits, manifest }));
 
 export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaType = "", sourceId, normalizedAt = "1970-01-01T00:00:00.000Z", sourceHash, settings = {}, limits = {}, probabilisticUnits = [] }) {
   if (process.env.KDLC_RESTRICTED_WORKER !== "1" || !process.permission || process.permission.has("child") || process.permission.has("fs.write", "/")) throw new Error("Direct normalization requires the restricted worker capability boundary");
@@ -240,14 +241,14 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     const omissions = qualityWarnings.filter((warning) => /sampled|scanned|omitted|excluded/i.test(warning)).map((reason) => ({ reason }));
     const manifest = { api_version: "kdlc.dev/normalization-manifest/v1", source_id: sourceId, source_hash: hash, normalized_at: normalizedAt, status: omissions.length ? "partial" : "complete", format, normalizer: { id: result.descriptor.id, version: result.descriptor.version, parser: result.descriptor.parser }, settings, coverage: { discovered: result.discovered, emitted: result.units.length, ...(result.coverage ?? {}) }, omissions, quality_warnings: qualityWarnings, outputs, security };
     if (!validateManifest(manifest)) throw new Quarantine("invalid-output-schema", "Normalizer manifest failed its schema contract");
-    return { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest };
+    const normalized = { descriptor: result.descriptor, units: result.units, probabilisticUnits, manifest }; return { ...normalized, semantics_hash: semanticsHash(normalized) };
   } catch (error) {
     const quarantined = error instanceof Quarantine ? error : new Quarantine("malformed", "Normalizer failed safely", { parser: error.message });
     const safeSourceId = typeof sourceId === "string" && portableSourceId.test(sourceId) ? sourceId : `source-${hash.slice(7, 23)}`;
     const safeNormalizedAt = validRfc3339(normalizedAt) ? normalizedAt : "1970-01-01T00:00:00.000Z";
     const manifest = quarantineManifest(safeSourceId, hash, safeNormalizedAt, settings, quarantined);
     if (!validateManifest(manifest)) throw new Error("Quarantine manifest failed its schema contract");
-    return { descriptor: null, units: [], probabilisticUnits: [], manifest };
+    const normalized = { descriptor: null, units: [], probabilisticUnits: [], manifest }; return { ...normalized, semantics_hash: semanticsHash(normalized) };
   }
 }
 
@@ -255,10 +256,23 @@ export function portableArtifacts(result, sourceId) {
   if (!portableSourceId.test(sourceId)) throw new Error("Source ID is not portable");
   if (sourceId !== result?.manifest?.source_id) throw new Error("Source ID does not match the normalization manifest");
   if (!validateManifest(result.manifest)) throw new Error("Normalization manifest is invalid");
+  if (result.semantics_hash !== semanticsHash(result)) throw new Error("Normalization descriptor or manifest semantics were mutated");
+  const quarantined = result.manifest.status === "quarantined";
+  if (quarantined) {
+    if (result.descriptor !== null || result.units.length || result.probabilisticUnits.length || result.manifest.format !== null || result.manifest.normalizer !== null || result.manifest.coverage.discovered !== 0 || result.manifest.coverage.emitted !== 0 || result.manifest.outputs.length) throw new Error("Quarantine result semantics are inconsistent");
+  } else {
+    const expectedDescriptor = descriptors[result.manifest.format];
+    if (!expectedDescriptor || canonicalJson(result.descriptor) !== canonicalJson(expectedDescriptor)) throw new Error("Normalizer descriptor does not match the trusted format profile");
+    if (result.manifest.normalizer.id !== result.descriptor.id || result.manifest.normalizer.version !== result.descriptor.version || canonicalJson(result.manifest.normalizer.parser) !== canonicalJson(result.descriptor.parser)) throw new Error("Manifest normalizer provenance does not match its descriptor");
+    if (result.manifest.coverage.emitted !== result.units.length || (result.manifest.status === "complete") !== (result.manifest.omissions.length === 0) || (result.manifest.status === "partial") !== (result.manifest.omissions.length > 0)) throw new Error("Manifest coverage or omission semantics are inconsistent");
+    const allowed = new Set(result.descriptor.locator_kinds);
+    if (result.units.some((unit) => unit.extraction_method.mode !== "deterministic" || unit.extraction_method.normalizer !== result.descriptor.id || unit.extraction_method.version !== result.descriptor.version || !allowed.has(unit.locator.kind)) || result.probabilisticUnits.some((unit) => unit.extraction_method.mode !== "probabilistic" || !allowed.has(unit.locator.kind))) throw new Error("Unit extraction provenance does not match its descriptor");
+    if (result.manifest.settings.language && result.units.some((unit) => unit.language !== result.manifest.settings.language)) throw new Error("Unit language does not match manifest settings");
+  }
   const deterministic = `${result.units.map((unit) => canonicalJson(unit)).join("\n")}${result.units.length ? "\n" : ""}`;
   const probabilistic = `${result.probabilisticUnits.map((unit) => canonicalJson(unit)).join("\n")}${result.probabilisticUnits.length ? "\n" : ""}`;
   if (result.units.some((unit) => !validateUnit(unit) || unit.source_hash !== result.manifest.source_hash) || result.probabilisticUnits.some((unit) => !validateUnit(unit) || unit.source_hash !== result.manifest.source_hash)) throw new Error("Normalized units are invalid or source-unbound");
-  const expectedOutputs = result.manifest.status === "quarantined" ? [] : [{ path: "units.jsonl", hash: byteHash(deterministic), bytes: Buffer.byteLength(deterministic), mode: "deterministic" }, ...(result.probabilisticUnits.length ? [{ path: "probabilistic-units.jsonl", hash: byteHash(probabilistic), bytes: Buffer.byteLength(probabilistic), mode: "probabilistic" }] : [])];
+  const expectedOutputs = quarantined ? [] : [{ path: "units.jsonl", hash: byteHash(deterministic), bytes: Buffer.byteLength(deterministic), mode: "deterministic" }, ...(result.probabilisticUnits.length ? [{ path: "probabilistic-units.jsonl", hash: byteHash(probabilistic), bytes: Buffer.byteLength(probabilistic), mode: "probabilistic" }] : [])];
   if (canonicalJson(result.manifest.outputs) !== canonicalJson(expectedOutputs)) throw new Error("Normalization manifest output hashes do not match serialized bytes");
   const basis = result.manifest.outputs.find(({ mode }) => mode === "deterministic")?.hash ?? result.manifest.source_hash;
   const directory = `sources/normalized/${sourceId}/${basis.replace("sha256:", "sha256-")}`;

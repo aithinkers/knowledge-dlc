@@ -117,6 +117,9 @@ test("FEAT-003 restricted JSONL worker refuses active policy and returns bounded
   assert.equal(isolated.manifest.security.network, false); assert.equal(isolated.units.find(({ kind }) => kind === "line").text, "bounded");
   await assert.rejects(runRestrictedNormalizer({ id: "limited", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt" }, { outputBytes: 1 }), /output limit/);
   await assert.rejects(runRestrictedNormalizer({ id: "too-many", bytes_base64: Buffer.from("bounded").toString("base64"), filename: "safe.txt", probabilisticUnits: Array.from({ length: 10_001 }, () => null) }), /count exceeds/);
+  const nearMegabyte = { text: "x".repeat(999_000) };
+  await assert.rejects(runRestrictedNormalizer({ id: "cumulative", bytes_base64: "", filename: "safe.txt", probabilisticUnits: Array(10_000).fill(nearMegabyte) }), /serialized size limit/);
+  await assert.rejects(normalize({ bytes: new Uint8Array(25_000_001), filename: "huge.txt" }), /Raw normalization source/);
 });
 
 test("FEAT-003 trusted ceilings, package identity, provenance, and portable paths fail closed", async () => {
@@ -148,7 +151,16 @@ test("FEAT-003 trusted ceilings, package identity, provenance, and portable path
   const valid = await normalize({ bytes: Buffer.from("safe"), filename: "safe.txt", sourceId: "source-7", normalizedAt: "2026-08-15T00:00:00Z" });
   assert.equal(valid.manifest.source_id, "source-7"); assert.equal(valid.manifest.normalized_at, "2026-08-15T00:00:00Z"); assert.equal(manifestValidator(valid.manifest), true, JSON.stringify(manifestValidator.errors));
   const changedUnit = structuredClone(valid); changedUnit.units[0].source_hash = `sha256:${"0".repeat(64)}`;
-  assert.throws(() => portableArtifacts(changedUnit, "source-7"), /source-unbound/);
+  assert.throws(() => portableArtifacts(changedUnit, "source-7"), /semantics|source-unbound/);
   const changedManifest = structuredClone(valid); changedManifest.manifest.outputs[0].hash = `sha256:${"0".repeat(64)}`;
-  assert.throws(() => portableArtifacts(changedManifest, "source-7"), /output hashes/);
+  assert.throws(() => portableArtifacts(changedManifest, "source-7"), /semantics|output hashes/);
+  for (const mutate of [
+    (copy) => { copy.manifest.normalizer.version = "9.9.9"; },
+    (copy) => { copy.manifest.settings = { language: "fr" }; },
+    (copy) => { copy.manifest.coverage.emitted += 1; },
+    (copy) => { copy.descriptor.version = "9.9.9"; }
+  ]) {
+    const changed = structuredClone(valid); mutate(changed);
+    assert.throws(() => portableArtifacts(changed, "source-7"), /semantics were mutated/);
+  }
 });
