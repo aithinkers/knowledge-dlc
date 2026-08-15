@@ -155,11 +155,11 @@ export function createInstallReport({ packageReport, installedPackages, lock, sc
   return issueInstallReport(authority, payload);
 }
 
-export function authorizeInstallation({ manifest, report, trustAuthorization, waiver, authority, now = new Date().toISOString() }) {
+export function authorizeInstallation({ manifest, report, trustAuthorization, waiver, authority }) {
   if (!verifyInstallReport(authority, report)) extensionFail("KDLC_EXTENSION_REPORT_UNTRUSTED", "Installation authorization requires an authentic runtime-signed report");
   if (report.manifest_hash !== artifactHash(manifest) || report.plugin !== manifest.metadata.name || report.permission_hash !== artifactHash(report.executable_permissions)) extensionFail("KDLC_EXTENSION_REPORT_DRIFT", "Installation report no longer binds the exact plugin and permissions");
   if (report.requires_explicit_trust && !authority.verifyTrust(trustAuthorization, report)) extensionFail("KDLC_EXTENSION_TRUST_REQUIRED", "Executable plugin installation requires explicit authenticated trust");
-  if (report.mode === "controlled" && report.waiver_required_executables.length && !authority.verifyWaiver(waiver, report, report.waiver_required_executables, now)) extensionFail("KDLC_EXTENSION_SANDBOX_DENIED", "Controlled mode requires effective sandbox coverage or an exact active waiver");
+  if (report.mode === "controlled" && report.waiver_required_executables.length && !authority.verifyWaiver(waiver, report, report.waiver_required_executables)) extensionFail("KDLC_EXTENSION_SANDBOX_DENIED", "Controlled mode requires effective sandbox coverage or an exact active waiver");
   return Object.freeze({ status: "installation-authorized", execution_status: "not-executed", plugin: report.plugin, version: report.version, manifest_hash: report.manifest_hash,
     package_hash: report.package_hash, trust_actor: trustAuthorization?.actor ?? null, waiver_actor: waiver?.actor ?? null, permission_hash: report.permission_hash });
 }

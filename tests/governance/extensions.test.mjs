@@ -22,6 +22,10 @@ const packageRoot = (name) => resolve(root, "tests/fixtures/extensions/packages"
 const hash = (character) => `sha256:${character.repeat(64)}`;
 const framework = Object.freeze({ version: "0.2.0", hash: hash("f") });
 const okf = Object.freeze({ version: "0.2.0", revision: "okf-0.2-reference", hash: hash("b") });
+function trustedClock(initial = "2026-08-14T00:00:00.000Z") {
+  let millis = Date.parse(initial);
+  return { millis: () => millis, set: (value) => { millis = Date.parse(value); } };
+}
 
 async function fixture(name) { return JSON.parse(await readFile(resolve(root, "tests/fixtures/extensions", name), "utf8")); }
 function expectCode(code, action) { assert.throws(action, (error) => error?.code === code); }
@@ -35,11 +39,11 @@ function sandbox(overrides = {}) {
     resources: { memory_bytes: 268435456, cpu_ms: 10000, output_bytes: 20000000 }, ...overrides
   };
 }
-function authorityWith(sandboxState = sandbox()) {
+function authorityWith(sandboxState = sandbox(), clock = trustedClock()) {
   return new ExtensionAuthority([
     { id: "trust-token", actor: "human:alice", roles: ["plugin-trust"] },
     { id: "review-token", actor: "human:bob", roles: ["governance-reviewer"] }
-  ], { framework, okf, sandbox: sandboxState, mode: "controlled", policy: {
+  ], { framework, okf, sandbox: sandboxState, mode: "controlled", clock, policy: {
     minimum_trust: "machine-confirmed", mandatory_gates: ["human-review"], sensor: { require_blocking: true, minimum_severity: "error" },
     normalizer: { network: false, execute_code: false, macros: false }, template: { allowed_merge: ["create", "deep-merge"] }
   } });
@@ -147,16 +151,21 @@ test("FEAT-007 runtime-signed permission report uses effective sandbox attestati
 test("FEAT-007 controlled unsandboxed code needs exact authenticated trust and waiver", async () => {
   const validator = await createExtensionValidator(root); const scanner = new ExtensionPackageScanner({ validator, key: Buffer.alloc(32, 9) });
   const plugin = await scanner.scan(packageRoot("malicious")); const lock = lockFor([plugin]); const installedPackages = [plugin];
-  const authority = authorityWith(); const report = createInstallReport({ packageReport: plugin, installedPackages, lock, scanner, validator, authority, mode: "controlled" });
+  const clock = trustedClock(); const authority = authorityWith(sandbox(), clock); const report = createInstallReport({ packageReport: plugin, installedPackages, lock, scanner, validator, authority, mode: "controlled" });
   assert.deepEqual(report.waiver_required_executables, ["malicious-exporter:exfiltrate"]);
   const trust = authority.trustInstallation(authority.establishSession("trust-token"), report);
   expectCode("KDLC_EXTENSION_TRUST_REQUIRED", () => authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: { ...trust }, authority }));
   expectCode("KDLC_EXTENSION_SANDBOX_DENIED", () => authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: trust, authority }));
   const session = authority.establishSession("review-token");
-  const expired = authority.waiveControlledExecution(session, report, { executableIds: ["malicious-exporter:exfiltrate"], reason: "time limited", expiresAt: "2026-01-01T00:00:00.000Z" });
-  expectCode("KDLC_EXTENSION_SANDBOX_DENIED", () => authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: trust, waiver: expired, authority, now: "2026-08-14T00:00:00.000Z" }));
+  expectCode("KDLC_EXTENSION_WAIVER_INVALID", () => authority.waiveControlledExecution(session, report, { executableIds: ["malicious-exporter:exfiltrate"], reason: "expired", expiresAt: "2026-01-01T00:00:00.000Z" }));
+  expectCode("KDLC_EXTENSION_WAIVER_INVALID", () => authority.waiveControlledExecution(session, report, { executableIds: ["malicious-exporter:exfiltrate"], reason: "zero length", expiresAt: "2026-08-14T00:00:00.000Z" }));
   const waiver = authority.waiveControlledExecution(session, report, { executableIds: ["malicious-exporter:exfiltrate"], reason: "time limited", expiresAt: "2027-01-01T00:00:00.000Z" });
-  assert.equal(authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: trust, waiver, authority, now: "2026-08-14T00:00:00.000Z" }).status, "installation-authorized");
+  assert.equal(waiver.issued_at, "2026-08-14T00:00:00.000Z");
+  assert.equal(authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: trust, waiver, authority }).status, "installation-authorized");
+  clock.set("2026-08-13T23:59:59.999Z");
+  expectCode("KDLC_EXTENSION_SANDBOX_DENIED", () => authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: trust, waiver, authority, now: "2026-08-14T00:00:00.000Z" }));
+  clock.set("2027-01-01T00:00:00.000Z");
+  expectCode("KDLC_EXTENSION_SANDBOX_DENIED", () => authorizeInstallation({ manifest: plugin.manifest, report, trustAuthorization: trust, waiver, authority, now: "2026-08-14T00:00:00.000Z" }));
 });
 
 test("FEAT-007 migrations are previewable, semantic, immutable, and exact-confirmation gated", async () => {
@@ -178,10 +187,17 @@ test("FEAT-007 migrations are previewable, semantic, immutable, and exact-confir
   const weakPreview = previewMigration({ migration: weakening, files, validator });
   assert.equal(weakPreview.semantic_effects[0].category, "trust"); assert.equal(weakPreview.security_weakening, true);
   expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash }));
-  const authority = authorityWith(); const waiver = authority.waiveMigrationSecurity(authority.establishSession("review-token"), weakPreview,
+  const clock = trustedClock(); const authority = authorityWith(sandbox(), clock); const reviewSession = authority.establishSession("review-token");
+  expectCode("KDLC_MIGRATION_WAIVER_INVALID", () => authority.waiveMigrationSecurity(reviewSession, weakPreview,
+    { reason: "zero length", expiresAt: "2026-08-14T00:00:00.000Z" }));
+  const waiver = authority.waiveMigrationSecurity(reviewSession, weakPreview,
     { reason: "approved compatibility rollback", expiresAt: "2027-01-01T00:00:00.000Z" });
-  expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver: { ...waiver }, now: "2026-08-14T00:00:00.000Z" }));
-  assert.equal(applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver, now: "2026-08-14T00:00:00.000Z" }).report.security_weakening, true);
+  expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver: { ...waiver } }));
+  assert.equal(applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver }).report.security_weakening, true);
+  clock.set("2026-08-13T23:59:59.999Z");
+  expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver, now: "2026-08-14T00:00:00.000Z" }));
+  clock.set("2027-01-01T00:00:00.000Z");
+  expectCode("KDLC_MIGRATION_SECURITY_DOWNGRADE", () => applyMigrationPreview(weakPreview, { confirmedPreviewHash: weakPreview.preview_hash, authority, waiver, now: "2026-08-14T00:00:00.000Z" }));
 
   const beforeConfiguration = { minimum_trust: "human-reviewed", approval_gates: ["human-review", "policy-review"],
     sensor: { blocking: true, severity: "error" }, security: { network: [], subprocess: false, credentials: [] } };

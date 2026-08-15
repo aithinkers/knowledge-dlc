@@ -29,7 +29,9 @@ Installation is a gated sequence:
    executable plugin.
 6. If controlled-mode sandbox evidence is absent or insufficient, reject the
    executable unless an authenticated governance reviewer grants a live waiver
-   scoped to the exact signed report and fully-qualified executable IDs.
+   scoped to the exact signed report and fully-qualified executable IDs. Waiver
+   issuance and liveness use only the runtime authority's injected trusted
+   clock; caller-provided timestamps cannot extend or revive authorization.
 
 Authorization reports explicitly state `execution_status: not-executed`; the
 SDK does not execute plugin code. Normalizer and sensor contributions bind
@@ -42,7 +44,7 @@ Those effects and downgrade flags are derived recursively from the actual
 structured diff, including parent-object replacements, deep merges, and keyed
 arrays; the descriptor's self-reported category is not trusted. Applying a
 security-weakening preview requires a separate live waiver from an authenticated
-governance reviewer.
+governance reviewer, with the same trusted-clock issuance and expiry rules.
 `applyMigrationPreview` accepts only the original issued preview object and its
 exact confirmation hash; it returns proposed output bytes and performs no
 filesystem writes. Callers retain responsibility for their normal transactional

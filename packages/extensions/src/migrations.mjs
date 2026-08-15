@@ -124,9 +124,9 @@ export function previewMigration({ migration, files, validator }) {
   const preview = Object.freeze({ ...basis, preview_hash: artifactHash(basis) }); previews.set(preview, Object.freeze(Object.fromEntries([...output].sort()))); return preview;
 }
 
-export function applyMigrationPreview(preview, { confirmedPreviewHash, authority, waiver, now = new Date().toISOString() }) {
+export function applyMigrationPreview(preview, { confirmedPreviewHash, authority, waiver }) {
   const output = previews.get(preview);
   if (!output || confirmedPreviewHash !== preview.preview_hash) extensionFail("KDLC_MIGRATION_CONFIRMATION_REQUIRED", "Migration application requires the exact preview hash");
-  if (preview.security_weakening && !authority?.verifyMigrationWaiver(waiver, preview, now)) extensionFail("KDLC_MIGRATION_SECURITY_DOWNGRADE", "Security-weakening migration requires an exact active authenticated waiver");
+  if (preview.security_weakening && !authority?.verifyMigrationWaiver(waiver, preview)) extensionFail("KDLC_MIGRATION_SECURITY_DOWNGRADE", "Security-weakening migration requires an exact active authenticated waiver");
   return Object.freeze({ report: structuredClone(preview), files: structuredClone(output) });
 }

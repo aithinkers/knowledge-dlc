@@ -31,18 +31,26 @@ function validExpiry(expiresAt) {
   return typeof expiresAt === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiresAt)
     && Number.isFinite(Date.parse(expiresAt)) && new Date(Date.parse(expiresAt)).toISOString() === expiresAt;
 }
+function clockTime(authority) {
+  const state = authorityStates.get(authority); let millis;
+  try { millis = state?.clock?.millis(); } catch { extensionFail("KDLC_EXTENSION_CLOCK_INVALID", "Trusted extension clock failed"); }
+  if (!Number.isSafeInteger(millis)) extensionFail("KDLC_EXTENSION_CLOCK_INVALID", "Trusted extension clock returned an invalid time");
+  let iso; try { iso = new Date(millis).toISOString(); } catch { extensionFail("KDLC_EXTENSION_CLOCK_INVALID", "Trusted extension clock returned an out-of-range time"); }
+  return { millis, iso };
+}
 
 export class ExtensionAuthority {
   #principals;
 
-  constructor(principals, { framework, okf, sandbox, policy, mode, key = randomBytes(32), keyId = "extension-runtime-v1" } = {}) {
+  constructor(principals, { framework, okf, sandbox, policy, mode, clock, key = randomBytes(32), keyId = "extension-runtime-v1" } = {}) {
     if (!Array.isArray(principals)) throw new TypeError("ExtensionAuthority requires trusted principal records");
     if (!framework || typeof framework.version !== "string" || typeof framework.hash !== "string" || !okf || typeof okf.version !== "string" || typeof okf.revision !== "string" || typeof okf.hash !== "string"
-      || !validSandbox(sandbox) || !validPolicy(policy) || !["local", "controlled"].includes(mode)
+      || !validSandbox(sandbox) || !validPolicy(policy) || !["local", "controlled"].includes(mode) || typeof clock?.millis !== "function"
       || !(key instanceof Uint8Array) || key.byteLength < 32 || typeof keyId !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) {
       throw new TypeError("ExtensionAuthority requires trusted framework, OKF, sandbox, and signing configuration");
     }
-    authorityStates.set(this, { framework: structuredClone(framework), okf: structuredClone(okf), sandbox: structuredClone(sandbox), policy: structuredClone(policy), mode, key: Buffer.from(key), keyId });
+    authorityStates.set(this, { framework: structuredClone(framework), okf: structuredClone(okf), sandbox: structuredClone(sandbox), policy: structuredClone(policy), mode, clock, key: Buffer.from(key), keyId });
+    clockTime(this);
     this.#principals = new Map();
     for (const principal of principals) {
       const allowed = new Set(["id", "actor", "roles"]);
@@ -73,10 +81,11 @@ export class ExtensionAuthority {
   waiveControlledExecution(session, report, { executableIds, reason, expiresAt }) {
     const sessionRecord = sessions.get(session); const principal = sessionRecord?.authority === this ? sessionRecord.principal : null;
     if (!principal?.roles.includes("governance-reviewer")) extensionFail("KDLC_EXTENSION_WAIVER_DENIED", "Controlled execution waiver requires an authenticated governance reviewer");
+    const now = clockTime(this);
     if (!Array.isArray(executableIds) || !executableIds.length || new Set(executableIds).size !== executableIds.length || typeof reason !== "string" || !reason.trim()
-      || !validExpiry(expiresAt)) extensionFail("KDLC_EXTENSION_WAIVER_INVALID", "Controlled execution waiver is malformed");
+      || !validExpiry(expiresAt) || Date.parse(expiresAt) <= now.millis) extensionFail("KDLC_EXTENSION_WAIVER_INVALID", "Controlled execution waiver is malformed or inactive");
     const waiver = Object.freeze({ api_version: "kdlc.dev/plugin-waiver/v1alpha1", scope: "controlled-execution-gap", actor: principal.actor,
-      plugin: report.plugin, manifest_hash: report.manifest_hash, executable_ids: [...executableIds].sort(), reason, expires_at: expiresAt });
+      plugin: report.plugin, manifest_hash: report.manifest_hash, executable_ids: [...executableIds].sort(), reason, issued_at: now.iso, expires_at: expiresAt });
     waivers.set(waiver, { authority: this, reportHash: artifactHash(report), principal: structuredClone(principal) });
     return waiver;
   }
@@ -86,27 +95,33 @@ export class ExtensionAuthority {
     return Boolean(record?.authority === this && authorization.report_hash === artifactHash(report) && same(record.report, report));
   }
 
-  verifyWaiver(waiver, report, executableIds, now) {
-    const record = waivers.get(waiver);
-    return Boolean(record?.authority === this && record.reportHash === artifactHash(report) && waiver.scope === "controlled-execution-gap"
-      && waiver.plugin === report.plugin && waiver.manifest_hash === report.manifest_hash && same(waiver.executable_ids, [...executableIds].sort())
-      && Date.parse(waiver.expires_at) > Date.parse(now));
+  verifyWaiver(waiver, report, executableIds) {
+    try {
+      const record = waivers.get(waiver); const now = clockTime(this).millis;
+      return Boolean(record?.authority === this && record.reportHash === artifactHash(report) && waiver.scope === "controlled-execution-gap"
+        && waiver.plugin === report.plugin && waiver.manifest_hash === report.manifest_hash && same(waiver.executable_ids, [...executableIds].sort())
+        && validExpiry(waiver.issued_at) && validExpiry(waiver.expires_at) && Date.parse(waiver.issued_at) <= now && now < Date.parse(waiver.expires_at));
+    } catch { return false; }
   }
 
   waiveMigrationSecurity(session, preview, { reason, expiresAt }) {
     const sessionRecord = sessions.get(session); const principal = sessionRecord?.authority === this ? sessionRecord.principal : null;
     if (!principal?.roles.includes("governance-reviewer")) extensionFail("KDLC_MIGRATION_WAIVER_DENIED", "Security-weakening migration waiver requires an authenticated governance reviewer");
-    if (!preview?.security_weakening || typeof reason !== "string" || !reason.trim() || !validExpiry(expiresAt)) extensionFail("KDLC_MIGRATION_WAIVER_INVALID", "Security-weakening migration waiver is malformed");
+    const now = clockTime(this);
+    if (!preview?.security_weakening || typeof reason !== "string" || !reason.trim() || !validExpiry(expiresAt) || Date.parse(expiresAt) <= now.millis) extensionFail("KDLC_MIGRATION_WAIVER_INVALID", "Security-weakening migration waiver is malformed or inactive");
     const waiver = Object.freeze({ api_version: "kdlc.dev/migration-waiver/v1alpha1", scope: "security-weakening-migration", actor: principal.actor,
-      migration_id: preview.migration_id, preview_hash: preview.preview_hash, reason, expires_at: expiresAt });
+      migration_id: preview.migration_id, preview_hash: preview.preview_hash, reason, issued_at: now.iso, expires_at: expiresAt });
     migrationWaivers.set(waiver, { authority: this, previewHash: artifactHash(preview), principal: structuredClone(principal) });
     return waiver;
   }
 
-  verifyMigrationWaiver(waiver, preview, now) {
-    const record = migrationWaivers.get(waiver);
-    return Boolean(record?.authority === this && record.previewHash === artifactHash(preview) && waiver.scope === "security-weakening-migration"
-      && waiver.migration_id === preview.migration_id && waiver.preview_hash === preview.preview_hash && Date.parse(waiver.expires_at) > Date.parse(now));
+  verifyMigrationWaiver(waiver, preview) {
+    try {
+      const record = migrationWaivers.get(waiver); const now = clockTime(this).millis;
+      return Boolean(record?.authority === this && record.previewHash === artifactHash(preview) && waiver.scope === "security-weakening-migration"
+        && waiver.migration_id === preview.migration_id && waiver.preview_hash === preview.preview_hash && validExpiry(waiver.issued_at) && validExpiry(waiver.expires_at)
+        && Date.parse(waiver.issued_at) <= now && now < Date.parse(waiver.expires_at));
+    } catch { return false; }
   }
 }
 
