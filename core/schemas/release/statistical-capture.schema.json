@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://kdlc.dev/schemas/release/statistical-capture-1.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "trial_id", "captured_at", "corpus_hash", "profile_hash", "manifest_hashes", "provider_request_ids", "results", "exclusions"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/statistical-capture/v1alpha1"}, "trial_id": {"type": "string", "pattern": "^trial-(?:00[1-9]|0[12][0-9]|030)$"},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "corpus_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "profile_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"},
+    "manifest_hashes": {"type": "object", "additionalProperties": false, "required": ["prompt", "tool", "model"], "properties": {"prompt": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "tool": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}, "model": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}}},
+    "provider_request_ids": {"type": "array", "minItems": 12, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "results": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["case_id", "response", "raw_output", "raw_output_hash"], "properties": {"case_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"}, "response": {"type": "object", "additionalProperties": false, "required": ["decision", "answer"], "properties": {"decision": {"enum": ["answer", "abstain", "deny", "conflict"]}, "answer": {"type": "string"}}}, "raw_output": {"type": "string", "minLength": 1}, "raw_output_hash": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}}}},
+    "exclusions": {"const": []}
+  }
+}

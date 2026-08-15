@@ -1,0 +1,9 @@
+{
+  "api_version": "kdlc.dev/statistical-capture-status/v1alpha1",
+  "status": "blocked",
+  "reason": "Provider, exact model revision, and independently supplied provider capture inputs have not been approved. No live calls or model outputs were produced by this tranche.",
+  "required_trials": 30,
+  "required_full_corpus_cases_per_trial": 12,
+  "captured_trials": 0,
+  "exclusions_allowed": false
+}

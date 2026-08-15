@@ -1,0 +1,4 @@
+{
+  "api_version": "kdlc.dev/statistical-manifest/v1alpha1", "kind": "tool", "id": "offline-no-tools", "version": 1, "status": "frozen",
+  "configuration": {"mode": "none", "tools": []}
+}

@@ -81,7 +81,9 @@ test("REL-001 readiness record keeps final release gates explicitly open", async
   const readiness = await text("docs/release-readiness.md");
   assert.match(readiness, /not a conformance statement,\s+release announcement, or evidence that REL-001 is complete/i);
   assert.match(readiness, /private vulnerability reporting/i);
-  assert.match(readiness, /secret scanning, non-provider patterns, validity checks, and\s+push protection/i);
+  assert.match(readiness, /secret scanning, push protection, and\s+Dependabot security updates are enabled/i);
+  assert.match(readiness, /non-provider secret patterns and validity checks are unavailable/i);
+  assert.match(readiness, /allowed_actions` remains `all`/);
   assert.match(readiness, /Final REL-001 blockers/);
 });
 

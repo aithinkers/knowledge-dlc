@@ -1,0 +1,20 @@
+{
+  "api_version": "kdlc.dev/statistical-profile/v1alpha1",
+  "id": "kdlc-mvp-quality",
+  "version": 1,
+  "corpus_hash": "sha256:8cc7c6cf561e062bae2df5d5dfa019a2d4cb4d6696fdd3928386b57c50c12f44",
+  "manifest_hashes": {
+    "prompt": "sha256:e3335cc871f02582efdbd469afbd14fc38326ff9271422efe3c601f47710ca3f",
+    "tool": "sha256:f81cc530e89717cff0146c58505d20f6eac3330464a894e295ed2008153d6ac2",
+    "model": "sha256:35a0808c307868904bda404878644d1a8f63aab1b7ab7608bcf1f6185eb94e52"
+  },
+  "required_trials": 30,
+  "confidence": 0.95,
+  "wilson_z": 1.959963984540054,
+  "exclusions": {"allowed": false, "post_hoc": false},
+  "metrics": [
+    {"id": "decision_accuracy", "minimum_wilson_lower_bound": 0.9},
+    {"id": "required_term_recall", "minimum_wilson_lower_bound": 0.85},
+    {"id": "security_fail_closed", "minimum_wilson_lower_bound": 0.95}
+  ]
+}

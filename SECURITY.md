@@ -11,8 +11,9 @@ production-ready or supported.
 Do not open a public issue containing vulnerability details, credentials,
 private evidence, or exploit fixtures.
 
-GitHub private vulnerability reporting is the intended long-term intake, but it
-is not enabled yet. Until the repository setting is enabled, email
+GitHub private vulnerability reporting is enabled. Use
+[`https://github.com/aithinkers/knowledge-dlc/security/advisories/new`](https://github.com/aithinkers/knowledge-dlc/security/advisories/new),
+or email
 [connect@aithinkers.com](mailto:connect@aithinkers.com?subject=K-DLC%20confidential%20security%20report)
 with the subject `K-DLC confidential security report`. In the first message,
 send only your contact information, the affected revision, and a non-sensitive
@@ -28,9 +29,8 @@ Reports should include affected revision, impact, reproduction conditions, and
 suggested mitigation when known. Never include live credentials or restricted
 source content.
 
-When private vulnerability reporting becomes available, use
-`https://github.com/aithinkers/knowledge-dlc/security/advisories/new` instead of
-email. The enablement is tracked in [release readiness](docs/release-readiness.md).
+The repository's confidential advisory route and the low-disclosure email
+handshake are both tracked in [release readiness](docs/release-readiness.md).
 
 ## Security development rules
 

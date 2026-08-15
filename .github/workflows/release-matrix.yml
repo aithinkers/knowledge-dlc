@@ -1,0 +1,63 @@
+name: Release matrix
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: ${{ matrix.cell }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {cell: ubuntu-node22, os: ubuntu-latest, node: 22.23.2}
+          - {cell: ubuntu-node24, os: ubuntu-latest, node: 24.5.0}
+          - {cell: windows-node22, os: windows-latest, node: 22.23.2}
+          - {cell: windows-node24, os: windows-latest, node: 24.5.0}
+          - {cell: macos-node22, os: macos-latest, node: 22.23.2}
+          - {cell: macos-node24, os: macos-latest, node: 24.5.0}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm install --global npm@11.5.1
+      - run: npm ci --ignore-scripts
+      - run: node scripts/run-release-matrix-cell.mjs --cell ${{ matrix.cell }} --output result.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-matrix-${{ matrix.cell }}
+          path: result.json
+          if-no-files-found: error
+
+  release-matrix:
+    name: Release matrix
+    if: ${{ always() }}
+    needs: [matrix]
+    runs-on: ubuntu-latest
+    steps:
+      - if: ${{ needs.matrix.result != 'success' }}
+        run: exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.5.0
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-matrix-*
+          path: matrix-results
+      - run: node scripts/verify-release-matrix.mjs matrix-results

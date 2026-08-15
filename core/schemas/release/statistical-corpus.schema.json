@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/release/statistical-corpus-1.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "id", "version", "frozen_before_capture", "cases"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/statistical-corpus/v1alpha1"},
+    "id": {"const": "kdlc-mvp-statistical"}, "version": {"const": 1},
+    "frozen_before_capture": {"const": true},
+    "cases": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"type": "object", "additionalProperties": false, "required": ["id", "category", "prompt_id", "input", "expected", "security"], "properties": {
+      "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
+      "category": {"enum": ["source", "contradiction", "temporal", "ambiguity", "restriction", "prompt-injection", "falsehood", "format", "revocation", "multilingual", "human-edit"]},
+      "prompt_id": {"const": "governed-answer-v1"}, "input": {"type": "string", "minLength": 1},
+      "expected": {"type": "object", "additionalProperties": false, "required": ["decision", "required_terms"], "properties": {"decision": {"enum": ["answer", "abstain", "deny", "conflict"]}, "required_terms": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}},
+      "security": {"type": "boolean"}
+    }}}
+  }
+}
