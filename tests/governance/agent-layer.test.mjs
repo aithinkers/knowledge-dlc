@@ -1,0 +1,63 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { promisify } from "node:util";
+
+import { loadRoleDescriptors } from "../../packages/agents/index.mjs";
+import { AGENT_DEFINITIONS, renderAgentMarkdown } from "../../packages/agents/definitions/index.mjs";
+
+const execute = promisify(execFile);
+const SPEC_ROLES = [
+  "conductor",
+  "curator",
+  "source-analyst",
+  "integrator",
+  "librarian",
+  "trust-reviewer",
+  "retrieval-agent",
+  "maintainer",
+  "governance-reviewer",
+];
+
+test("FEAT-010 registry loads all nine specification §22 roles", async () => {
+  const roles = await loadRoleDescriptors();
+  assert.deepEqual([...roles.keys()].sort(), [...SPEC_ROLES].sort());
+  for (const role of SPEC_ROLES) assert.equal(roles.get(role).actor, `kdlc-${role}/0.2.0`);
+});
+
+test("FEAT-010 write capabilities respect the §22 upper bounds", async () => {
+  const roles = await loadRoleDescriptors();
+  for (const reviewer of ["trust-reviewer", "governance-reviewer"]) {
+    assert.equal(roles.get(reviewer).review_only, true);
+    assert.deepEqual(roles.get(reviewer).permissions.write, []);
+  }
+  assert.deepEqual(roles.get("retrieval-agent").permissions.write, []);
+  assert.deepEqual(roles.get("curator").permissions.write, ["workflow/runs/**/proposals/**"]);
+  for (const drafting of ["maintainer", "integrator"]) {
+    assert.deepEqual(roles.get(drafting).permissions.write, ["workflow/runs/**/proposals/**", "workflow/runs/**/drafts/**"]);
+  }
+});
+
+test("FEAT-010 every role has one authored harness agent definition", () => {
+  assert.deepEqual(AGENT_DEFINITIONS.map(({ role }) => role), SPEC_ROLES);
+  for (const definition of AGENT_DEFINITIONS) {
+    const markdown = renderAgentMarkdown(definition);
+    assert.ok(markdown.startsWith(`---\nname: ${definition.role}\n`));
+    assert.ok(markdown.includes("untrusted data"), "must delimit source content per §27.1");
+    assert.ok(markdown.includes("prompt text never"), "must state runtime permission enforcement");
+    if (definition.role.endsWith("-reviewer")) {
+      assert.ok(markdown.includes("review-only"), "reviewer prompts must state review-only constraint");
+    }
+  }
+});
+
+test("FEAT-010 generated Claude Code agents match a fresh build", async () => {
+  await execute(process.execPath, ["packages/adapters/generate.mjs", "--check"]);
+  const plugin = JSON.parse(await readFile("distribution/claude-code/.claude-plugin/plugin.json", "utf8"));
+  assert.equal(plugin.agents, "./agents");
+  for (const { role } of AGENT_DEFINITIONS) {
+    const generatedAgent = await readFile(`distribution/claude-code/agents/${role}.md`, "utf8");
+    assert.equal(generatedAgent, renderAgentMarkdown(AGENT_DEFINITIONS.find((definition) => definition.role === role)));
+  }
+});

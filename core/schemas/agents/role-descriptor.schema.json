@@ -7,7 +7,7 @@
   "required": ["api_version", "role", "actor", "review_only", "permissions"],
   "properties": {
     "api_version": {"const": "kdlc.dev/agent-role/v1alpha1"},
-    "role": {"enum": ["conductor", "source-analyst", "integrator", "librarian", "trust-reviewer", "governance-reviewer"]},
+    "role": {"enum": ["conductor", "curator", "source-analyst", "integrator", "librarian", "trust-reviewer", "retrieval-agent", "maintainer", "governance-reviewer"]},
     "actor": {"type": "string", "pattern": "^kdlc-[a-z-]+/[0-9]+\\.[0-9]+\\.[0-9]+$"},
     "review_only": {"type": "boolean"},
     "permissions": {
