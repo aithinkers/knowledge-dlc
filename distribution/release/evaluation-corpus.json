@@ -1,0 +1,103 @@
+{
+  "api_version": "kdlc.dev/release-evaluation-corpus/v1alpha1",
+  "id": "kdlc-mvp-recorded",
+  "version": 1,
+  "scope": "pre-release-structural-subset",
+  "deterministic": true,
+  "pending_categories": ["multilingual-quality", "human-reviewer-quality", "statistical-model-quality"],
+  "cases": [
+    {
+      "id": "recorded-ingest",
+      "category": "workflow",
+      "requirement_ids": ["FEAT-004"],
+      "fixtures": [
+        {"path": "tests/fixtures/models/ingest-recording.json", "sha256": "sha256:3c9ccb5493cc7c20870cc074c9c0686b4c198dbe074fb337fdc6a200d0fca0ec"},
+        {"path": "tests/fixtures/workflows/ingest-normalized.json", "sha256": "sha256:b28e24d946d65f47f852a78fc9fc6706419103d98603d20b23d1fa82a2b41a35"}
+      ],
+      "executable_evidence": {"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee", "test_ids": ["FEAT-004 ingest and adoption replay schema-valid recorded model outputs"]},
+      "expected": ["recorded model output validates", "anchored claim and proposal are deterministic", "no live model call"],
+      "security": false
+    },
+    {
+      "id": "governed-publication",
+      "category": "governance",
+      "requirement_ids": ["FEAT-004", "FEAT-008"],
+      "fixtures": [{"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee"}],
+      "executable_evidence": {"path": "tests/governance/agent-workflows.test.mjs", "sha256": "sha256:e3e6736de02a6acaf3fc0b00e51f12e85781ddb3890f27f431b3d1dd370febee", "test_ids": ["FEAT-004 approved human review binds the exact packet and permits stable publication intent", "FEAT-004 stable publication fails closed and later decisions revoke approval"]},
+      "expected": ["review packet and receipt exact-bind inputs", "stable publication rejects drift"],
+      "security": true
+    },
+    {
+      "id": "adversarial-governance",
+      "category": "security",
+      "requirement_ids": ["FEAT-008"],
+      "fixtures": [
+        {"path": "tests/fixtures/governance/adversarial.json", "sha256": "sha256:dc799bf83bab1b838a44e664577f1003918d36ac441c87f6b16fdf581bcee158"},
+        {"path": "tests/governance/governed-controls.test.mjs", "sha256": "sha256:6afd8731bb1883573e59ff08d74c2471b2608db687ed0e3a454cc7ea7f0c1f6c"}
+      ],
+      "executable_evidence": {"path": "tests/governance/governed-controls.test.mjs", "sha256": "sha256:6afd8731bb1883573e59ff08d74c2471b2608db687ed0e3a454cc7ea7f0c1f6c", "test_ids": ["FEAT-008 secret and prompt-injection fixtures block before model routing without disclosure", "FEAT-008 falsehood, authority spoofing, and duplicate-source laundering block review"]},
+      "expected": ["prompt injection and falsehood fail closed", "authority spoofing cannot expand authority", "restricted routes are denied"],
+      "security": true
+    },
+    {
+      "id": "bounded-normalization",
+      "category": "normalization",
+      "requirement_ids": ["FEAT-003"],
+      "fixtures": [{"path": "tests/governance/normalization.test.mjs", "sha256": "sha256:8c784c4f8d27f447c373af8e17665e7e7d67330203ee56e60f0387d752dc7230"}],
+      "executable_evidence": {"path": "tests/governance/normalization.test.mjs", "sha256": "sha256:8c784c4f8d27f447c373af8e17665e7e7d67330203ee56e60f0387d752dc7230", "test_ids": ["FEAT-003 descriptor, manifest, and unit schemas validate every deterministic profile", "FEAT-003 corrupt, encrypted, oversized, archive-bomb, external, macro, and unsupported inputs quarantine"]},
+      "expected": ["required structural profiles emit valid locators", "active, corrupt, encrypted, and over-budget inputs quarantine"],
+      "security": true
+    },
+    {
+      "id": "federated-nondisclosure",
+      "category": "retrieval",
+      "requirement_ids": ["FEAT-005", "FEAT-008"],
+      "fixtures": [{"path": "tests/governance/federation-retrieval.test.mjs", "sha256": "sha256:93fc47f5b611034d888fcf1bdb2c1ea4b8001c1b307660adb841f2dfbc27fd0f"}],
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:efea5423d0a9759c51a71baac898a61ae1c4b3bf09479370a69c7c54457956bc", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
+      "expected": ["unauthorized and absent responses are externally equivalent", "cache and mount drift fail closed", "qualified conflicts remain deterministic"],
+      "security": true
+    },
+    {
+      "id": "durable-concurrency",
+      "category": "concurrency",
+      "requirement_ids": ["FEAT-002"],
+      "fixtures": [{"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:1d6e30e89a1d9903a3f868316a0a7048974efc8df4b4b2663aa9f273fb8cf984"}],
+      "executable_evidence": {"path": "tests/governance/lifecycle-concurrency.test.mjs", "sha256": "sha256:1d6e30e89a1d9903a3f868316a0a7048974efc8df4b4b2663aa9f273fb8cf984", "test_ids": ["FEAT-002 finalizing publication recovers forward after audit without rollback", "FEAT-002 finalizing crash recovery reacquires dead target leases durably"]},
+      "expected": ["cross-instance mutations are serialized", "crash recovery does not create partial canonical state"],
+      "security": true
+    },
+    {
+      "id": "transport-equivalence",
+      "category": "distribution",
+      "requirement_ids": ["FEAT-006"],
+      "fixtures": [{"path": "tests/governance/distribution.test.mjs", "sha256": "sha256:57695c75b9191897bc65bfaa6b2c47750026f5db87c8de4d8c80a667545251dd"}],
+      "executable_evidence": {"path": "tests/governance/distribution.test.mjs", "sha256": "sha256:57695c75b9191897bc65bfaa6b2c47750026f5db87c8de4d8c80a667545251dd", "test_ids": ["FEAT-006 one engine produces equivalent direct, MCP, and generated-adapter outcomes"]},
+      "expected": ["direct, adapters, stdio, and HTTP produce equivalent governed outcomes", "advertised tools equal callable tools"],
+      "security": true
+    },
+    {
+      "id": "clean-rebuild",
+      "category": "rebuild",
+      "requirement_ids": ["FEAT-001", "FEAT-005"],
+      "fixtures": [
+        {"path": "tests/fixtures/federation/base-primary/retrieval-catalog.json", "sha256": "sha256:c63dfa1e176cb686704813a203da897facc971d423d4afc8fb5bdcaa6fd29c69"},
+        {"path": "tests/fixtures/federation/base-primary/index.md", "sha256": "sha256:e36010c85d8d2c96c1687440b8959759ac7f0fb39408b026cc49b2ed5e75aa0a"},
+        {"path": "tests/fixtures/federation/base-primary/policies/index.md", "sha256": "sha256:156e6989f8f3c94b9c2ef902870cb975a6fadfbf003d93220689b712aad15d37"},
+        {"path": "tests/fixtures/federation/base-primary/references/index.md", "sha256": "sha256:877cc3f4b741e1af3d061dc90e8541939fb51736178e4bc1b2a0dd743f5e1e19"},
+        {"path": "tests/fixtures/federation/base-primary/references/sources/index.md", "sha256": "sha256:b3dacbade91ef79e8f5aa9154831b1d9d5b96be3afb14fa3fadd8f1fb8ff795a"}
+      ],
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:efea5423d0a9759c51a71baac898a61ae1c4b3bf09479370a69c7c54457956bc", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
+      "expected": ["indexes rebuild byte-identically", "resolved retrieval records remain equivalent"],
+      "security": false
+    },
+    {
+      "id": "governed-revocation-erasure",
+      "category": "governance",
+      "requirement_ids": ["FEAT-008", "FEAT-009"],
+      "fixtures": [{"path": "tests/governance/revocation-erasure.test.mjs", "sha256": "sha256:cc3b37fe2511228e6e763d4922f8e9920dd7553a4b1eaa7906d241fae7a635d8"}],
+      "executable_evidence": {"path": "tests/governance/revocation-erasure.test.mjs", "sha256": "sha256:cc3b37fe2511228e6e763d4922f8e9920dd7553a4b1eaa7906d241fae7a635d8", "test_ids": ["FEAT-008 FEAT-009 exposes only instance-bound evidence derived from a verified durable purge", "FEAT-009 same-ID path substitution and post-audit late copies cannot receive a receipt", "FEAT-009 a concurrent retrieval finishing after barrier installation cannot disclose revoked content"]},
+      "expected": ["authenticated revocation resolves exact provenance impact", "legal hold and retention fail closed", "verified erasure prevents known-copy and retrieval races", "opaque FEAT-008 completion evidence exact-binds the durable receipt"],
+      "security": true
+    }
+  ]
+}

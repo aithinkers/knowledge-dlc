@@ -1,5 +1,6 @@
 import { CLI_COMMANDS } from "../cli/index.mjs";
 import { MCP_PROTOCOL, MCP_TOOLS } from "../mcp/index.mjs";
+import { descriptors } from "../normalizers/index.mjs";
 
 export const distributionDefinition = Object.freeze({
   version: 1,
@@ -26,7 +27,7 @@ export const distributionDefinition = Object.freeze({
       "job_cancel",
     ].includes(name),
   ).map(({ name }) => name),
-  conformance_modules: ["Core", "Lifecycle", "Federated", "Served"],
+  conformance_modules: ["Core", "Lifecycle", "Governed", "Federated", "Served"],
   transports: ["stdio", "streamable-http"],
-  format_profiles: [],
+  format_profiles: Object.keys(descriptors),
 });

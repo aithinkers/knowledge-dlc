@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kdlc.dev/schemas/release/evaluation-profile-1.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["api_version", "id", "version", "corpus", "mandatory_requirements", "mode", "structural_thresholds", "statistical_suite"],
+  "properties": {
+    "api_version": {"const": "kdlc.dev/release-evaluation-profile/v1alpha1"},
+    "id": {"const": "kdlc-mvp-pre-release"}, "version": {"const": 1},
+    "corpus": {"type": "object", "additionalProperties": false, "required": ["id", "version", "sha256"], "properties": {"id": {"const": "kdlc-mvp-recorded"}, "version": {"const": 1}, "sha256": {"$ref": "https://kdlc.dev/schemas/v1alpha1/common.schema.json#/$defs/digest"}}},
+    "mandatory_requirements": {"type": "array", "minItems": 8, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^FEAT-[0-9]{3}$"}},
+    "mode": {"const": "recorded-only"},
+    "structural_thresholds": {"type": "object", "additionalProperties": false, "required": ["minimum_pass_rate", "security_failures_allowed", "live_model_calls_allowed"], "properties": {"minimum_pass_rate": {"const": 1}, "security_failures_allowed": {"const": 0}, "live_model_calls_allowed": {"const": 0}}},
+    "statistical_suite": {"type": "object", "additionalProperties": false, "required": ["status", "required_trials", "confidence", "reason"], "properties": {"status": {"const": "pending"}, "required_trials": {"type": "integer", "minimum": 2}, "confidence": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}, "reason": {"type": "string", "minLength": 1}}}
+  }
+}

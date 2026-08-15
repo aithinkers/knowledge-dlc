@@ -45,6 +45,8 @@
   "scripts": {
     "check:governance": "node scripts/verify-governance.mjs",
     "check:supply-chain": "node scripts/verify-supply-chain.mjs",
+    "check:release-evidence": "node scripts/verify-release-evidence.mjs",
+    "test:release-evaluation": "node scripts/run-release-evaluation.mjs",
     "sbom:generate": "node scripts/verify-supply-chain.mjs --write",
     "test:extensions": "node --test tests/governance/extensions.test.mjs",
     "test:governance": "node --test tests/governance/*.test.mjs",

@@ -23,6 +23,8 @@ complete.
 - [Support policy](SUPPORT.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Release-readiness gates](docs/release-readiness.md)
+- [Machine-readable pre-release conformance](distribution/release/conformance-statement.json)
+- [Recorded pre-release evaluation](distribution/release/evaluation-report.json)
 
 ## Required delivery flow
 
