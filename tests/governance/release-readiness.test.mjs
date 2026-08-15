@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { parseYamlArtifact } from "../../packages/contracts/index.mjs";
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, readTrustedFile } from "../../scripts/supply-chain-validation.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const text = (path) => readFile(resolve(root, path), "utf8");
@@ -64,6 +64,7 @@ test("REL-001 npm updates, installed licenses, dependency graph, and exact packa
   assert.ok(packageFiles.files.includes("packages/retrieval/src/retriever.mjs"));
   assert.deepEqual(exactPackageManifestFailures([...packageFiles.files, "packages/core/src/unexpected-secret.txt"], packageFiles.files), ["unexpected emitted package file: packages/core/src/unexpected-secret.txt"]);
   assert.deepEqual(exactPackageManifestFailures(packageFiles.files.filter((path) => path !== "package.json"), packageFiles.files), ["missing emitted package file: package.json"]);
+  assert.equal(normalizeNpmPackPath("distribution\\release\\evaluation-report.json"), "distribution/release/evaluation-report.json");
   assert.deepEqual(installedMetadataFailures({ identity: { name: "example" }, entry: { version: "1.0.0" }, metadata: { name: "example", version: "1.0.1", license: "GPL-3.0" }, allowedLicenses: policy.allowed_licenses }), [
     "installed identity differs from lock: example@1.0.0", "installed license is not allowlisted: example@1.0.0 (GPL-3.0)"
   ]);

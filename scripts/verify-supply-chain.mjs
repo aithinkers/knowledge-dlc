@@ -5,7 +5,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, readTrustedFile } from "./supply-chain-validation.mjs";
+import { exactPackageManifestFailures, installedMetadataFailures, installedTreeHash, normalizeNpmPackPath, readTrustedFile } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile);
 const root = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDATE_ROOT) : resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,7 +70,7 @@ try {
   const { stdout } = await execute(npm, ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
   const result = JSON.parse(stdout);
   if (!Array.isArray(result) || result.length !== 1 || !Array.isArray(result[0].files)) throw new Error("unexpected npm pack result");
-  emittedFiles = result[0].files.map(({ path }) => path).sort();
+  emittedFiles = result[0].files.map(({ path }) => normalizeNpmPackPath(path)).sort();
 } catch (error) { failures.push(`npm pack manifest unavailable: ${error.message}`); }
 
 const lockPackages = lock.packages ?? {};

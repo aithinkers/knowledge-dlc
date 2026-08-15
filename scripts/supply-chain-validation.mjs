@@ -44,6 +44,11 @@ export async function readTrustedFile(root, relativePath, { afterOpen } = {}) {
   }
 }
 
+export function normalizeNpmPackPath(path) {
+  if (typeof path !== "string" || !path) throw new Error("npm pack path is invalid");
+  return path.replaceAll("\\", "/");
+}
+
 export function exactPackageManifestFailures(actual, expected) {
   const normalize = (values) => [...new Set(values)].sort();
   const actualPaths = normalize(actual);

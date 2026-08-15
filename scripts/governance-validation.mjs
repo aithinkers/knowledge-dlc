@@ -21,6 +21,7 @@ export const protectedHarnessFiles = Object.freeze([
   "scripts/derive-release-artifacts.mjs",
   "scripts/verify-release-matrix.mjs",
   "scripts/collect-release-state.mjs",
+  "scripts/release-state-derivation.mjs",
   "scripts/release-evaluation-boundary.mjs",
   "scripts/run-release-evaluation.mjs",
   "scripts/release-evidence-definition.mjs",
@@ -69,9 +70,10 @@ function inspectReservedContexts(content, entryName) {
   const workflow = document.toJS({ maxAliasCount: 100 });
   if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) return [`candidate workflow is not a mapping: ${entryName}`];
   const isProtectedOwner = reservedContexts.some(({ workflow: owner }) => entryName === owner);
-  if (!isProtectedOwner && (workflow.permissions?.statuses === "write" || workflow.permissions?.checks === "write")) failures.push(`candidate workflow cannot mint check or status contexts: ${entryName}`);
+  const canMintContexts = (permissions) => permissions === "write-all" || (permissions && typeof permissions === "object" && !Array.isArray(permissions) && (permissions.statuses === "write" || permissions.checks === "write"));
+  if (!isProtectedOwner && canMintContexts(workflow.permissions)) failures.push(`candidate workflow cannot mint check or status contexts: ${entryName}`);
   if (!isProtectedOwner && workflow.jobs && typeof workflow.jobs === "object" && !Array.isArray(workflow.jobs)) for (const [jobId, job] of Object.entries(workflow.jobs)) {
-    if (job && typeof job === "object" && !Array.isArray(job) && (job.permissions?.statuses === "write" || job.permissions?.checks === "write")) failures.push(`candidate workflow job cannot mint check or status contexts: ${entryName}#${jobId}`);
+    if (job && typeof job === "object" && !Array.isArray(job) && canMintContexts(job.permissions)) failures.push(`candidate workflow job cannot mint check or status contexts: ${entryName}#${jobId}`);
     if (job && typeof job === "object" && !Array.isArray(job) && typeof job.name === "string" && job.name.includes("${{")) {
       failures.push(`dynamic job name is forbidden outside a protected workflow: ${entryName}#${jobId}`);
     }

@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 import { promisify } from "node:util";
+import { normalizeNpmPackPath } from "./supply-chain-validation.mjs";
 
 const execute = promisify(execFile); const [candidateArgument, outputArgument] = process.argv.slice(2);
 if (!candidateArgument || !outputArgument || process.argv.length !== 4) throw new Error("usage: node scripts/derive-release-artifacts.mjs <candidate-root> <output.json>");
@@ -19,7 +20,7 @@ try {
   for (const destination of destinations) {
     const { stdout } = await execute(npm, ["pack", "--json", "--ignore-scripts", "--pack-destination", destination], { cwd: candidate, env: safeEnvironment, maxBuffer: 32 * 1024 * 1024, ...npmOptions });
     const parsed = JSON.parse(stdout); if (!Array.isArray(parsed) || parsed.length !== 1 || !parsed[0].filename || !Array.isArray(parsed[0].files)) throw new Error("npm pack did not emit one artifact and exact manifest");
-    const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path, size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en")); const bytes = await readFile(resolve(destination, parsed[0].filename));
+    const manifest = parsed[0].files.map(({ path, size, mode }) => ({ path: normalizeNpmPackPath(path), size, mode })).sort((left, right) => left.path.localeCompare(right.path, "en")); const bytes = await readFile(resolve(destination, parsed[0].filename));
     builds.push({ filename: parsed[0].filename, sha256: digest(bytes), manifest_sha256: digest(JSON.stringify(manifest)), file_count: manifest.length });
   }
   if (builds[0].sha256 !== builds[1].sha256 || builds[0].manifest_sha256 !== builds[1].manifest_sha256 || builds[0].file_count !== builds[1].file_count) throw new Error("trusted double-package derivation is not reproducible");

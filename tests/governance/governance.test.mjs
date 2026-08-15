@@ -270,6 +270,8 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
     };
     for (const [index, contextName] of ["Candidate tests", "CodeQL (JavaScript/TypeScript)", "Dependency review", "Pull request traceability", "Repository policy", "Secret history scan", "Supply-chain verification"].entries()) spoofWorkflows[`spoof-context-${index}.yml`] = `name: harmless\njobs:\n  pass:\n    name: ${contextName}\n`;
     spoofWorkflows["spoof-status-api.yml"] = "name: harmless\npermissions:\n  statuses: write\njobs:\n  pass:\n    runs-on: ubuntu-latest\n    steps: []\n";
+    spoofWorkflows["spoof-write-all.yml"] = "name: harmless\npermissions: write-all\njobs:\n  pass:\n    runs-on: ubuntu-latest\n    steps: []\n";
+    spoofWorkflows["spoof-job-write-all.yml"] = "name: harmless\njobs:\n  pass:\n    permissions: write-all\n    runs-on: ubuntu-latest\n    steps: []\n";
     for (const [name, contents] of Object.entries(spoofWorkflows)) await writeFile(join(candidate, ".github/workflows", name), contents);
 
     const failures = await validateHarnessIntegrity(candidate, trusted);
@@ -292,6 +294,8 @@ test("REQ-GOV-002 protects the trusted release gate and rejects exact-context sp
     assert.ok(failures.includes("dynamic job name is forbidden outside a protected workflow: spoof-matrix.yml#pass"));
     for (const [index, contextName] of ["Candidate tests", "CodeQL (JavaScript/TypeScript)", "Dependency review", "Pull request traceability", "Repository policy", "Secret history scan", "Supply-chain verification"].entries()) assert.ok(failures.includes(`reserved check name "${contextName}" appears in another workflow: spoof-context-${index}.yml#pass`));
     assert.ok(failures.includes("candidate workflow cannot mint check or status contexts: spoof-status-api.yml"));
+    assert.ok(failures.includes("candidate workflow cannot mint check or status contexts: spoof-write-all.yml"));
+    assert.ok(failures.includes("candidate workflow job cannot mint check or status contexts: spoof-job-write-all.yml#pass"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { deriveRulesetState } from "./release-state-derivation.mjs";
 
 const [output] = process.argv.slice(2); if (!output || process.argv.length !== 3) throw new Error("usage: node scripts/collect-release-state.mjs <output-directory>");
 const [owner, repository] = (process.env.GITHUB_REPOSITORY ?? "").split("/"); const token = process.env.GH_TOKEN; const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"));
@@ -8,24 +9,16 @@ if (!owner || !repository || !token || !event.pull_request) throw new Error("tru
 const headers = { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" };
 const api = async (path) => { const response = await fetch(`https://api.github.com/repos/${owner}/${repository}${path}`, { headers }); if (!response.ok) throw new Error(`${path}: ${response.status}`); return response.json(); };
 const apiAll = async (path) => { const values = []; for (let page = 1; ; page += 1) { const batch = await api(`${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`); values.push(...batch); if (batch.length < 100) return values; } };
-const repo = await api("");
+const [repo, workflowPermissions] = await Promise.all([api(""), api("/actions/permissions/workflow")]);
 const dependencies = await Promise.all(Array.from({ length: 8 }, (_, index) => api(`/issues/${index + 2}`)));
 const summaries = await api("/rulesets?includes_parents=true&per_page=100");
 const rulesets = await Promise.all(summaries.filter(({ target, enforcement }) => target === "branch" && enforcement === "active").map(({ id }) => api(`/rulesets/${id}`)));
-const applicable = rulesets.filter(({ conditions }) => conditions?.ref_name?.include?.includes("~DEFAULT_BRANCH"));
-const rule = (type) => applicable.flatMap(({ rules }) => rules ?? []).find((candidate) => candidate.type === type);
-const pullRequest = rule("pull_request")?.parameters ?? {}; const statusChecks = rule("required_status_checks")?.parameters ?? {};
-const requiredChecks = (statusChecks.required_status_checks ?? []).map(({ context }) => context).sort();
-const directPushBypass = applicable.some(({ bypass_actors }) => (bypass_actors ?? []).some(({ bypass_mode }) => bypass_mode === "always"));
+const derivedRuleset = deriveRulesetState(rulesets, { baseRef: event.pull_request.base.ref, defaultBranch: repo.default_branch });
 const settings = {
   visibility: repo.visibility ?? "unknown",
+  actions: { default_workflow_permissions: workflowPermissions.default_workflow_permissions ?? "unknown", can_approve_pull_request_reviews: workflowPermissions.can_approve_pull_request_reviews === true },
   release_blocking_issues_closed: dependencies.every(({ state, pull_request }) => state === "closed" && !pull_request),
-  ruleset: {
-    ids: applicable.map(({ id }) => id).sort((left, right) => left - right), active: applicable.length > 0, default_branch: applicable.length > 0,
-    prevents_deletion: Boolean(rule("deletion")), prevents_non_fast_forward: Boolean(rule("non_fast_forward")), linear_history: Boolean(rule("required_linear_history")),
-    pull_request: { required_approvals: pullRequest.required_approving_review_count ?? 0, require_code_owner_review: pullRequest.require_code_owner_review === true, dismiss_stale_reviews: pullRequest.dismiss_stale_reviews_on_push === true, require_last_push_approval: pullRequest.require_last_push_approval === true, require_thread_resolution: pullRequest.required_review_thread_resolution === true, allowed_merge_methods: [...(pullRequest.allowed_merge_methods ?? [])].sort() },
-    strict_status_checks: statusChecks.strict_required_status_checks_policy === true, required_checks: requiredChecks, direct_push_bypass: directPushBypass
-  }
+  ruleset: derivedRuleset
 };
 
 const head = event.pull_request.head.sha; const [reviews, comments] = await Promise.all([apiAll(`/pulls/${event.pull_request.number}/reviews`), apiAll(`/issues/${event.pull_request.number}/comments`)]);
