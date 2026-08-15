@@ -90,11 +90,24 @@ export class NodeFileStore {
       }
     }
     try {
-      const metadata = await lstat(target);
-      if (metadata.isSymbolicLink()) throw invalid("Storage target must not be a symlink");
-      const canonical = await realpath(target);
-      const canonicalRel = relative(canonicalRoot, canonical);
-      if (canonicalRel === ".." || canonicalRel.startsWith(`..${sep}`) || isAbsolute(canonicalRel)) throw invalid("Storage target escapes configured root");
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const metadata = await lstat(target);
+        if (metadata.isSymbolicLink()) throw invalid("Storage target must not be a symlink");
+        const canonical = await realpath(target);
+        const canonicalRel = relative(canonicalRoot, canonical);
+        if (canonicalRel !== ".." && !canonicalRel.startsWith(`..${sep}`) && !isAbsolute(canonicalRel)) break;
+        const observed = await lstat(target);
+        if (observed.isSymbolicLink()) throw invalid("Storage target must not be a symlink");
+        // A mutex contender may rename the inspected directory for stale
+        // recovery and create a successor at the same lexical path. Retry only
+        // when that exact identity changed; a stable outside identity remains
+        // a containment violation and always fails closed.
+        if (metadata.dev !== observed.dev || metadata.ino !== observed.ino) {
+          if (attempt < 2) continue;
+          throw Object.assign(new Error("Storage target identity changed during containment validation"), { code: "EBADF" });
+        }
+        throw invalid("Storage target escapes configured root");
+      }
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }

@@ -53,7 +53,7 @@
       "category": "retrieval",
       "requirement_ids": ["FEAT-005", "FEAT-008"],
       "fixtures": [{"path": "tests/governance/federation-retrieval.test.mjs", "sha256": "sha256:93fc47f5b611034d888fcf1bdb2c1ea4b8001c1b307660adb841f2dfbc27fd0f"}],
-      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:572c01ef42c8641dcc1a59e29e84f9259bff2742f415798d6a9c540243ca5c86", "test_ids": ["REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift"]},
       "expected": ["unauthorized and absent responses are externally equivalent", "cache and mount drift fail closed", "qualified conflicts remain deterministic"],
       "security": true
     },
@@ -86,7 +86,7 @@
         {"path": "tests/fixtures/federation/base-primary/references/index.md", "sha256": "sha256:877cc3f4b741e1af3d061dc90e8541939fb51736178e4bc1b2a0dd743f5e1e19"},
         {"path": "tests/fixtures/federation/base-primary/references/sources/index.md", "sha256": "sha256:b3dacbade91ef79e8f5aa9154831b1d9d5b96be3afb14fa3fadd8f1fb8ff795a"}
       ],
-      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:7660db098ba58066dc330f5d4142aa5310aab2965f3186e7588dd21ce865f724", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
+      "executable_evidence": {"path": "tests/governance/release-evidence.test.mjs", "sha256": "sha256:572c01ef42c8641dcc1a59e29e84f9259bff2742f415798d6a9c540243ca5c86", "test_ids": ["REL-001 clean rebuild removes caches and indexes then reproduces retrieval records and bytes"]},
       "expected": ["indexes rebuild byte-identically", "resolved retrieval records remain equivalent"],
       "security": false
     },

@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -14,9 +12,6 @@ import { scrubbedReleaseEnvironment } from "./release-evaluation-boundary.mjs";
 if (process.argv.length !== 2) throw new Error("usage: node scripts/run-release-evaluation.mjs");
 const execute = promisify(execFile);
 const root = process.env.KDLC_CANDIDATE_ROOT ? resolve(process.env.KDLC_CANDIDATE_ROOT) : process.cwd();
-const temporaryReadRoot = process.platform === "darwin" ? "/var" : tmpdir();
-const temporaryReadArguments = [...new Set([temporaryReadRoot, realpathSync(tmpdir())])].map((path) => `--allow-fs-read=${path}`);
-const temporaryWriteArguments = [...new Set([tmpdir(), realpathSync(tmpdir())])].map((path) => `--allow-fs-write=${path}`);
 const testIsolationArgument = Number(process.versions.node.split(".")[0]) >= 24 ? "--test-isolation=none" : "--experimental-test-isolation=none";
 const failures = await validateReleaseEvidence(root);
 if (failures.length) throw new Error(`release evidence failed validation: ${failures.join("; ")}`);
@@ -28,13 +23,16 @@ for (const recorded of run.results) {
   const releaseCase = corpus.cases.find(({ id }) => id === recorded.case_id);
   const allowNormalizer = recorded.case_id === "bounded-normalization";
   let status = "passed";
-  const boundaryRoot = await mkdtemp(resolve(tmpdir(), "kdlc-release-boundary-"));
+  // Keep the writable test sandbox beneath the read-only candidate root. This
+  // gives Windows one canonical drive/path ancestry and avoids granting read
+  // access to user-profile parents merely to traverse an 8.3 TEMP alias.
+  const boundaryRoot = await mkdtemp(resolve(root, ".kdlc-release-boundary-"));
   const boundaryReport = resolve(boundaryRoot, "observations.json");
   try {
     const pattern = `^(?:${releaseCase.executable_evidence.test_ids.map((id) => id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`;
-    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, ...temporaryReadArguments, ...temporaryWriteArguments, "--import", pathToFileURL(resolve(root, "scripts/release-offline-guard.mjs")).href, "--test", testIsolationArgument, "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
+    const { stdout } = await execute(process.execPath, ["--permission", ...(allowNormalizer ? ["--allow-child-process"] : []), `--allow-fs-read=${root}`, `--allow-fs-write=${boundaryRoot}`, "--import", pathToFileURL(resolve(root, "scripts/release-offline-guard.mjs")).href, "--test", testIsolationArgument, "--test-name-pattern", pattern, releaseCase.executable_evidence.path], {
       cwd: root,
-      env: scrubbedReleaseEnvironment(boundaryReport, { root, allowNormalizer }),
+      env: scrubbedReleaseEnvironment(boundaryReport, { root, allowNormalizer, temporaryRoot: boundaryRoot }),
       maxBuffer: 32 * 1024 * 1024,
     });
     const pass = Number(/(?:#|ℹ)\s*pass\s+(\d+)/.exec(stdout)?.[1] ?? -1); const skipped = Number(/(?:#|ℹ)\s*skipped\s+(\d+)/.exec(stdout)?.[1] ?? 0);

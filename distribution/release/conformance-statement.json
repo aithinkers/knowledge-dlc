@@ -16,5 +16,5 @@
   "pending_requirements": [
     {"id": "REL-001", "issue": 10, "reason": "Statistical evaluation, final artifact/version agreement, external protections, and independent release verification remain pending.", "release_blocking": true}
   ],
-  "evidence": [{"path":"distribution/release/evaluation-report.json","sha256":"sha256:56c5ddaa99ac2e451a2b4c055363395cfb0e80d03555b625b19cf86812dc57a0"},{"path":"docs/traceability.json","sha256":"sha256:59c7f4338e0677e5ac7558201dfb7843c8c328c924104688c3a1f788615fe38b"},{"path":"docs/release-readiness.md","sha256":"sha256:aaf3fd7e419a3351ac4462eb88f6329073e7cac4ed3a3aa8476437213da98c8d"}]
+  "evidence": [{"path":"distribution/release/evaluation-report.json","sha256":"sha256:d0eddacd82d80ba479309da046c1fdaf1543b3dd83adb33717c790638ab9c77d"},{"path":"docs/traceability.json","sha256":"sha256:59c7f4338e0677e5ac7558201dfb7843c8c328c924104688c3a1f788615fe38b"},{"path":"docs/release-readiness.md","sha256":"sha256:aaf3fd7e419a3351ac4462eb88f6329073e7cac4ed3a3aa8476437213da98c8d"}]
 }

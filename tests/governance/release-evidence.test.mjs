@@ -24,6 +24,19 @@ async function makeRemovable(path) {
   if (metadata.isDirectory()) { await chmod(path, 0o700); const directory = await opendir(path); for await (const entry of directory) await makeRemovable(resolve(path, entry.name)); }
   else if (!metadata.isSymbolicLink()) await chmod(path, 0o600);
 }
+async function copyFixtureTree(source, destination) {
+  const metadata = await lstat(source);
+  if (metadata.isSymbolicLink()) throw new Error("Release fixture trees cannot contain symlinks");
+  if (metadata.isDirectory()) {
+    await mkdir(destination, { recursive: true });
+    const directory = await opendir(source);
+    for await (const entry of directory) await copyFixtureTree(resolve(source, entry.name), resolve(destination, entry.name));
+    return;
+  }
+  if (!metadata.isFile()) throw new Error("Release fixture trees require regular files");
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, await readFile(source), { flag: "wx", mode: 0o600 });
+}
 async function listIndexFiles(directory, prefix = "") {
   const paths = []; const handle = await opendir(directory);
   for await (const entry of handle) {
@@ -131,7 +144,7 @@ test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval
   const projectRoot = await mkdtemp(resolve(tmpdir(), "kdlc-release-rebuild-"));
   context.after(async () => { await makeRemovable(projectRoot); await rm(projectRoot, { recursive: true, force: true }); });
   const primary = resolve(projectRoot, "primary");
-  await cp(resolve(root, "tests/fixtures/federation/base-primary"), primary, { recursive: true });
+  await copyFixtureTree(resolve(root, "tests/fixtures/federation/base-primary"), primary);
   await assertCommittedIndexes(primary);
   const driftPath = resolve(primary, committedIndexDefinitions[0].path); const committedBytes = await readFile(driftPath);
   await writeFile(driftPath, `${committedBytes.toString("utf8")}drift\n`); await assert.rejects(() => assertCommittedIndexes(primary)); await writeFile(driftPath, committedBytes);
@@ -171,7 +184,7 @@ test("REL-001 clean rebuild removes caches and indexes then reproduces retrieval
 test("REL-001 federated evidence denies unauthorized local concepts without disclosure and detects cache drift", async (context) => {
   const projectRoot = await mkdtemp(resolve(tmpdir(), "kdlc-release-federated-"));
   context.after(async () => { await makeRemovable(projectRoot); await rm(projectRoot, { recursive: true, force: true }); });
-  await cp(resolve(root, "tests/fixtures/federation/base-primary"), resolve(projectRoot, "primary"), { recursive: true });
+  await copyFixtureTree(resolve(root, "tests/fixtures/federation/base-primary"), resolve(projectRoot, "primary"));
   const project = { api_version: "kdlc.dev/v1alpha1", kind: "Project", metadata: { name: "release-federated" }, purpose: "./purpose.md", profile: "base@1", knowledge_bases: [{ name: "primary", uri: "./primary", mode: "read-only", role: "primary", priority: 100 }] };
   const clock = { now: () => "2026-08-15T00:00:00.000Z" }; const audit = { append: async () => {} };
   const governancePolicy = { api_version: "kdlc.dev/governance-policy/v1alpha1", id: "release-federated", version: 1, minimum_independent_sources: 1, required_erasure_surfaces: [], waiver_authorities: {}, declassification_authorities: {}, erasure_policy_refs: {}, external_models: {} };
