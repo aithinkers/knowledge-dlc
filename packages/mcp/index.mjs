@@ -215,6 +215,19 @@ export class McpProjectServer {
     const job = /^kdlc:\/\/jobs\/(job_[a-f0-9]{16})$/.exec(uri);
     if (job)
       return this.engine(principal).execute("job_status", { id: job[1] });
+    const review = /^kdlc:\/\/reviews\/([A-Za-z0-9._-]+)\/packet$/.exec(uri);
+    if (review) {
+      if (
+        !principal.scopes.includes("review") ||
+        typeof this.engine(principal).handlers.review_packet !== "function"
+      )
+        throw Object.assign(new Error("Resource unavailable"), {
+          code: -32004,
+        });
+      return this.engine(principal).execute("review_packet", {
+        proposal_id: review[1],
+      });
+    }
     const fetch = MCP_TOOLS.find(({ name }) => name === "kb_fetch");
     if (/^kb:\/\/[a-z0-9.-]+\/.+/.test(uri) && this.available(fetch, principal))
       return this.engine(principal).execute("kb_fetch", { uri });
@@ -339,6 +352,16 @@ export class McpProjectServer {
                   {
                     uriTemplate: "kb://{knowledge_base_id}/{concept_id}",
                     name: "Knowledge concept",
+                    mimeType: "application/json",
+                  },
+                ]
+              : []),
+            ...(principal.scopes.includes("review") &&
+            typeof this.engine(principal).handlers.review_packet === "function"
+              ? [
+                  {
+                    uriTemplate: "kdlc://reviews/{proposal_id}/packet",
+                    name: "Governed review packet",
                     mimeType: "application/json",
                   },
                 ]

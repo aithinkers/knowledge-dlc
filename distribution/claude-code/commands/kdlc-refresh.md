@@ -2,4 +2,4 @@
 description: Run the governed K-DLC refresh operation
 ---
 
-Execute `kdlc refresh --output json` and return its exact versioned envelope. Do not infer success when `ok` is false.
+Invoke the argument vector ["node", "distribution/claude-code/run.mjs", "refresh", "--output", "json", ...hostArgumentVector] directly without a shell. Preserve every user argument as one argv element and return the exact versioned envelope. Do not infer success when `ok` is false.

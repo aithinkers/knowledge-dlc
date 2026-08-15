@@ -46,7 +46,7 @@ const generated = new Map([
 for (const command of definition.cli_commands)
   generated.set(
     `distribution/claude-code/commands/kdlc-${command}.md`,
-    `---\ndescription: Run the governed K-DLC ${command} operation\n---\n\nExecute \`kdlc ${command} --output json\` and return its exact versioned envelope. Do not infer success when \`ok\` is false.\n`,
+    `---\ndescription: Run the governed K-DLC ${command} operation\n---\n\nInvoke the argument vector [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", ...hostArgumentVector] directly without a shell. Preserve every user argument as one argv element and return the exact versioned envelope. Do not infer success when \`ok\` is false.\n`,
   );
 let drift = false;
 for (const [relative, content] of generated) {

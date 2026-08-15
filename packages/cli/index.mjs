@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import {
   mkdir,
   readFile,
@@ -347,6 +348,19 @@ export class KdlcEngine {
       ],
     };
     await atomicJson(path, project);
+    await atomicJson(this.path("principal-policy.json"), {
+      api_version: "kdlc.dev/local-principal-policy/v1",
+      principals: [
+        {
+          actor: "process:local",
+          scopes: ["read", "mutate"],
+          clearance: "public",
+          compartments: [],
+        },
+      ],
+      minimum_trust: "unverified",
+      stale_behavior: "warn",
+    });
     return { ...project, files };
   }
   async startJob(operation, input) {
@@ -717,10 +731,43 @@ export function renderEnvelope(envelope, output = "text") {
 
 export function createLocalProjectEngine(options = {}) {
   const root = resolve(options.root ?? process.cwd());
-  const principal = options.principal ?? {
+  const requestedPrincipal = options.principal ?? {
     actor: "process:local",
-    scopes: ["read", "mutate"],
+    scopes: [],
   };
+  let policy = null,
+    principal = requestedPrincipal;
+  const policyPath = resolve(root, ".kdlc/principal-policy.json");
+  if (existsSync(policyPath)) {
+    const candidate = JSON.parse(readFileSync(policyPath, "utf8"));
+    const record =
+      candidate?.api_version === "kdlc.dev/local-principal-policy/v1" &&
+      Array.isArray(candidate.principals)
+        ? candidate.principals.find(
+            ({ actor }) => actor === requestedPrincipal.actor,
+          )
+        : null;
+    if (
+      record &&
+      Array.isArray(record.scopes) &&
+      ["public", "internal", "confidential", "restricted"].includes(
+        record.clearance,
+      ) &&
+      Array.isArray(record.compartments) &&
+      ["unverified", "machine-confirmed", "human-reviewed"].includes(
+        candidate.minimum_trust,
+      ) &&
+      ["warn", "exclude", "fail"].includes(candidate.stale_behavior)
+    ) {
+      principal = {
+        ...requestedPrincipal,
+        scopes: [...record.scopes],
+        clearance: record.clearance,
+        compartments: [...record.compartments],
+      };
+      policy = candidate;
+    }
+  }
   const resolveMounts = async () => {
     const project = parseYamlArtifact(
       await readFile(resolve(root, "knowledge-project.yaml"), "utf8"),
@@ -731,14 +778,21 @@ export function createLocalProjectEngine(options = {}) {
   };
   const search = async (input) => {
     const { mounts } = await resolveMounts();
-    const policy = {
-      authorizeMount: async () => principal.scopes.includes("read"),
-      authorizeConcept: async () => principal.scopes.includes("read"),
-      authorizeSource: async () => principal.scopes.includes("read"),
+    const order = { public: 0, internal: 1, confidential: 2, restricted: 3 };
+    const allowed = (access) =>
+      access &&
+      order[access.classification] <= order[principal.clearance] &&
+      (access.compartments ?? []).every((item) =>
+        principal.compartments.includes(item),
+      );
+    const pdp = {
+      authorizeMount: async ({ mount }) => allowed(mount.access),
+      authorizeConcept: async ({ concept }) => allowed(concept.access),
+      authorizeSource: async ({ source }) => allowed(source.access),
     };
     const retriever = new FederatedRetriever({
       mounts,
-      policy,
+      policy: pdp,
       minimumDurationMs: 0,
     });
     const authorization = await retriever.prepareAuthorization({ principal });
@@ -747,12 +801,21 @@ export function createLocalProjectEngine(options = {}) {
       principal,
       query: input.query ?? input.question,
       mode: input.mode ?? "wiki-only",
+      minimumTrust: policy.minimum_trust,
+      staleBehavior: policy.stale_behavior,
       includeSources: true,
     });
   };
   const fetchConcept = async ({ uri }) => {
     const match = /^kb:\/\/([a-z0-9.-]+)\/(.+)$/.exec(uri ?? "");
     if (!match) throw inputError("A canonical kb URI is required");
+    const authorization = await search({ query: match[2], mode: "audit" });
+    if (
+      !authorization.results.some(
+        ({ id }) => id === `kb://${match[1]}/${match[2]}`,
+      )
+    )
+      throw missing("Requested concept is unavailable");
     const { mounts } = await resolveMounts();
     const mount = mounts.find(({ id }) => id === match[1]);
     const record = mount?.retrieval_catalog.find(({ id }) => id === match[2]);
@@ -784,24 +847,26 @@ export function createLocalProjectEngine(options = {}) {
       ],
     };
   };
-  const handlers = {
-    query: search,
-    kb_search: search,
-    kb_fetch: fetchConcept,
-    trace: fetchConcept,
-    kb_trace: fetchConcept,
-    refresh: async () => {
-      const resolved = await resolveMounts();
-      return {
-        lock: resolved.lock,
-        mounts: resolved.mounts.map(({ alias, id, resolved_ref }) => ({
-          alias,
-          id,
-          resolved_ref,
-        })),
-      };
-    },
-  };
+  const handlers = policy
+    ? {
+        query: search,
+        kb_search: search,
+        kb_fetch: fetchConcept,
+        trace: fetchConcept,
+        kb_trace: fetchConcept,
+        refresh: async () => {
+          const resolved = await resolveMounts();
+          return {
+            lock: resolved.lock,
+            mounts: resolved.mounts.map(({ alias, id, resolved_ref }) => ({
+              alias,
+              id,
+              resolved_ref,
+            })),
+          };
+        },
+      }
+    : {};
   return new KdlcEngine({
     ...options,
     root,
