@@ -98,7 +98,7 @@ bypass and status activity remain auditable in GitHub.
 
 PR #45, linked to issue #44, may use a one-time protected release-state
 bootstrap bypass only at head
-`55b4c35e2649adc5ceff21c638c2495657ec7066`. It authorizes exactly these
+`f422fb5127107fb67992d410dbbbe0c38582d070`. It authorizes exactly these
 SHA-256 transitions:
 
 - `.github/workflows/release-matrix.yml` from
@@ -109,7 +109,7 @@ SHA-256 transitions:
   to `1fc144b0954e543c94efeb8b4719dfb478f97f54da2d52b4808b6749b1539d7c`;
 - `scripts/release-state-derivation.mjs` from
   `db94d015dd3ab409eac9b2c43af5c991dedf5e3a4cd893285af5c54c6f727a34`
-  to `bfc4c4367697f12fd5eba63e72200049e69426dcd0785993067402299a4fbcfc`;
+  to `ee7d5d6b924e788a902c677b98ab3b4f483a3a3e7e2ccc11f05addb24d002b74`;
 - `scripts/release-evidence-validation.mjs` from
   `3d4e224165a5296f3baf7e5f8a2e0302e5e52baff586eadcddb8b4552b40639d`
   to `f8696009967ff88106a9fbaafbacf1c4479a0dbedd11e141d46ac6f22ea06cb3`.
