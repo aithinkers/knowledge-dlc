@@ -168,7 +168,27 @@ test("FEAT-008 waiver roles and declassification policies are exact and strict-c
   await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-date", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://classification/1", reason: "invalid date", expires_at: "2026-02-30T00:00:00Z" }), (error) => error.code === "KDLC_DECLASSIFICATION_INVALID");
   await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-policy", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://invented/1", reason: "unknown policy", expires_at: "2026-08-15T12:00:00Z" }), (error) => ["KDLC_GOVERNANCE_AUTHORITY_DENIED", "KDLC_DECLASSIFICATION_INVALID"].includes(error.code));
   await assert.rejects(authority.issueDeclassification(trusted, { id: "bad-offset", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://classification/1", reason: "nonstandard offset", expires_at: "2026-08-15T12:00:00+23:59" }), (error) => error.code === "KDLC_DECLASSIFICATION_INVALID");
+  await assert.rejects(authority.issueDeclassification(trusted, { id: "unknown-offset", subject: baseline().subject, from: "restricted", to: "public", policy_ref: "policy://classification/1", reason: "unknown offset", expires_at: "2026-08-15T12:00:00-00:00" }), (error) => error.code === "KDLC_DECLASSIFICATION_INVALID");
   await assert.rejects(engine.authorizePublication(baseline({ content: "api_key=synthetic-value-000000" }), { waivers: [{ kind: "kdlc-governance-waiver-1", id: "forged" }] }), (error) => error.code === "KDLC_GOVERNANCE_DENIED");
+});
+
+test("FEAT-008 retrieval proofs are opaque, exact-query and principal bound, and expire on the trusted clock", async () => {
+  let now = "2026-08-14T12:00:00.000Z";
+  const trustedClock = { now: () => now }; const audit = { append: async () => {} };
+  const authority = new GovernanceControlAuthority({ authenticate: async () => null, clock: trustedClock, audit });
+  const engine = await GovernanceControlEngine.create({ policy, clock: trustedClock, audit, authority });
+  const input = baseline({
+    principal: { id: "human:reader", clearance: "internal", compartments: ["engineering"] },
+    mount: { id: "example.team", resolved_ref: "rev-1", tree_hash: artifactHash("tree"), access: material().access },
+    concept: { id: "concepts/control", access: material().access }, query: "retention policy", query_mode: "wiki-only"
+  });
+  const proof = await engine.issueRetrievalProof(input, { ttlMs: 10 });
+  assert.equal(engine.verifyRetrievalProof(proof, input), true);
+  assert.equal(engine.verifyRetrievalProof({ kind: "kdlc-governance-retrieval-proof-1" }, input), false);
+  assert.equal(engine.verifyRetrievalProof(proof, { ...input, query: "different query" }), false);
+  assert.equal(engine.verifyRetrievalProof(proof, { ...input, principal: { ...input.principal, id: "human:other" } }), false);
+  now = "2026-08-14T12:00:00.010Z";
+  assert.equal(engine.verifyRetrievalProof(proof, input), false);
 });
 
 test("FEAT-008 erasure accepts only opaque completed-workflow verification and never actor assertions", async () => {

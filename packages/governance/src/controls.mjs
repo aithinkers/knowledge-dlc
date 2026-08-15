@@ -1,4 +1,4 @@
-import { artifactHash, canonicalJson } from "../../core/index.mjs";
+import { artifactHash, canonicalJson, isRfc3339Instant } from "../../core/index.mjs";
 import { createContractValidator } from "../../contracts/index.mjs";
 import { GovernanceError } from "../index.mjs";
 
@@ -24,18 +24,14 @@ export const BUILT_IN_GOVERNANCE_SENSORS = Object.freeze(SENSOR_SPECS.map(([id, 
 })));
 
 const authoritySessions = new WeakMap();
-const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+const retrievalProofs = new WeakMap();
 
-function isRfc3339Instant(value) {
-  const match = typeof value === "string" ? RFC3339.exec(value) : null;
-  if (!match) return false;
-  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]
-    && Number(match[4]) <= 23 && Number(match[5]) <= 59 && Number(match[6]) <= 59
-    && Number(match[7] ?? 0) <= 14 && Number(match[8] ?? 0) <= 59
-    && (Number(match[7] ?? 0) < 14 || Number(match[8] ?? 0) === 0) && Number.isFinite(Date.parse(value));
+export function verifyGovernanceRetrievalProof(proof, input, engine) {
+  const state = retrievalProofs.get(proof); let inputHash;
+  try { inputHash = artifactHash(jsonClone(input)); } catch { return false; }
+  if (!state || state.engine !== engine || state.input_hash !== inputHash) return false;
+  const now = at(state.clock).getTime();
+  return isRfc3339Instant(state.issued_at) && isRfc3339Instant(state.expires_at) && Date.parse(state.issued_at) <= now && Date.parse(state.expires_at) > now;
 }
 
 function fail(code, message, details = {}) { throw new GovernanceError(code, message, details); }
@@ -247,6 +243,16 @@ export class GovernanceControlEngine {
     if (!report?.allowed || report.report_hash !== artifactHash(unsigned)) fail("KDLC_GOVERNANCE_DENIED", "Governance controls denied the operation", { finding_codes: distinct((report?.results ?? []).filter(({ blocks }) => blocks).flatMap(({ finding_codes }) => finding_codes)) });
   }
   async authorizeRetrieval(input, options) { const report = await this.evaluate("retrieval", input, options); this.assertAllowed(report); return report; }
+  async issueRetrievalProof(input, { ttlMs = 60_000 } = {}) {
+    if (!Number.isSafeInteger(ttlMs) || ttlMs < 1 || ttlMs > 300_000) fail("KDLC_RETRIEVAL_PROOF_TTL_INVALID", "Retrieval proof lifetime must be between 1 and 300000 milliseconds");
+    const normalized = jsonClone(input); const report = await this.authorizeRetrieval(normalized); const now = at(this.#clock);
+    const proof = Object.freeze({ kind: "kdlc-governance-retrieval-proof-1" });
+    retrievalProofs.set(proof, Object.freeze({ engine: this, clock: this.#clock, input_hash: artifactHash(normalized), policy_hash: this.#policyHash, report_hash: report.report_hash, issued_at: now.toISOString(), expires_at: new Date(now.getTime() + ttlMs).toISOString() }));
+    return proof;
+  }
+  verifyRetrievalProof(proof, input) {
+    return verifyGovernanceRetrievalProof(proof, input, this);
+  }
   async authorizeExternalModel(input, options) { const report = await this.evaluate("model-route", input, options); this.assertAllowed(report); return report; }
   async authorizePublication(input, options) { const report = await this.evaluate("publication", input, options); this.assertAllowed(report); return report; }
   async authorizeErasure(input, options) { const report = await this.evaluate("erasure", input, options); this.assertAllowed(report); return report; }

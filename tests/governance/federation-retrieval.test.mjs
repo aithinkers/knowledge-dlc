@@ -11,6 +11,7 @@ import test from "node:test";
 import { byteHash } from "../../packages/core/index.mjs";
 import { createContractValidator } from "../../packages/contracts/index.mjs";
 import { FederationError, FederationResolver, routeWrite } from "../../packages/federation/index.mjs";
+import { GovernanceControlAuthority, GovernanceControlEngine } from "../../packages/governance/index.mjs";
 import { FederatedRetriever, RetrievalError, traverseHierarchicalIndex } from "../../packages/retrieval/index.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -20,6 +21,17 @@ const policyState = JSON.parse(await readFile(join(fixtures, "policy-state.json"
 
 function federationCode(code) { return (error) => error instanceof FederationError && error.code === code; }
 function retrievalCode(code) { return (error) => error instanceof RetrievalError && error.code === code; }
+const governancePolicy = Object.freeze({
+  api_version: "kdlc.dev/governance-policy/v1alpha1", id: "retrieval-test", version: 1,
+  minimum_independent_sources: 1, required_erasure_surfaces: [], waiver_authorities: {},
+  declassification_authorities: {}, erasure_policy_refs: {}, external_models: {}
+});
+async function governanceControls(now = fixedNow, auditEvents = []) {
+  const clock = { now }; const audit = { append: async (event) => auditEvents.push(event) };
+  const authority = new GovernanceControlAuthority({ authenticate: async () => null, clock, audit });
+  return GovernanceControlEngine.create({ policy: governancePolicy, clock, audit, authority });
+}
+function reader(extra = {}) { return { id: "human:reader", clearance: "internal", compartments: ["engineering"], ...extra }; }
 
 async function workspace(context) {
   const root = await mkdtemp(join(tmpdir(), "kdlc-federation-"));
@@ -82,12 +94,13 @@ test("FEAT-005 rejects duplicate stable IDs, cache drift, unsafe Git entries, an
 
   const resolved = await resolver.resolveProject(project(root)); const primary = resolved.mounts.find(({ alias }) => alias === "primary");
   const concept = join(primary.root, "policies/authentication.md");
-  const driftRetriever = new FederatedRetriever({ mounts: resolved.mounts, policy: policy(), now: () => new Date(fixedNow()) });
-  const driftAuthorization = await driftRetriever.prepareAuthorization({ principal: {}, queryModes: ["wiki-only"] });
+  const driftPrincipal = reader();
+  const driftRetriever = new FederatedRetriever({ mounts: resolved.mounts, policy: policy(), governanceControls: await governanceControls(), now: () => new Date(fixedNow()) });
+  const driftAuthorization = await driftRetriever.prepareAuthorization({ principal: driftPrincipal, query: "authentication", queryModes: ["wiki-only"] });
   await chmod(primary.root, 0o755); await chmod(join(primary.root, "policies"), 0o755); await chmod(concept, 0o644);
   await writeFile(concept, `${await readFile(concept, "utf8")}\ndrift\n`);
   await assert.rejects(resolver.verify(primary), federationCode("KDLC_CACHE_DRIFT"));
-  await assert.rejects(driftRetriever.search({ authorization: driftAuthorization, principal: {}, query: "authentication" }), retrievalCode("KDLC_MOUNT_INTEGRITY"));
+  await assert.rejects(driftRetriever.search({ authorization: driftAuthorization, principal: driftPrincipal, query: "authentication" }), retrievalCode("KDLC_MOUNT_INTEGRITY"));
   await assert.rejects(resolver.resolveMount(project(root).knowledge_bases[0]), federationCode("KDLC_CACHE_DRIFT"));
   await assert.rejects(stat(primary.root), (error) => error.code === "ENOENT");
 
@@ -119,7 +132,6 @@ function policy(state = policyState) {
     && (access.compartments ?? []).every((compartment) => compartments.has(compartment));
   return {
     authorizeMount: async ({ mount, queryMode }) => state.query_modes.includes(queryMode) && allows(mount.access),
-    authorizeGovernance: async ({ concept }) => allows(concept.access ?? undefined),
     authorizeConcept: async ({ concept }) => allows(concept.access ?? undefined),
     authorizeSource: async ({ source }) => allows(source.access ?? undefined)
   };
@@ -149,8 +161,8 @@ test("FEAT-005 traverses hierarchical indexes and retrieves across mounts with q
     ]) try { mutate(); } catch {}
     return authorizeSource(input);
   };
-  const retriever = new FederatedRetriever({ mounts, policy: mutatingPolicy, now: () => new Date("2026-08-14T15:00:00Z") });
-  const principal = { id: "human:reader" }; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  const retriever = new FederatedRetriever({ mounts, policy: mutatingPolicy, governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00Z") });
+  const principal = reader(); const authorization = await retriever.prepareAuthorization({ principal, query: "authentication", queryModes: ["wiki-only"] });
   const response = await retriever.search({ authorization, principal, query: "authentication", mode: "wiki-only", includeSources: true, limit: 1 });
   assert.equal(response.status, "ok"); assert.equal(response.results.length, 2); assert.equal(response.citations.length, 2);
   assert.match(response.citations[0].concept, /^kb:\/\/acme\.(?:primary|legacy)@[0-9a-z:-]+\/policies\/authentication$/);
@@ -162,7 +174,8 @@ test("FEAT-005 traverses hierarchical indexes and retrieves across mounts with q
   assert.equal(sourceInputs.find(({ source }) => source.id === "auth-source").source.resource, "https://example.invalid/auth");
   const contracts = await createContractValidator(); assert.equal(contracts.validate("retrievalResponse", response).valid, true);
 
-  const zeroScoreConflict = await retriever.search({ authorization, principal, query: "phishing-resistant", mode: "wiki-only", limit: 1 });
+  const conflictAuthorization = await retriever.prepareAuthorization({ principal, query: "phishing-resistant", queryModes: ["wiki-only"] });
+  const zeroScoreConflict = await retriever.search({ authorization: conflictAuthorization, principal, query: "phishing-resistant", mode: "wiki-only", limit: 1 });
   assert.deepEqual(zeroScoreConflict.results.map(({ id }) => id), [
     "kb://acme.primary/policies/authentication", "kb://acme.legacy/policies/authentication"
   ]);
@@ -172,24 +185,33 @@ test("FEAT-005 traverses hierarchical indexes and retrieves across mounts with q
 
 test("FEAT-005 applies query-mode, trust, freshness, and access filters before disclosure", async (context) => {
   const root = await workspace(context); const { mounts } = await new FederationResolver({ projectRoot: root, now: fixedNow }).resolveProject(project(root));
-  const retriever = new FederatedRetriever({ mounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z") });
-  const principal = {}; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["trusted-only", "sources-only", "fresh-only"] });
+  const retriever = new FederatedRetriever({ mounts, policy: policy(), governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00Z") });
+  const principal = reader(); const authorization = await retriever.prepareAuthorization({ principal, query: "authentication", queryModes: ["trusted-only", "sources-only", "fresh-only"] });
   const trusted = await retriever.search({ authorization, principal, query: "authentication", mode: "trusted-only" });
   assert.deepEqual(trusted.results.map(({ id }) => id), ["kb://acme.primary/policies/authentication"]);
-  assert.equal((await retriever.search({ authorization, principal, query: "spoofed verification", mode: "trusted-only" })).status, "not_found");
+  const spoofAuthorization = await retriever.prepareAuthorization({ principal, query: "spoofed verification", queryModes: ["trusted-only"] });
+  assert.equal((await retriever.search({ authorization: spoofAuthorization, principal, query: "spoofed verification", mode: "trusted-only" })).status, "not_found");
   const sources = await retriever.search({ authorization, principal, query: "authentication", mode: "sources-only", staleBehavior: "warn" });
   assert.equal(sources.results.length, 1); assert.equal(sources.results[0].freshness, "stale"); assert.equal(sources.warnings.length, 1);
   const fresh = await retriever.search({ authorization, principal, query: "authentication", mode: "fresh-only" });
   assert.equal(fresh.results.some(({ id }) => id.includes("references/sources")), false);
   await assert.rejects(retriever.search({ principal, query: "authentication", mode: "wiki-only" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
+  await assert.rejects(retriever.search({ authorization, principal: reader({ id: "human:other" }), query: "authentication", mode: "trusted-only" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
+  await assert.rejects(retriever.search({ authorization, principal, query: "different query", mode: "trusted-only" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
   await assert.rejects(retriever.search({ principal: {}, query: "authentication", mode: "vector-only" }), retrievalCode("KDLC_QUERY_MODE"));
 
   let authorizationTime = 100;
-  const expiring = new FederatedRetriever({ mounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z"), authorizationTtlMs: 10,
+  const expiring = new FederatedRetriever({ mounts, policy: policy(), governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00Z"), authorizationTtlMs: 10,
     authorizationMonotonic: () => authorizationTime });
-  const expiringAuthorization = await expiring.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  const expiringAuthorization = await expiring.prepareAuthorization({ principal, query: "authentication", queryModes: ["wiki-only"] });
   authorizationTime = 110;
   await assert.rejects(expiring.search({ authorization: expiringAuthorization, principal, query: "authentication" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
+
+  let proofNow = "2026-08-14T15:00:00.000Z";
+  const proofExpiring = new FederatedRetriever({ mounts, policy: policy(), governanceControls: await governanceControls(() => proofNow), now: () => new Date(proofNow), authorizationTtlMs: 10, authorizationMonotonic: () => 0 });
+  const proofAuthorization = await proofExpiring.prepareAuthorization({ principal, query: "authentication", queryModes: ["wiki-only"] });
+  proofNow = "2026-08-14T15:00:00.010Z";
+  await assert.rejects(proofExpiring.search({ authorization: proofAuthorization, principal, query: "authentication" }), retrievalCode("KDLC_AUTHORIZATION_SNAPSHOT_REQUIRED"));
 });
 
 test("FEAT-005 trust receipts and freshness dates reject impossible and future calendar values", async (context) => {
@@ -198,8 +220,8 @@ test("FEAT-005 trust receipts and freshness dates reject impossible and future c
     .replace("2026-08-01T00:00:00Z", "2026-02-30T00:00:00Z")
     .replace("stale_after: 2027-01-01", "stale_after: 2027-02-30"));
   const invalidMounts = (await new FederationResolver({ projectRoot: invalidRoot, now: fixedNow }).resolveProject(project(invalidRoot))).mounts;
-  const invalidRetriever = new FederatedRetriever({ mounts: invalidMounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00Z") });
-  const invalidPrincipal = {}; const invalidAuthorization = await invalidRetriever.prepareAuthorization({ principal: invalidPrincipal, queryModes: ["trusted-only", "fresh-only"] });
+  const invalidRetriever = new FederatedRetriever({ mounts: invalidMounts, policy: policy(), governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00Z") });
+  const invalidPrincipal = reader(); const invalidAuthorization = await invalidRetriever.prepareAuthorization({ principal: invalidPrincipal, query: "phishing-resistant", queryModes: ["trusted-only", "fresh-only"] });
   assert.equal((await invalidRetriever.search({ authorization: invalidAuthorization, principal: invalidPrincipal, query: "phishing-resistant", mode: "trusted-only" })).status, "not_found");
   assert.equal((await invalidRetriever.search({ authorization: invalidAuthorization, principal: invalidPrincipal, query: "phishing-resistant", mode: "fresh-only" })).status, "not_found");
 
@@ -208,23 +230,23 @@ test("FEAT-005 trust receipts and freshness dates reject impossible and future c
     .replace("2026-08-01T00:00:00Z", "2024-02-29T23:59:59Z")
     .replace("stale_after: 2027-01-01", "stale_after: 2028-02-29"));
   const leapMounts = (await new FederationResolver({ projectRoot: leapRoot, now: fixedNow }).resolveProject(project(leapRoot))).mounts;
-  const leapPrincipal = {};
-  const beforeBoundary = new FederatedRetriever({ mounts: leapMounts, policy: policy(), now: () => new Date("2028-02-28T23:59:59Z") });
-  const beforeAuthorization = await beforeBoundary.prepareAuthorization({ principal: leapPrincipal, queryModes: ["trusted-only", "fresh-only"] });
+  const leapPrincipal = reader();
+  const beforeBoundary = new FederatedRetriever({ mounts: leapMounts, policy: policy(), governanceControls: await governanceControls(() => "2028-02-28T23:59:59Z"), now: () => new Date("2028-02-28T23:59:59Z") });
+  const beforeAuthorization = await beforeBoundary.prepareAuthorization({ principal: leapPrincipal, query: "phishing-resistant", queryModes: ["trusted-only", "fresh-only"] });
   assert.equal((await beforeBoundary.search({ authorization: beforeAuthorization, principal: leapPrincipal, query: "phishing-resistant", mode: "trusted-only" })).status, "ok");
   assert.equal((await beforeBoundary.search({ authorization: beforeAuthorization, principal: leapPrincipal, query: "phishing-resistant", mode: "fresh-only" })).status, "ok");
-  const atBoundary = new FederatedRetriever({ mounts: leapMounts, policy: policy(), now: () => new Date("2028-02-29T00:00:00Z") });
-  const boundaryAuthorization = await atBoundary.prepareAuthorization({ principal: leapPrincipal, queryModes: ["fresh-only"] });
+  const atBoundary = new FederatedRetriever({ mounts: leapMounts, policy: policy(), governanceControls: await governanceControls(() => "2028-02-29T00:00:00Z"), now: () => new Date("2028-02-29T00:00:00Z") });
+  const boundaryAuthorization = await atBoundary.prepareAuthorization({ principal: leapPrincipal, query: "phishing-resistant", queryModes: ["fresh-only"] });
   assert.equal((await atBoundary.search({ authorization: boundaryAuthorization, principal: leapPrincipal, query: "phishing-resistant", mode: "fresh-only" })).status, "not_found");
 
   const futureRoot = await workspace(context);
   await rewritePrimaryConcept(futureRoot, "policies/authentication.md", (body) => body.replace("2026-08-01T00:00:00Z", "2026-08-14T15:00:00.000Z"));
   const futureMounts = (await new FederationResolver({ projectRoot: futureRoot, now: fixedNow }).resolveProject(project(futureRoot))).mounts;
-  const exactRetriever = new FederatedRetriever({ mounts: futureMounts, policy: policy(), now: () => new Date("2026-08-14T15:00:00.000Z") });
-  const exactAuthorization = await exactRetriever.prepareAuthorization({ principal: leapPrincipal, queryModes: ["trusted-only"] });
+  const exactRetriever = new FederatedRetriever({ mounts: futureMounts, policy: policy(), governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00.000Z") });
+  const exactAuthorization = await exactRetriever.prepareAuthorization({ principal: leapPrincipal, query: "phishing-resistant", queryModes: ["trusted-only"] });
   assert.equal((await exactRetriever.search({ authorization: exactAuthorization, principal: leapPrincipal, query: "phishing-resistant", mode: "trusted-only" })).status, "ok");
-  const futureRetriever = new FederatedRetriever({ mounts: futureMounts, policy: policy(), now: () => new Date("2026-08-14T14:59:59.999Z") });
-  const futureAuthorization = await futureRetriever.prepareAuthorization({ principal: leapPrincipal, queryModes: ["trusted-only"] });
+  const futureRetriever = new FederatedRetriever({ mounts: futureMounts, policy: policy(), governanceControls: await governanceControls(() => "2026-08-14T14:59:59.999Z"), now: () => new Date("2026-08-14T14:59:59.999Z") });
+  const futureAuthorization = await futureRetriever.prepareAuthorization({ principal: leapPrincipal, query: "phishing-resistant", queryModes: ["trusted-only"] });
   assert.equal((await futureRetriever.search({ authorization: futureAuthorization, principal: leapPrincipal, query: "phishing-resistant", mode: "trusted-only" })).status, "not_found");
 });
 
@@ -252,20 +274,22 @@ test("FEAT-005 authorizes before concept reads and bounds absent/unauthorized re
   const authorizeConcept = delayedPolicy.authorizeConcept; const authorizeSource = delayedPolicy.authorizeSource;
   delayedPolicy.authorizeConcept = async (input) => { conceptDecisions += 1; await new Promise((resolve) => setTimeout(resolve, 12)); return authorizeConcept(input); };
   delayedPolicy.authorizeSource = async (input) => { sourceDecisions += 1; await new Promise((resolve) => setTimeout(resolve, 12)); return authorizeSource(input); };
-  const retriever = new FederatedRetriever({ mounts, policy: delayedPolicy, now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75, audit: slowAudit,
+  const retriever = new FederatedRetriever({ mounts, policy: delayedPolicy, governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75, audit: slowAudit,
     readConcept: async (path) => { reads.push(path); if (path.endsWith("/policies/nightfall.md")) throw new Error("unauthorized body opened"); return readFile(path); } });
-  const principal = {}; const authorization = await retriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  const principal = reader(); const authorization = await retriever.prepareAuthorization({ principal, query: "authentication", queryModes: ["wiki-only"] });
   const allAccessState = { ...policyState, classifications: [...policyState.classifications, "restricted"], compartments: [...policyState.compartments, "nightfall"] };
-  const absentRetriever = new FederatedRetriever({ mounts, policy: policy(allAccessState), now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75, audit: slowAudit });
-  const absentAuthorization = await absentRetriever.prepareAuthorization({ principal, queryModes: ["wiki-only"] });
+  const absentRetriever = new FederatedRetriever({ mounts, policy: policy(allAccessState), governanceControls: await governanceControls(), now: () => new Date("2026-08-14T15:00:00Z"), minimumDurationMs: 75, audit: slowAudit });
+  const absentPrincipal = reader({ clearance: "restricted", compartments: ["engineering", "nightfall"] });
+  const absentAuthorization = await absentRetriever.prepareAuthorization({ principal: absentPrincipal, query: "Zephyr", queryModes: ["wiki-only"] });
+  const unauthorizedAuthorization = await retriever.prepareAuthorization({ principal, query: "Nightfall", queryModes: ["wiki-only"] });
   const preparedDecisions = conceptDecisions; const preparedSourceDecisions = sourceDecisions;
   const sourced = await retriever.search({ authorization, principal, query: "authentication", mode: "wiki-only", includeSources: true });
   assert.deepEqual(sourced.results.find(({ id }) => id === "kb://acme.primary/policies/authentication").source_citations.map(({ id }) => id), ["auth-source"]);
   const durations = []; let unauthorized; let absent;
   for (let iteration = 0; iteration < 3; iteration += 1) {
-    let started = performance.now(); unauthorized = await retriever.search({ authorization, principal, query: "Nightfall", mode: "wiki-only" });
+    let started = performance.now(); unauthorized = await retriever.search({ authorization: unauthorizedAuthorization, principal, query: "Nightfall", mode: "wiki-only" });
     durations.push(performance.now() - started);
-    started = performance.now(); absent = await absentRetriever.search({ authorization: absentAuthorization, principal, query: "Zephyr", mode: "wiki-only" });
+    started = performance.now(); absent = await absentRetriever.search({ authorization: absentAuthorization, principal: absentPrincipal, query: "Zephyr", mode: "wiki-only" });
     durations.push(performance.now() - started);
     assert.deepEqual(unauthorized, absent);
   }
