@@ -131,9 +131,9 @@ the trusted-base token job.
   the current repository eligibility and therefore remain explicit blockers.
 - Actions default workflow permissions are read-only, pull-request approval is
   not granted to workflows, and full-SHA action pinning is required.
-- `allowed_actions` remains `all` for current workflow compatibility. A final
-  release decision must either move to an enforced selected-action allowlist or
-  record independent acceptance of that residual risk.
+- Actions are restricted to selected GitHub-owned actions, with third-party and
+  verified-creator actions disabled; every referenced action remains pinned to
+  a reviewed full commit SHA.
 - Required status checks must include the stable `Release matrix` aggregator
   after it has produced successful evidence on the release candidate.
 
