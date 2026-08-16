@@ -69,8 +69,11 @@ function detect(bytes, filename = "", mediaType = "") {
   // .eml may be latin1; route on extension/media type before the strict UTF-8
   // sample decode (the eml profile handles its own charset fallback).
   if (ext === ".eml" || mediaType === "message/rfc822") return "eml";
+  // HTML may be latin1 too; route before the strict UTF-8 sample decode.
+  if ([".html", ".htm", ".xhtml"].includes(ext) || ["text/html", "application/xhtml+xml"].includes(mediaType)) return "html";
   let sample; try { sample = text(bytes.subarray(0, Math.min(bytes.length, 4096))); } catch { throw new Quarantine("unsupported", "Unknown binary content signature"); }
   if (/^\s*<mxfile(?:\s|>)/.test(sample)) return "drawio";
+  if (/^\s*(?:<!DOCTYPE\s+html|<html\b)/i.test(sample)) return "html";
   if (ext === ".md" || mediaType === "text/markdown") return "markdown";
   if (ext === ".csv" || mediaType === "text/csv") return "csv";
   if (ext === ".txt" || mediaType === "text/plain") return "text";
@@ -320,6 +323,101 @@ function emlProfile(bytes, sourceHash, limits) {
   return { descriptor, units, discovered: partCount + headers.length, warnings: [...warnings, ...(attachmentCount > 0 ? ["attachments-inventoried-not-extracted"] : [])] };
 }
 
+// HTML (FEAT-022, #96). A deterministic, tolerant tokenizer — not a spec
+// parser — that recovers structure from real-world markup: headings,
+// paragraphs, tables, and links as units with DOM-path locators. Scripts,
+// styles, comments, and active link targets are removed with the hardened
+// patterns from the eml/msg work; nothing is ever fetched.
+const HTML_VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
+const HTML_BLOCK = new Set(["p", "li", "dd", "dt", "blockquote", "pre", "figcaption", "caption", "summary"]);
+const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', copy: "©", reg: "®", trade: "™" };
+// Single pass: each entity site decodes at most once, so &amp;lt; → &lt;
+// (never <) by construction.
+const decodeHtmlEntities = (value) => value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (whole, body) => {
+  if (body[0] === "#") {
+    const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+    return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  }
+  return HTML_ENTITIES[body.toLowerCase()] ?? whole;
+});
+const collapseSpace = (value) => value.replace(/\s+/g, " ").trim();
+function htmlProfile(bytes, sourceHash, limits) {
+  const descriptor = descriptors.html; const make = unitFactory(sourceHash, descriptor); const warnings = []; const units = [];
+  let raw;
+  try { raw = decoder.decode(bytes).normalize("NFC"); }
+  catch { warnings.push("non-utf8-decoded-as-latin1"); raw = new TextDecoder("latin1").decode(bytes).normalize("NFC"); }
+  // Sanitize before tokenizing: comments/CDATA/doctype, then script/style
+  // blocks (whitespace/attribute-tolerant close tags; unterminated blocks are
+  // dropped to end-of-input rather than leaking their content as text).
+  let value = raw.replace(/<!--[\s\S]*?(?:-->|$)/g, " ").replace(/<!\[CDATA\[[\s\S]*?(?:\]\]>|$)/g, " ").replace(/<!DOCTYPE[^>]*>/gi, " ");
+  const activeBefore = value.length;
+  value = value.replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/\s*(?:script|style)\b[^>]*>/gi, " ").replace(/<(?:script|style)\b[^>]*>[\s\S]*$/gi, " ");
+  if (value.length !== activeBefore) warnings.push("scripts-and-styles-removed");
+  const language = /<html\b[^>]*\blang\s*=\s*["']?([A-Za-z0-9-]+)/i.exec(value)?.[1] ?? null;
+  const title = collapseSpace(decodeHtmlEntities(/<title\b[^>]*>([\s\S]*?)<\/\s*title\b[^>]*>/i.exec(value)?.[1] ?? "").replace(/<[^>]*>/g, " ")) || null;
+
+  units.push(make("html-metadata", { kind: "dom-path", path: "/" }, { structured_data: { title, language } }));
+  const stack = []; const childCounts = [new Map()];
+  const domPath = () => `/${stack.map((frame) => `${frame.name}[${frame.index}]`).join("/")}` || "/";
+  let tags = 0; let activeLinksDropped = 0;
+  const flush = { text: "", path: "/", cells: null, rowPath: null, link: null };
+  const emitBlock = (kindName, path) => {
+    const text = collapseSpace(flush.text);
+    flush.text = "";
+    if (text) units.push(make(kindName, { kind: "dom-path", path }, { text }));
+  };
+  const tokens = value.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^"'>])*)\/?>|([^<]+)/g);
+  for (const token of tokens) {
+    if (token[3] !== undefined) {
+      const text = decodeHtmlEntities(token[3]);
+      flush.text += text;
+      if (flush.link) flush.link.text += text;
+      if (flush.cells && flush.cells.open) flush.cells.current += text;
+      continue;
+    }
+    const name = token[1].toLowerCase(); const closing = token[0][1] === "/";
+    tags += 1; exceed("shapes", tags, limits.shapes);
+    if (!closing) {
+      if (HTML_VOID.has(name)) { if (name === "br") flush.text += "\n"; continue; }
+      if (stack.length >= 100) throw new Quarantine("limit-exceeded", "HTML nesting exceeds depth limit", { maximum: 100 });
+      const counts = childCounts[childCounts.length - 1];
+      const index = (counts.get(name) ?? 0) + 1; counts.set(name, index);
+      stack.push({ name, index }); childCounts.push(new Map());
+      if (/^h[1-6]$/.test(name) || HTML_BLOCK.has(name)) { emitBlock("block", domPath()); flush.text = ""; }
+      if (name === "a") {
+        const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(token[2] ?? "");
+        const target = (href?.[1] ?? href?.[2] ?? href?.[3] ?? "").trim();
+        if (/^(?:javascript|data|vbscript):/i.test(target)) { activeLinksDropped += 1; flush.link = { text: "", href: null, path: domPath() }; }
+        else flush.link = { text: "", href: target || null, path: domPath() };
+      }
+      if (name === "tr") { flush.cells = { row: [], open: false, current: "", path: domPath() }; }
+      if ((name === "td" || name === "th") && flush.cells) { flush.cells.open = true; flush.cells.current = ""; }
+      continue;
+    }
+    // closing tag: pop to the matching frame if present (tolerates mis-nesting)
+    const at = stack.map((frame) => frame.name).lastIndexOf(name);
+    if (at === -1) continue;
+    const path = `/${stack.slice(0, at + 1).map((frame) => `${frame.name}[${frame.index}]`).join("/")}`;
+    if (/^h[1-6]$/.test(name)) { units.push(make("heading", { kind: "dom-path", path }, { text: collapseSpace(flush.text) || "(empty heading)", structured_data: { level: Number(name[1]) } })); flush.text = ""; }
+    else if (HTML_BLOCK.has(name)) emitBlock(name === "li" ? "list-item" : "paragraph", path);
+    if (name === "a" && flush.link) {
+      const text = collapseSpace(flush.link.text);
+      if (flush.link.href && text) units.push(make("link", { kind: "dom-path", path: flush.link.path }, { text, structured_data: { destination: flush.link.href } }));
+      flush.link = null;
+    }
+    if ((name === "td" || name === "th") && flush.cells?.open) { flush.cells.row.push(collapseSpace(decodeHtmlEntities(flush.cells.current))); flush.cells.open = false; }
+    if (name === "tr" && flush.cells) {
+      if (flush.cells.row.length > 0) units.push(make("table-row", { kind: "dom-path", path: flush.cells.path }, { structured_data: { cells: flush.cells.row } }));
+      flush.cells = null;
+    }
+    while (stack.length > at) { stack.pop(); childCounts.pop(); }
+  }
+  emitBlock("block", "/");
+  if (activeLinksDropped > 0) warnings.push("active-link-targets-dropped");
+  if (units.length <= 1 && !title) throw new Quarantine("malformed", "Input carries no extractable HTML content");
+  return { descriptor, units, discovered: tags, warnings };
+}
+
 // CFBF / Outlook .msg (FEAT-020). A bounded, loop-safe Compound File Binary
 // reader plus MAPI property-stream extraction. Attachments are inventoried
 // with content hashes and never expanded; non-msg CFBF (legacy .doc/.xls)
@@ -505,6 +603,7 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     else if (format === "markdown" || format === "text") result = linesProfile(input, format, hash);
     else if (format === "csv") result = csvProfile(input, hash, settings, resolvedLimits);
     else if (format === "eml") result = emlProfile(input, hash, resolvedLimits);
+    else if (format === "html") result = htmlProfile(input, hash, resolvedLimits);
     else if (format === "cfb") { result = msgProfile(input, hash, resolvedLimits); format = "msg"; }
     else if (format === "pdf") result = await pdfProfile(input, hash, resolvedLimits);
     else if (format === "drawio") result = drawioProfile(input, hash, resolvedLimits);

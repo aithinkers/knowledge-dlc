@@ -838,6 +838,27 @@
           "tests/governance/remote-sources.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-022",
+      "title": "HTML normalizer with DOM-path locators",
+      "issue": 96,
+      "specification_sections": [
+        "5.7",
+        "9.2"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/normalizers/src/descriptors.mjs",
+          "packages/normalizers/src/normalize.mjs",
+          "core/schemas/normalization/normalized-unit.schema.json",
+          "core/schemas/release/conformance-statement.schema.json"
+        ],
+        "tests": [
+          "tests/governance/html-normalizer.test.mjs"
+        ]
+      }
     }
   ]
 }
