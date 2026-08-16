@@ -997,7 +997,7 @@
       "evidence": {
         "implementation": [
           "packages/adapters/generate.mjs",
-          "distribution/claude-code/commands/kdlc-start.md",
+          "distribution/claude-code/commands/start.md",
           "security/npm-package-files.json"
         ],
         "tests": [
@@ -1122,6 +1122,26 @@
         ],
         "tests": [
           "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
+    },
+    {
+      "id": "FEAT-036",
+      "title": "Human-tier Claude Code palette: clean names, plain descriptions, five verbs",
+      "issue": 131,
+      "specification_sections": [
+        "9.4",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/adapters/generate.mjs",
+          "distribution/claude-code/commands/start.md",
+          "security/npm-package-files.json"
+        ],
+        "tests": [
+          "tests/governance/human-surfaces.test.mjs"
         ]
       }
     }

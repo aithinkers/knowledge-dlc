@@ -1,5 +1,5 @@
 ---
-description: Run the governed K-DLC publish operation
+description: You want to see what's waiting on your decision, or decide it — this is the human gate.
 argument-hint: JSON string array
 ---
 

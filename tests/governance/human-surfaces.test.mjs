@@ -39,15 +39,19 @@ test("FEAT-017: personas render into every harness agent surface without touchin
 });
 
 test("FEAT-017: every generated command surface carries guidance above an unchanged binding", async () => {
-  // setup has no in-harness surface (FEAT-029): it installs harness surfaces
-  // and is circular from inside one. A start surface exists instead.
-  assert.ok((await readFile(join(root, "distribution/claude-code/commands/kdlc-start.md"), "utf8")).includes("pick up where we left off"));
-  for (const command of distributionDefinition.cli_commands.filter((name) => name !== "setup")) {
-    const claude = await readFile(join(root, "distribution/claude-code/commands", `kdlc-${command}.md`), "utf8");
+  // The Claude Code palette carries the human tier only (FEAT-036) with
+  // plugin-namespace-friendly names; other operations remain runner-invocable
+  // and are exercised through the kiro surfaces below.
+  assert.ok((await readFile(join(root, "distribution/claude-code/commands/start.md"), "utf8")).includes("pick up where we left off"));
+  for (const command of ["init", "ingest", "query", "publish", "revisit", "status", "doctor"]) {
+    const claude = await readFile(join(root, "distribution/claude-code/commands", `${command}.md`), "utf8");
+    assert.ok(!claude.startsWith("---\ndescription: Run the governed"), `${command}: description is plain language`);
     for (const marker of ["**When to use:**", "**What you give it:**", "**What you get back:**", "**Usually next:**"]) {
       assert.ok(claude.includes(marker), `${command}: ${marker}`);
     }
     assert.ok(claude.includes(`"distribution/claude-code/run.mjs", "${command}", "--output", "json"`), `${command}: binding intact`);
+  }
+  for (const command of distributionDefinition.cli_commands.filter((name) => name !== "setup")) {
     for (const harness of ["kiro", "kiro-ide"]) {
       const skill = await readFile(join(root, `distribution/${harness}/.kiro/skills/kdlc-${command}/SKILL.md`), "utf8");
       assert.ok(skill.includes("**When to use:**"), `${harness}/${command}: guidance present`);

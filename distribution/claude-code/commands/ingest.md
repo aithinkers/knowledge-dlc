@@ -1,5 +1,5 @@
 ---
-description: Run the governed K-DLC ingest operation
+description: New source material should enter the pipeline (documents, pages, exports).
 argument-hint: JSON string array
 ---
 

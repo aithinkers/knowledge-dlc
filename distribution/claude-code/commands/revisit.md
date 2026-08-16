@@ -1,5 +1,5 @@
 ---
-description: Run the governed K-DLC revisit operation
+description: Auto mode published drafts without you — see what's awaiting your ratification, or ratify one.
 argument-hint: JSON string array
 ---
 

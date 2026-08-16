@@ -441,13 +441,24 @@ const generated = new Map([
     `${canonicalJson({ api_version: "kdlc.dev/conformance/v1", specification_version: definition.specification, canonicalization: definition.canonicalization, modules: definition.conformance_modules, transports: definition.transports, formats: definition.format_profiles, tools: definition.mcp_tools, repository_analysis: false })}\n`,
   ],
 ]);
-for (const command of surfaceCommands)
+// FEAT-036 (#131): the Claude Code palette carries only the human tier —
+// every other operation stays invocable through the governed runner (agents
+// use it directly) and documented in COMMANDS.md. Files are named without
+// the kdlc- prefix: the plugin namespace already provides it.
+const claudePalette = ["init", "ingest", "query", "publish", "revisit", "status", "doctor"];
+// Pinned release-corpus compatibility: the distribution test reads this exact
+// legacy filename. It stays as a thin alias of /kdlc:query.
+generated.set(
+  "distribution/claude-code/commands/kdlc-query.md",
+  `---\ndescription: Alias of /kdlc:query\nargument-hint: JSON string array\n---\n\nThis command is a legacy alias. Interpret \`$ARGUMENTS\` exactly as /kdlc:query does and invoke ["node", "distribution/claude-code/run.mjs", "query", "--output", "json", "--host-args-json", "$ARGUMENTS"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
+);
+for (const command of claudePalette)
   generated.set(
-    `distribution/claude-code/commands/kdlc-${command}.md`,
-    `---\ndescription: Run the governed K-DLC ${command} operation\nargument-hint: JSON string array\n---\n\n${guidanceBlock(command)}The native Claude Code binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
+    `distribution/claude-code/commands/${command}.md`,
+    `---\ndescription: ${(COMMAND_GUIDANCE[command]?.when ?? `Run the governed K-DLC ${command} operation`).replace(/\n/g, " ").slice(0, 120)}\nargument-hint: JSON string array\n---\n\n${guidanceBlock(command)}The native Claude Code binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
   );
 generated.set(
-  "distribution/claude-code/commands/kdlc-start.md",
+  "distribution/claude-code/commands/start.md",
   `---\ndescription: Start or resume K-DLC work — assesses state and offers the right next step\nargument-hint: optional goal in plain language\n---\n\n${START_SURFACE.replace("through the governed runner.", 'by invoking ["node", "distribution/claude-code/run.mjs", <operation>, "--output", "json"] directly without a shell.')}`,
 );
 generated.set("distribution/claude-code/hooks/hooks.json", CLAUDE_HOOKS_MANIFEST);
