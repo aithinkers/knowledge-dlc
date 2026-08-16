@@ -1025,6 +1025,23 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-031",
+      "title": "Governed refusals surface real codes and details through the envelope",
+      "issue": 121,
+      "specification_sections": [
+        "7.2"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/cli-hints.test.mjs"
+        ]
+      }
     }
   ]
 }

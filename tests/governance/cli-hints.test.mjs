@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderEnvelope } from "../../packages/cli/index.mjs";
+import { KdlcEngine, renderEnvelope } from "../../packages/cli/index.mjs";
 
 const ingestEnvelope = {
   api_version: "kdlc.dev/engine-envelope/v1",
@@ -61,4 +61,33 @@ test("FEAT-028: claude-code setup prints the two-step marketplace install", asyn
   const install = instructions.find((line) => line.includes("claude plugin"));
   assert.match(install, /claude plugin marketplace add .+ && claude plugin install kdlc@kdlc/);
   assert.ok(!install.includes("claude plugin install /"), "no bare-path install instruction remains");
+});
+
+test("FEAT-031: governed refusals surface their real code and details through the envelope", async () => {
+  const { GovernanceError } = await import("../../packages/governance/index.mjs");
+  const engine = new KdlcEngine({ handlers: { status: () => { throw new GovernanceError("KDLC_MODEL_RECORDING_INVALID", "Recorded model output failed schema validation", { errors: [{ instancePath: "/claims/0/id" }] }); } } });
+  const envelope = await engine.envelope("status", {});
+  assert.equal(envelope.error.code, "KDLC_MODEL_RECORDING_INVALID");
+  assert.equal(envelope.error.details.errors[0].instancePath, "/claims/0/id");
+  assert.match(renderEnvelope(envelope, "human"), /Specifics: .*instancePath/);
+  assert.match(renderEnvelope(envelope, "text"), /KDLC_MODEL_RECORDING_INVALID: Recorded model output failed schema validation\n\{/);
+  // Unknown errors stay scrubbed.
+  const opaque = new KdlcEngine({ handlers: { status: () => { throw new Error("secret internals: /etc/passwd"); } } });
+  const masked = await opaque.envelope("status", {});
+  assert.equal(masked.error.code, "KDLC_INTERNAL");
+  assert.ok(!JSON.stringify(masked).includes("secret internals"));
+});
+
+test("FEAT-031: coded refusals keep the exit-class taxonomy and never break the envelope", async () => {
+  const { GovernanceError } = await import("../../packages/governance/index.mjs");
+  const make = (code, extra = {}) => new KdlcEngine({ handlers: { status: () => { throw Object.assign(new GovernanceError(code, "m"), extra); } } });
+  assert.equal((await make("KDLC_DECISION_CONFLICT").envelope("status", {})).error.class, 4, "conflicts exit 4");
+  assert.equal((await make("KDLC_RECEIPT_IMMUTABLE").envelope("status", {})).error.class, 4, "immutability is a conflict");
+  assert.equal((await make("KDLC_GOVERNANCE_CONTROLS_REQUIRED").envelope("status", {})).error.class, 5, "missing controls are a dependency");
+  assert.equal((await make("KDLC_MODEL_RECORDING_INVALID").envelope("status", {})).error.class, 3, "refusals stay policy");
+  // Uncloneable details never break the envelope contract.
+  const hostile = await make("KDLC_MODEL_RECORDING_INVALID", { details: { fn: () => {} } }).envelope("status", {});
+  assert.equal(hostile.ok, false);
+  assert.equal(hostile.error.code, "KDLC_MODEL_RECORDING_INVALID");
+  assert.deepEqual(hostile.error.details, {});
 });
