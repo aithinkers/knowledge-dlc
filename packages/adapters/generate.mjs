@@ -58,9 +58,9 @@ const COMMAND_GUIDANCE = {
     next: "kdlc publish for approved content; kdlc proposal to rework rejections.",
   },
   publish: {
-    when: "Approved knowledge should become visible at its access level.",
-    give: "The approved item to publish.",
-    get: "Published, versioned knowledge — refused if approvals are missing.",
+    when: "You want to see what's waiting on your decision, or decide it — this is the human gate.",
+    give: "Nothing to list pending review packets; or <proposal-id> --approve \"reason\" (or --reject / --request-changes) to decide and land it in one step.",
+    get: "On approval: the concept file, index, and retrieval catalog updated atomically — kdlc query answers with citations immediately. Refusals and rejections change nothing.",
     next: "kdlc query to see it live; kdlc status for the audit trail.",
   },
   status: {
@@ -149,9 +149,10 @@ Follow this routine (read-only assessment first — never mutate while assessing
      user for --access and --license — governance decisions), then follow the
      kit README under \`.kdlc/drafting/<workflow>/\` to draft and submit.
      Work in the foreground and report the returned packet hashes.
-   - Proposals pending review → present the review packet and its hash; the
-     user's decision goes through the governed \`review\` operation.
-   - Approved but unpublished → offer \`publish\`.
+   - Proposals pending review → run \`publish\` bare to list them, present
+     each packet and hash, and record the user's decision with
+     \`publish <proposal-id> --approve|--reject|--request-changes\` — on
+     approval the concept lands atomically and query answers immediately.
    - Published knowledge present → offer \`query\`, \`refresh\`, or \`gaps\`.
    - Remote connectors configured but not ready → point at the
      connector-setup agent and \`sources\` readiness.

@@ -23,7 +23,8 @@ import {
   parseYamlArtifact,
 } from "../contracts/index.mjs";
 import { FederationResolver } from "../federation/index.mjs";
-import { createCoreSensors, scanLintContext, SensorRunner } from "../lifecycle/src/index.mjs";
+import { AuditWriter, createCoreSensors, scanLintContext, SensorRunner, TransactionManager, sha256Token } from "../lifecycle/src/index.mjs";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { guardRetriever, RevocationGuard } from "../erasure/index.mjs";
 import { createExtensionValidator, previewMigration } from "../extensions/index.mjs";
 import { PrincipalAuthority, ReviewContextAuthority, RuntimeTrustAuthority } from "../agents/index.mjs";
@@ -421,7 +422,7 @@ export class KdlcEngine {
           ...localOwnerIdentity(),
           review_roles: ["trust-reviewer"],
           scopes: ["read", "mutate", "review", "publish"],
-          clearance: "public",
+          clearance: "internal",
           compartments: [],
         },
       ],
@@ -839,8 +840,19 @@ export function parseCli(argv) {
     [input.proposal_id, input.decision, input.receipt_id] = positionals;
   }
   if (operation === "publish") {
-    [input.proposal_id, input.receipt_id] = positionals;
-    if (positionals[2]) input.current = JSON.parse(positionals[2]);
+    const flags = positionals.filter((value) => value.startsWith("--"));
+    const plain = positionals.filter((value, index) => !value.startsWith("--") && !(positionals[index - 1] === "--approve" || positionals[index - 1] === "--reject" || positionals[index - 1] === "--request-changes"));
+    const reasonFor = (flag) => {
+      const at = positionals.indexOf(flag);
+      return at !== -1 && positionals[at + 1] && !positionals[at + 1].startsWith("--") ? positionals[at + 1] : undefined;
+    };
+    if (flags.includes("--approve")) { input.decide = "approved"; input.reason = reasonFor("--approve"); }
+    else if (flags.includes("--reject")) { input.decide = "rejected"; input.reason = reasonFor("--reject"); }
+    else if (flags.includes("--request-changes")) { input.decide = "changes_requested"; input.reason = reasonFor("--request-changes"); }
+    [input.proposal_id, input.receipt_id] = plain;
+    if (input.proposal_id === undefined) delete input.proposal_id;
+    if (input.receipt_id === undefined) delete input.receipt_id;
+    if (plain[2]) input.current = JSON.parse(plain[2]);
   }
   if (operation === "proposal" && (positionals.includes("--scaffold") || positionals.includes("--submit"))) {
     const flag = (name) => {
@@ -1190,6 +1202,121 @@ export function createLocalProjectEngine(options = {}) {
         reviewContextSession: await contextSession(workflowId),
         ...(review ? { session: principalAuthority.establishReviewSession(principal.id, principal.review_roles[0]) } : {}),
       });
+      // FEAT-033 (#125): humans never assemble the publish current-context —
+      // every field already exists in the workflow's own durable records.
+      const deriveCurrent = async (workflowId, proposal) => {
+        const normalized = await store.get(`workflow/runs/${workflowId}/state/normalized-evidence.json`);
+        const record = policy.review_contexts.find((entry) => entry.workflow_id === workflowId)
+          ?? (await indexStore.exists(contextPath(workflowId)) ? await indexStore.readJson(contextPath(workflowId)) : null);
+        if (!record) throw missing("Trusted review context is unavailable");
+        return {
+          concept: structuredClone(proposal.concept.after),
+          target_revision: proposal.target.revision,
+          source_hashes: [normalized.source_hash],
+          resolved_dependencies: structuredClone(record.context.resolved.dependencies),
+          profile: structuredClone(record.context.resolved.profile),
+          policies: structuredClone(record.context.resolved.policies),
+        };
+      };
+      // FEAT-033: the last mile — after the verification chain authorizes
+      // publication, land the OKF concept and regenerate index + catalog in
+      // one journaled, crash-recoverable transaction (never half-published).
+      const materializePublication = async ({ workflowId, proposal }) => {
+        const project = JSON.parse(readFileSync(resolve(root, ".kdlc/project.json"), "utf8"));
+        const mount = project.mounts?.[0]?.alias ?? "primary";
+        const base = `knowledge/${mount}`;
+        const subjectPath = String(proposal.target.subject).replace(/^kb:\/\/[^/]+\//, "").replace(/[^A-Za-z0-9/_-]+/g, "-").toLowerCase();
+        if (!subjectPath || subjectPath.includes("..")) throw inputError(`proposal subject ${proposal.target.subject} does not yield a safe concept path`);
+        const conceptRelative = `concepts/${subjectPath}.md`;
+        const conceptId = conceptRelative.slice(0, -3); // retriever contract: id === path minus .md
+        const frontmatter = proposal.concept.after.frontmatter;
+        const conceptContent = `---\n${stringifyYaml(frontmatter)}---\n\n${String(proposal.concept.after.body).replace(/\n*$/, "\n")}`;
+        const kbConfigText = await indexStore.exists(`${base}/knowledge-base.yaml`) ? await indexStore.readText(`${base}/knowledge-base.yaml`) : null;
+        const kbAccess = kbConfigText ? parseYaml(kbConfigText)?.access?.classification ?? "internal" : "internal";
+        const catalogPath = `${base}/retrieval-catalog.json`;
+        const oldCatalog = await indexStore.exists(catalogPath) ? JSON.parse(await indexStore.readText(catalogPath)) : { version: "kdlc-retrieval-catalog-1", concepts: [] };
+        // Retrieval binds to frontmatter access and per-source access/rights.
+        // Concepts reviewed without them keep the pre-FEAT-033 contract —
+        // authorization recorded, nothing materialized — with the reason
+        // stated so the drafter can fix and re-review.
+        const missingMetadata = !frontmatter.access || typeof frontmatter.access.classification !== "string"
+          ? `the concept frontmatter lacks access.classification (e.g. "${kbAccess}")`
+          : (frontmatter.sources ?? []).filter((source) => typeof source.resource !== "string" || !source.access?.classification || !source.rights?.license)
+              .map((source) => `source "${source.id}" lacks resource/access/rights`).join("; ") || null;
+        if (missingMetadata) {
+          return { materialized: false, reason: `${missingMetadata} — retrieval binds to these reviewed fields, so the intent is recorded but the concept was not published to the knowledge base; add them in the drafting template and re-review` };
+        }
+        const entry = { id: conceptId, path: conceptRelative, byte_hash: sha256Token(conceptContent), access: structuredClone(frontmatter.access) };
+        const catalog = { ...oldCatalog, concepts: [...oldCatalog.concepts.filter((item) => item.id !== conceptId), entry].sort((a, b) => a.id.localeCompare(b.id)) };
+        const catalogContent = `${JSON.stringify(catalog)}\n`;
+        const indexPathRel = `${base}/index.md`;
+        const oldIndex = await indexStore.exists(indexPathRel) ? await indexStore.readText(indexPathRel) : "<!-- generated by kdlc; do not edit -->\n# Knowledge Index\n";
+        const line = `* [${String(frontmatter.title ?? conceptId).replace(/[\[\]\n]/g, " ")}](${conceptRelative})`;
+        const kept = oldIndex.split("\n").filter((existing) => existing.trim().length > 0 && !existing.includes(`](${conceptRelative})`));
+        const indexContent = `${[...kept, line].join("\n")}\n`;
+        const priorToken = async (path) => (await indexStore.exists(path)) ? sha256Token(await indexStore.readText(path)) : null;
+        const existingConceptToken = await priorToken(`${base}/${conceptRelative}`);
+        if (existingConceptToken === sha256Token(conceptContent)) {
+          return { materialized: true, concept: `${base}/${conceptRelative}`, index: indexPathRel, catalog: catalogPath, already_published: true };
+        }
+        // A creation proposal (concept.before === null) was reviewed as NEW
+        // content. Lossy subject sanitization can collide distinct subjects
+        // onto one path — the CAS must refuse, never bless a silent overwrite
+        // of a different reviewed concept (review round HIGH).
+        if (proposal.concept.before === null && existingConceptToken !== null) {
+          throw new EngineError(
+            "KDLC_STATE_CONFLICT",
+            `a different concept already occupies ${conceptRelative} (subjects may collide after path sanitization) — this proposal was reviewed as a creation, so publishing it would silently destroy reviewed content; re-draft it as an update (concept.before set to the current content) or choose a distinct subject`,
+            EXIT.conflict,
+            { path: `${base}/${conceptRelative}` },
+          );
+        }
+        const transactions = new TransactionManager({
+          store: indexStore,
+          clock: { now: () => new Date().toISOString(), millis: () => Date.now() },
+          ids: { next: (prefix) => `${prefix}_${randomBytes(8).toString("hex")}` },
+          token: sha256Token,
+          audit: new AuditWriter({ store: indexStore, clock: { now: () => new Date().toISOString(), millis: () => Date.now() }, ids: { next: (prefix) => `${prefix}_${randomBytes(8).toString("hex")}` } }),
+        });
+        const journal = await transactions.prepare({
+          workflowId,
+          targets: [
+            { path: `${base}/${conceptRelative}`, expectedToken: proposal.concept.before === null ? null : existingConceptToken, content: conceptContent },
+            { path: indexPathRel, expectedToken: await priorToken(indexPathRel), content: indexContent },
+            { path: catalogPath, expectedToken: await priorToken(catalogPath), content: catalogContent },
+          ],
+        });
+        try {
+          await transactions.commit(workflowId, journal.transaction_id);
+        } catch (error) {
+          // Content is journaled: finalization hiccups roll forward, never
+          // leave the KB half-published.
+          if (error?.code === "KDLC_TRANSACTION_FINALIZATION_PENDING") await transactions.recover(workflowId, journal.transaction_id, "rollforward");
+          else throw error;
+        }
+        return { materialized: true, concept: `${base}/${conceptRelative}`, index: indexPathRel, catalog: catalogPath, transaction_id: journal.transaction_id };
+      };
+      // FEAT-033: the human gate — list what awaits decision, in plain terms.
+      const pendingReviews = async () => {
+        const directory = resolve(root, ".kdlc/governed/proposal-index");
+        if (!existsSync(directory)) return { pending: [] };
+        const pending = [];
+        for (const name of (await readdir(directory)).filter((item) => item.endsWith(".json")).sort()) {
+          const record = JSON.parse(await readFile(resolve(directory, name), "utf8"));
+          const decided = await indexStore.exists(`.kdlc/governed/workflow/runs/${record.workflow_id}/reviews/${record.proposal_id}/decision.json`);
+          if (decided) continue;
+          const proposal = await store.get(`workflow/runs/${record.workflow_id}/proposals/${record.proposal_id}.json`).catch(() => null);
+          pending.push({
+            proposal_id: record.proposal_id,
+            workflow_id: record.workflow_id,
+            packet_hash: record.packet_hash,
+            title: proposal?.concept?.after?.frontmatter?.title ?? record.proposal_id,
+            subject: proposal?.target?.subject ?? null,
+            next: `kdlc publish ${record.proposal_id} --approve "<reason>" (or --reject / --request-changes)`,
+          });
+        }
+        return { pending, ...(pending.length === 0 ? { note: "nothing is waiting on you" } : {}) };
+      };
       governed = {
         proposal_create: async ({ proposal }) => {
           const workflowId = proposal?.workflow_id;
@@ -1222,13 +1349,40 @@ export function createLocalProjectEngine(options = {}) {
           const runtime = await harness(index.workflow_id, true);
           return runtime.decide({ workflowId: index.workflow_id, proposalId, decision, receiptId });
         },
-        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current }) => {
+        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current, decide, reason }) => {
+          if (proposalId === undefined) return pendingReviews();
           const index = await proposalIndex(proposalId);
+          if (decide) {
+            // --approve/--reject/--request-changes: record the human decision
+            // first; only approvals continue into publication.
+            const reviewRuntime = await harness(index.workflow_id, true);
+            receiptId = receiptId ?? `rr_${digest(`${proposalId}:${decide}:${Date.now()}`).slice(7, 19)}`;
+            try {
+              await reviewRuntime.decide({ workflowId: index.workflow_id, proposalId, decision: decide, receiptId });
+            } catch (error) {
+              if (error?.code === "KDLC_DECISION_CONFLICT") {
+                throw new EngineError("KDLC_STATE_CONFLICT", `${proposalId} already has a recorded decision (receipt ${error.details?.current ?? "on file"}) — your earlier decision stands; finish with: kdlc publish ${proposalId} ${error.details?.current ?? "<receipt-id>"}`, EXIT.conflict, structuredClone(error.details ?? {}));
+              }
+              throw error;
+            }
+            // The human's stated rationale is part of the governance record.
+            await indexStore.writeJsonAtomic(`.kdlc/governed/workflow/runs/${index.workflow_id}/reviews/${proposalId}/rationale.json`, {
+              api_version: "kdlc.dev/review-rationale/v1",
+              proposal_id: proposalId, receipt_id: receiptId, decision: decide,
+              reason: reason ?? null, decided_by: principal.actor, decided_at: new Date().toISOString(),
+            });
+            if (decide !== "approved") return { proposal_id: proposalId, decision: decide, receipt_id: receiptId, reason: reason ?? null, published: null };
+          }
+          if (!receiptId) throw inputError("publish requires a receipt id (or use --approve to decide and publish in one step)");
+          const proposal = await store.get(`workflow/runs/${index.workflow_id}/proposals/${proposalId}.json`);
+          const effectiveCurrent = current ?? await deriveCurrent(index.workflow_id, proposal);
           const runtime = await harness(index.workflow_id, true);
           const receipt = await store.get(`workflow/runs/${index.workflow_id}/receipts/${receiptId}.json`);
           const decision = await store.get(`workflow/runs/${index.workflow_id}/reviews/${proposalId}/decision.json`);
           trustAuthority.activateReview({ workflowId: index.workflow_id, receipt, decision });
-          return runtime.preparePublication({ workflowId: index.workflow_id, proposalId, receiptId, current });
+          const publication = await runtime.preparePublication({ workflowId: index.workflow_id, proposalId, receiptId, current: effectiveCurrent });
+          const published = await materializePublication({ workflowId: index.workflow_id, proposal });
+          return { ...publication, published, next: published.materialized ? "the concept is live — kdlc query answers with citations now" : published.reason };
         },
         reconcile_edits: async ({ proposal_id: proposalId, reviewed_proposal_id: reviewedProposalId, target, reviewed_concept: reviewedConcept, current_concept: currentConcept, receipt_id: receiptId }) => {
           const index = await proposalIndex(reviewedProposalId);
@@ -1361,7 +1515,11 @@ export function createLocalProjectEngine(options = {}) {
       "   trusted review context, but the claim schema requires the fields present).",
       "2. Add proposals: `kdlc.dev/concept-proposal/v1alpha1` entries with `id` matching pr_<lowercase+digits>,",
       "   `workflow_id: \"" + workflowId + "\"`, `task: \"ingest\"`, `state: \"review_pending\"`, a `target`",
-      "   (knowledge_base_id/revision/subject), the OKF `concept` ({before: null, after: {frontmatter, body}}),",
+      "   (knowledge_base_id/revision/subject), the OKF `concept` ({before: null, after: {frontmatter, body}}) —",
+      "   frontmatter MUST include `access: {classification: \"" + access + "\"}` (retrieval binds to it) and",
+      "   each `sources` entry MUST carry `id`, `resource` (e.g. \"file:sources/<name>\"), `source_hash`,",
+      "   `access` and `rights` matching this kit's declarations (answers are withheld unless the requester",
+      "   may see the concept AND every disclosed source),",
       "   `claim_ids` listing every claim the concept rests on, `claim_decisions`",
       "   ([{claim_id, disposition: \"accepted\", rationale}]), and `created_by` (e.g. \"kdlc-integrator/0.2.0\").",
       "3. Set model.model and model.prompt to what actually drafted the content.",

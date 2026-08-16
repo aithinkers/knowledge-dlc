@@ -33,9 +33,10 @@ background work — and use only the governed engine operations:
 3. **Submit**: run `proposal --submit <workflow-id>` — the engine reads
    the kit files from disk, so never paste evidence or the recording into
    the conversation. Report each returned packet hash to the human.
-4. **Stop at the gate**: the human decides via `review`; publication goes
-   through `publish` with the current-context JSON the kit README
-   describes. Never infer a decision from conversation.
+4. **Stop at the gate**: run `publish` bare to show the human what awaits
+   them; their decision is `publish <proposal-id> --approve|--reject` —
+   approval lands the concept atomically and query answers immediately.
+   Never infer a decision from conversation.
 
 ## When to use this agent
 
