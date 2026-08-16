@@ -392,6 +392,47 @@ no unresolved critical or high finding must be attached. This authority is
 consumed and expires immediately when PR #93 merges or is closed, and it
 does not authorize any later protected change.
 
+PR #100, linked to issue #96, may use a one-time protected release-schema
+bypass for the HTML normalizer. The authorized pre-contract head is
+`1d10c0f10f2d608b3e331c4f38b5f45b472ceff1` on pre-contract base
+`419f7052d4986c0f267b558276b9513467379b2d`. It authorizes exactly one
+protected transition:
+`core/schemas/release/conformance-statement.schema.json` from SHA-256
+`7846b5dc04f1d6297a6a8db34835a54605794fd8d402661cd48d603eeede0ee1`
+to SHA-256
+`bc0607c136e5aeace73fb4c8891cc5d43c3dce85aea5bd40562fca465db9f9c9`,
+whose complete byte difference is the insertion of the single enum value
+`"html"` into the `format_profiles` items list.
+
+After this AGENTS-only contract (which also pre-registers FEAT-022 as
+planned and mechanically rebinds the traceability evidence hash) merges,
+PR #100 may target only the descendant base produced by merging main into
+the pre-contract head. The permitted delta beyond that mechanical merge is
+limited to: flipping the FEAT-022 traceability status from planned to
+implemented and filling its evidence arrays; the mechanical traceability
+evidence-hash rebind in `distribution/release/conformance-statement.json`;
+and, if a required security scanner raises findings on the pre-contract
+head, minimal fixes confined to `packages/normalizers/src/normalize.mjs`
+and `tests/governance/html-normalizer.test.mjs` that must be enumerated in
+the owner exception record and covered by the attached independent review.
+The protected schema byte transition must remain exactly the pair above.
+The complete PR #100 content diff against its base is limited to 8 paths:
+that schema transition; `packages/normalizers/src/descriptors.mjs`;
+`packages/normalizers/src/normalize.mjs`; the two new locator kinds' host
+schema `core/schemas/normalization/normalized-unit.schema.json`; the derived
+entries in `distribution/conformance.json` and
+`distribution/release/conformance-statement.json`; the FEAT-022 entry in
+`docs/traceability.json`; and the new
+`tests/governance/html-normalizer.test.mjs`. No workflow, validator,
+scorer, statistical, release-status, or other schema byte may change.
+Candidate tests and every non-self required or security check must pass;
+the owner exception record must identify the Repository policy protected
+self-difference on that single schema as its sole failed check and bypass
+reason. An independent read-only agent review of the exact merged head with
+no unresolved critical or high finding must be attached. This authority is
+consumed and expires immediately when PR #100 merges or is closed, and it
+does not authorize any later protected change.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
