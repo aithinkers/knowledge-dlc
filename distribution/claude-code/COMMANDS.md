@@ -21,3 +21,4 @@ All commands invoke the same governed CLI engine.
 - /kdlc:doctor → `kdlc doctor --output json`
 - /kdlc:reconcile-edits → `kdlc reconcile-edits --output json`
 - /kdlc:jobs → `kdlc jobs --output json`
+- /kdlc:sources → `kdlc sources --output json`
