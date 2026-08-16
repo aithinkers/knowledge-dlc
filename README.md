@@ -129,6 +129,18 @@ Remote sources (Confluence, SharePoint, OneDrive, Google Drive) connect
 through the guided `connector-setup` agent — read-only scopes, secrets stay
 in environment variables ([guide](distribution/claude-code/guides/connecting-remote-sources.md)).
 
+## The five verbs
+
+Day to day you only need these — everything else is automation or inspection:
+
+```bash
+kdlc                    # start or resume: where you are + the next step
+kdlc ingest <files>     # feed it (folders, PDFs, Office, email, HTML, …)
+kdlc query "…"          # ask it — answers carry citations
+kdlc publish            # your gate: list what awaits you; <id> --approve "reason" lands it
+kdlc revisit            # ratify auto-published drafts into default answers
+```
+
 ## Automation & CI — the engine directly
 
 The same `kdlc` CLI the harnesses invoke is a stable surface for scripts and

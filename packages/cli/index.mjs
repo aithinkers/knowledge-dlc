@@ -1531,14 +1531,27 @@ export function createLocalProjectEngine(options = {}) {
       sliceBounds = [Number(match[1]), Number(match[2])];
       if (sliceBounds[0] < 1 || sliceBounds[1] < sliceBounds[0]) throw inputError("--units range must satisfy 1 <= start <= end");
     }
-    const scaffolded = [];
+    const scaffolded = []; const skipped = [];
     for (const { artifact, index } of selection) {
       const workflowId = requestedWorkflow ?? (selection.length > 1 || source !== undefined ? `wf_${jobId.slice(4)}s${index}` : `wf_${jobId.slice(4)}`);
       if (!/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("workflow_id must match wf_<lowercase letters and digits> (the concept-proposal schema enforces it)");
-      scaffolded.push(await scaffoldOneSource({ artifact, workflowId, access, license, sliceBounds, sourceName: job.request?.sources?.[index] ?? artifact.manifest.source_id }));
+      try {
+        scaffolded.push(await scaffoldOneSource({ artifact, workflowId, access, license, sliceBounds, sourceName: job.request?.sources?.[index] ?? artifact.manifest.source_id }));
+      } catch (error) {
+        // Resumable batches (FEAT-035, #129): on an --all-sources re-run,
+        // already-scaffolded documents skip and the rest continue.
+        if (allSources && error?.code === "KDLC_STATE_CONFLICT") {
+          skipped.push({ workflow_id: workflowId, source: job.request?.sources?.[index] ?? artifact.manifest.source_id, reason: "already scaffolded" });
+          continue;
+        }
+        throw error;
+      }
+    }
+    if (allSources && scaffolded.length === 0 && skipped.length > 0) {
+      return { job_id: jobId, scaffolds: [], skipped, next: "every document is already scaffolded — fill the kits and submit with kdlc proposal --submit <workflow-id>" };
     }
     return withDefaultsNote(
-      selection.length === 1 ? scaffolded[0] : { job_id: jobId, scaffolds: scaffolded, next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" },
+      selection.length === 1 ? scaffolded[0] : { job_id: jobId, scaffolds: scaffolded, ...(skipped.length ? { skipped } : {}), next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" },
       usedDefaults, access, license,
     );
   };
