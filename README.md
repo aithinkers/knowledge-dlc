@@ -12,11 +12,14 @@ exact page, paragraph, or shape it came from, and staleness, conflicts, and
 access rules are first-class instead of afterthoughts.
 
 ```bash
-# try it in a minute (Node 22+)
-npx knowledge-dlc init
-npx knowledge-dlc ingest notes.md
-npx knowledge-dlc query "what do we know?"
+# try it in a minute (Node 22+, from a checkout)
+npm ci && npm link
+kdlc init && kdlc ingest notes.md && kdlc query "what do we know?"
 ```
+
+Once the package is published to npm, the same works with zero install:
+`npx knowledge-dlc init` — the CLI ships under both the `kdlc` and
+`knowledge-dlc` bin names.
 
 One harness-neutral core, rendered natively for **Claude Code, Codex CLI,
 Kiro CLI, Kiro IDE, and any MCP client** — the same governed engine, the same
@@ -133,22 +136,19 @@ drift. Setup output is derived from those same authored definitions.
 
 ## Quick start
 
-No install needed — `npx` runs the CLI straight from the registry:
-
-```bash
-mkdir my-knowledge && cd my-knowledge
-npx knowledge-dlc init              # scaffold a governed project workspace
-npx knowledge-dlc ingest notes.md   # normalize a source into anchored evidence
-npx knowledge-dlc query "what do we know about tokens?"
-npx knowledge-dlc setup claude-code .   # or codex | kiro | kiro-ide | mcp
-```
-
-Working from a checkout instead:
+From a checkout:
 
 ```bash
 npm ci && npm link     # exposes the `kdlc` CLI
-kdlc init && kdlc ingest notes.md && kdlc query "what do we know?"
+mkdir my-knowledge && cd my-knowledge
+kdlc init              # scaffold a governed project workspace
+kdlc ingest notes.md   # normalize a source into anchored evidence
+kdlc query "what do we know about tokens?"
+kdlc setup claude-code .   # or codex | kiro | kiro-ide | mcp
 ```
+
+Once published to npm, the zero-install form is
+`npx knowledge-dlc <command>` — identical commands, no checkout.
 
 The full walkthrough — install, ingest, review, publish, plugin and MCP
 setup — lives in **[docs/getting-started.md](docs/getting-started.md)** and is
