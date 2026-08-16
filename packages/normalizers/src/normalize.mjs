@@ -309,7 +309,9 @@ function emlProfile(bytes, sourceHash, limits) {
         ? emlDecodeBytes(decoded, warnings)
         : new TextDecoder("latin1").decode(decoded).normalize("NFC").replace(/\r\n?/g, "\n");
     const partWarnings = [];
-    if (type === "text/html") { value = value.replace(/<(?:style|script)\b[\s\S]*?<\/(?:style|script)>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/[ \t]+/g, " "); partWarnings.push("html-tags-stripped"); }
+    // Close-tag matching tolerates whitespace/attributes (</script >), and
+    // entity unescaping resolves &amp; LAST so &amp;lt; cannot double-decode.
+    if (type === "text/html") { value = value.replace(/<(?:style|script)\b[\s\S]*?<\/\s*(?:style|script)\b[^>]*>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&").replace(/[ \t]+/g, " "); partWarnings.push("html-tags-stripped"); }
     const trimmed = value.split("\n").map((line) => line.trimEnd()).join("\n").trim();
     if (trimmed) units.push(make("email-body", { kind: "mime-part", part }, { text: trimmed, structured_data: { media_type: type, ...(filename ? { filename } : {}) } }, partWarnings));
   };

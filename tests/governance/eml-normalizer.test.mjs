@@ -55,6 +55,15 @@ test("FEAT-019: a multipart email yields decoded headers, bodies, and an attachm
   assert.ok(!bodies[1].text.includes("evil"), "script content stripped");
   assert.ok(bodies[1].quality_warnings.includes("html-tags-stripped"));
 
+  // CodeQL round: spaced close tags and staged entities cannot leak or double-decode.
+  const tricky = await normalize({
+    bytes: Buffer.from('From: a@b.c\r\nSubject: t\r\nContent-Type: text/html\r\n\r\n<script foo="bar">leak()</script ><p>&amp;lt;kept&amp;gt; &amp; done</p>'),
+    filename: "tricky.eml"
+  });
+  const trickyBody = tricky.units.find(({ kind }) => kind === "email-body").text;
+  assert.ok(!trickyBody.includes("leak"), "spaced/attributed close tag still strips the block");
+  assert.match(trickyBody, /&lt;kept&gt; & done/, "&amp;lt; decodes once, never twice");
+
   const attachment = result.units.find(({ kind }) => kind === "email-attachment");
   assert.equal(attachment.structured_data.filename, "review-deck.pdf");
   assert.equal(attachment.structured_data.media_type, "application/pdf");
