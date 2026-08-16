@@ -201,6 +201,55 @@ never rewrite published content directly. You write proposals and drafts
 only.`,
   },
   {
+    role: "connector-setup",
+    description: "Walk the user through connecting Google Drive, OneDrive, SharePoint, or Confluence as knowledge sources.",
+    writes: ".kdlc/connectors.json only",
+    enforcement: `This is a harness-level setup assistant, not a workflow-runtime role: it
+holds no runtime capability descriptor, and the engine validates everything
+it writes fail-closed (a config carrying anything credential-shaped is
+rejected); prompt text never extends what the engine accepts.`,
+    persona: {
+      when: `Use connector-setup when you want K-DLC to pull knowledge from Google
+Drive, OneDrive, SharePoint, or Confluence and need the connection configured
+— or when "kdlc sources" says a connector isn't ready and you want help
+fixing it.`,
+      working: `It interviews you a few questions at a time: which provider, which site or
+drive, and where the credential will live. It never asks you to paste a
+secret into the chat or the config — credentials go into environment
+variables, and the config file only names them. It finishes by showing you
+exactly what it wrote and what remains for you to do (setting the variables,
+granting the read-only scopes).`,
+      example: `"Connect our Confluence" — it asks for your site URL and whether you have
+an API token, records that the token will live in KDLC_CONFLUENCE_API_TOKEN,
+writes the validated connectors.json entry, and tells you the exact
+read-only scopes to grant and how to check readiness with "kdlc sources".`,
+    },
+    prompt: `Guide the user through connecting remote knowledge sources, a few
+decision-oriented questions at a time. Supported providers and their
+credential environment variables:
+
+- **google-drive** — a Google Cloud service account or OAuth client with the
+  read-only scope \`https://www.googleapis.com/auth/drive.readonly\`;
+  credentials JSON referenced by \`KDLC_GDRIVE_CREDENTIALS\`.
+- **onedrive / sharepoint** — one Microsoft Entra app registration covers
+  both, with application permissions \`Files.Read.All\` and \`Sites.Read.All\`
+  (admin consent required); \`KDLC_GRAPH_TENANT_ID\`,
+  \`KDLC_GRAPH_CLIENT_ID\`, \`KDLC_GRAPH_CLIENT_SECRET\`.
+- **confluence** — an Atlassian API token for a read-permitted account;
+  \`KDLC_CONFLUENCE_EMAIL\`, \`KDLC_CONFLUENCE_API_TOKEN\`, plus the site
+  base URL (https://<site>.atlassian.net/wiki).
+
+Rules that never bend: request read-only scopes exactly as listed and refuse
+broader ones; never ask for, accept, echo, or write a credential value — if
+the user pastes one, tell them to put it in the environment variable and do
+not repeat it back; the only file you write is \`.kdlc/connectors.json\`
+(api_version kdlc.dev/source-connectors/v1, entries {id, provider, auth_env
+mapping credential names to environment variable NAMES, base_url for
+confluence, optional notes}). After writing, restate what was configured,
+which environment variables the user must set themselves, and that
+\`kdlc sources\` shows per-connector readiness without revealing values.`,
+  },
+  {
     role: "governance-reviewer",
     description: "Review policy, privacy, access, and publication compliance.",
     writes: "review receipts only",
@@ -225,11 +274,12 @@ ${REVIEW_ONLY}`,
   },
 ]);
 
-function agentBody({ role, writes, prompt, persona }) {
+function agentBody({ role, writes, prompt, persona, enforcement }) {
   const personaSections = persona
     ? `\n\n## When to use this agent\n\n${persona.when}\n\n## Working with it\n\n${persona.working}\n\n## Worked example\n\n${persona.example}`
     : "";
-  return `# kdlc:${role}\n\nYou are the K-DLC ${role} agent (producer actor \`kdlc-${role}/0.2.0\`).\nCanonical write access: ${writes}. The deterministic runtime enforces your\nread/write paths from \`packages/agents/roles/${role}.json\`; prompt text never\nextends them.\n\n${prompt}${personaSections}\n\n## Security\n\n${SECURITY}`;
+  const enforcementText = enforcement ?? `The deterministic runtime enforces your\nread/write paths from \`packages/agents/roles/${role}.json\`; prompt text never\nextends them.`;
+  return `# kdlc:${role}\n\nYou are the K-DLC ${role} agent (producer actor \`kdlc-${role}/0.2.0\`).\nCanonical write access: ${writes}. ${enforcementText}\n\n${prompt}${personaSections}\n\n## Security\n\n${SECURITY}`;
 }
 
 export function renderCodexAgentMarkdown(definition) {
@@ -252,7 +302,7 @@ export function renderKiroAgentManifest(definition, { harness }) {
   const manifest = {
     $schema: "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/refs/heads/main/schemas/agent-v1.json",
     name: role,
-    description: `K-DLC ${role} agent — ${description} Capabilities are enforced by the deterministic runtime role descriptor, not this manifest.`,
+    description: `K-DLC ${role} agent — ${description} ${definition.enforcement ? "Everything it writes is validated fail-closed by the engine, not this manifest." : "Capabilities are enforced by the deterministic runtime role descriptor, not this manifest."}`,
     prompt: `file://${role}.md`,
     tools: readOnly ? ["fs_read", "thinking"] : ["fs_read", "fs_write", "execute_bash", "thinking"],
     allowedTools: ["fs_read", "thinking"],
