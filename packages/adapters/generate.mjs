@@ -375,9 +375,9 @@ const generated = new Map([
   ],
   [
     "distribution/claude-code/.claude-plugin/plugin.json",
-    // agents/ and commands/ are auto-discovered at the plugin root; naming
-    // them as directory strings without a trailing slash fails current
-    // Claude Code manifest validation (FEAT-028 round 2).
+    // agents/ and commands/ are auto-discovered at the plugin root (the
+    // documented default); the previous directory-string form was rejected
+    // by current Claude Code manifest validation (FEAT-028 round 2).
     `${canonicalJson({ name: "kdlc", version: "0.2.0", description: "Governed K-DLC CLI adapter" })}\n`,
   ],
   [
