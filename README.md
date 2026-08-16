@@ -13,10 +13,10 @@ exact page, paragraph, or shape it came from, and staleness, conflicts, and
 access rules are first-class instead of afterthoughts.
 
 ```bash
-# try it in a minute (Node 22+, from a checkout)
+# get started (Node 22+, from a checkout)
 npm ci && npm link
-mkdir ~/my-knowledge && cd ~/my-knowledge
-kdlc init && kdlc ingest notes.md && kdlc query "what do we know?"
+kdlc setup claude-code ~/my-project   # or codex | kiro | kiro-ide | mcp
+# then, inside your AI tool: "init a knowledge base and ingest ./docs"
 ```
 
 Once the package is published to npm, the same works with zero install:
@@ -85,11 +85,13 @@ projections — plain files remain the durable contract.
 - **Deterministic governance** — sensors, audit trails, traceability, and a
   release evaluation that runs with zero live model calls
 
-## Pick your harness
+## Step 1 — add K-DLC to your AI tool
 
-One setup command installs any harness surface into your project, with runner
-paths resolved against this installation — the installed files work from any
-directory:
+K-DLC is designed to be used *inside* your AI tool: the agents drive the
+lifecycle (ingest → claims → concepts → review → publish) and stop at the
+review gates for your decisions. One setup command installs any harness
+surface into your project, with runner paths resolved against this
+installation — the installed files work from any directory:
 
 ```bash
 kdlc setup <claude-code|codex|kiro|kiro-ide|mcp>[,...] <project-directory>
@@ -99,62 +101,63 @@ kdlc setup <claude-code|codex|kiro|kiro-ide|mcp>[,...] <project-directory>
 | --- | --- | --- |
 | **Claude Code** | `kdlc setup claude-code .` prints the `claude plugin install …/distribution/claude-code` command | `/kdlc:<operation>`, `kdlc:<role>` agents |
 | **Codex CLI** (≥ 0.145) | `kdlc setup codex <project>` writes `.codex/` (skill + agents) into your project; surface source in `distribution/codex/` | `$kdlc` skill, `.codex/agents/<role>` |
-| **Kiro CLI** (≥ 2.6) | `kdlc setup kiro <project>` writes `.kiro/` (17 skills + 9 agents) into your project; surface source in `distribution/kiro/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
+| **Kiro CLI** (≥ 2.6) | `kdlc setup kiro <project>` writes `.kiro/` (skills + agents) into your project; surface source in `distribution/kiro/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
 | **Kiro IDE** | `kdlc setup kiro-ide <project>`; surface source in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
 | **Any MCP client** | `kdlc setup mcp <project>` writes a stdio config; HTTP packaging in `distribution/mcp/` | `kb_search`, `kb_fetch`, `proposal_create`, … |
-
-### Quick start per harness
-
-**Claude Code**
-```bash
-claude plugin install <this-checkout>/distribution/claude-code
-# then, inside any project:
-/kdlc:init  →  /kdlc:ingest ["notes.md"]  →  /kdlc:query ["what do we know?"]
-```
-
-**Kiro CLI / Kiro IDE**
-```bash
-kdlc setup kiro ~/my-project        # or kiro-ide
-# in Kiro, from ~/my-project:
-/kdlc-init  →  /kdlc-ingest  →  /kdlc-query
-# the kdlc:<role> agents appear under .kiro/agents/
-```
-
-**Codex CLI**
-```bash
-kdlc setup codex ~/my-project
-# in Codex: $kdlc with a JSON argument vector, e.g. ["init"]
-```
-
-**MCP (Claude Desktop or any client)**
-```bash
-kdlc setup mcp ~/my-project         # writes kdlc.mcp.json with absolute stdio paths
-```
 
 Adapters differ only in packaging: stage requirements, security policy, state
 transitions, and artifact contracts are identical everywhere (spec §25), and
 every distribution tree is generated from the authored core — CI fails on
-drift. Setup output is derived from those same authored definitions.
+drift.
 
-## Quick start
+## Step 2 — talk to it
 
-From a checkout:
+Inside the harness, work conversationally; the agents run the engine and
+surface decisions:
 
-```bash
-npm ci && npm link     # exposes the `kdlc` CLI
-mkdir my-knowledge && cd my-knowledge
-kdlc init              # scaffold a governed project workspace
-kdlc ingest notes.md   # normalize a source into anchored evidence
-kdlc query "what do we know about tokens?"
-kdlc setup claude-code .   # or codex | kiro | kiro-ide | mcp
+```text
+you>  /kdlc:init, then ingest everything under ./docs and our Confluence ENG space
+kdlc> 12 sources normalized (494 evidence units). The curator proposes 9 for
+      adoption and asks: is the vendor pricing page in scope?
+you>  no — defer it. Draft concepts for the rest.
+kdlc> 7 concept proposals ready for review — packet hash a41c… Approve?
+you>  approved
+kdlc> Published 7 concepts. Try: /kdlc:query ["what is our failover timeout?"]
 ```
 
-Once published to npm, the zero-install form is
-`npx knowledge-dlc <command>` — identical commands, no checkout.
+Remote sources (Confluence, SharePoint, OneDrive, Google Drive) connect
+through the guided `connector-setup` agent — read-only scopes, secrets stay
+in environment variables ([guide](distribution/claude-code/guides/connecting-remote-sources.md)).
 
-The full walkthrough — install, ingest, review, publish, plugin and MCP
-setup — lives in **[docs/getting-started.md](docs/getting-started.md)** and is
-executed end-to-end by a test on every change.
+## Automation & CI — the engine directly
+
+The same `kdlc` CLI the harnesses invoke is a stable surface for scripts and
+pipelines — no agent in the loop:
+
+```bash
+kdlc ingest docs/spec.md        # queues a background job; evidence, not answers
+kdlc lint                       # structural/policy findings for CI
+kdlc refresh                    # re-check published knowledge against sources
+kdlc publish                    # governed publication in a release pipeline
+```
+
+Heads up if you drive it by hand: `query` answers only from **published**
+knowledge. Evidence produced by `ingest` becomes queryable after
+`proposal` → `review` → `publish` — the full sequence is the walkthrough in
+[docs/getting-started.md](docs/getting-started.md), executed end-to-end by a
+test on every change. In a harness the agents run that middle stretch for you.
+
+## Inspecting your project
+
+Read-only commands you can run anytime, even mid-conversation:
+
+```bash
+kdlc status     # where everything stands
+kdlc jobs       # background work and results
+kdlc sources    # remote-source receipts and connector readiness
+kdlc trace kb://<kb>/<concept>   # full provenance chain
+kdlc doctor     # diagnosis and safe repair
+```
 
 ## Repository layout
 
