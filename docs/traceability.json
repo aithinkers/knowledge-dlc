@@ -901,6 +901,28 @@
           "tests/governance/gdrive-connector.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-025",
+      "title": "Guided remote-source connector setup: agent walkthrough and validated secret-free config",
+      "issue": 105,
+      "specification_sections": [
+        "5.7",
+        "9.4",
+        "22"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/agents/definitions/index.mjs",
+          "packages/sources/config.mjs",
+          "packages/cli/index.mjs",
+          "packages/adapters/generate.mjs"
+        ],
+        "tests": [
+          "tests/governance/connector-setup.test.mjs"
+        ]
+      }
     }
   ]
 }

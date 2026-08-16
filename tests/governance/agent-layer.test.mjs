@@ -40,7 +40,14 @@ test("FEAT-010 write capabilities respect the §22 upper bounds", async () => {
 });
 
 test("FEAT-010 every role has one authored harness agent definition", () => {
-  assert.deepEqual(AGENT_DEFINITIONS.map(({ role }) => role), SPEC_ROLES);
+  // The nine §22 workflow roles each have exactly one definition; harness-
+  // level assistants (which declare their own `enforcement` text instead of a
+  // runtime descriptor) may exist alongside them.
+  const workflowDefinitions = AGENT_DEFINITIONS.filter(({ enforcement }) => enforcement === undefined);
+  assert.deepEqual(workflowDefinitions.map(({ role }) => role), SPEC_ROLES);
+  for (const assistant of AGENT_DEFINITIONS.filter(({ enforcement }) => enforcement !== undefined)) {
+    assert.ok(!SPEC_ROLES.includes(assistant.role), `${assistant.role} must not shadow a workflow role`);
+  }
   for (const definition of AGENT_DEFINITIONS) {
     const markdown = renderAgentMarkdown(definition);
     assert.ok(markdown.startsWith(`---\nname: ${definition.role}\n`));

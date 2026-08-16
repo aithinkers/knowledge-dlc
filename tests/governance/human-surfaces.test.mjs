@@ -27,7 +27,11 @@ test("FEAT-017: personas render into every harness agent surface without touchin
       const body = render(definition);
       assert.ok(body.includes("## When to use this agent"), `${definition.role} persona section`);
       assert.ok(body.includes("## Worked example"), `${definition.role} example section`);
-      assert.ok(body.includes(`packages/agents/roles/${definition.role}.json`), `${definition.role} still names the runtime descriptor as enforcement source`);
+      if (definition.enforcement === undefined) {
+        assert.ok(body.includes(`packages/agents/roles/${definition.role}.json`), `${definition.role} still names the runtime descriptor as enforcement source`);
+      } else {
+        assert.ok(body.includes("harness-level setup assistant"), `${definition.role} states its non-runtime enforcement honestly`);
+      }
       assert.ok(body.includes("## Security"), `${definition.role} keeps the security section`);
       assert.ok(body.indexOf("## When to use this agent") < body.indexOf("## Security"), "persona precedes security");
     }

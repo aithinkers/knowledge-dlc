@@ -653,12 +653,23 @@ export class KdlcEngine {
   }
   async remoteSourceReceipts() {
     const directory = this.path("sources");
-    if (!(await exists(directory))) return { sources: [] };
     const receipts = [];
-    for (const name of (await readdir(directory)).filter((item) => /^src_[a-f0-9]{16}\.receipt\.json$/.test(item)).sort()) {
-      receipts.push(JSON.parse(await readFile(resolve(directory, name), "utf8")));
+    if (await exists(directory)) {
+      for (const name of (await readdir(directory)).filter((item) => /^src_[a-f0-9]{16}\.receipt\.json$/.test(item)).sort()) {
+        receipts.push(JSON.parse(await readFile(resolve(directory, name), "utf8")));
+      }
     }
-    return { sources: receipts };
+    // FEAT-025: configured connectors with env-presence booleans (never values).
+    let connectors = null;
+    const configPath = this.path("connectors.json");
+    if (await exists(configPath)) {
+      const { connectorReadiness } = await import("../sources/config.mjs");
+      let parsed;
+      try { parsed = JSON.parse(await readFile(configPath, "utf8")); }
+      catch { parsed = null; }
+      connectors = connectorReadiness(parsed);
+    }
+    return { sources: receipts, ...(connectors ? { connectors } : {}) };
   }
   async jobs() {
     const directory = this.path("jobs");
