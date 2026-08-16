@@ -22,3 +22,4 @@ All commands invoke the same governed CLI engine.
 - /kdlc:reconcile-edits → `kdlc reconcile-edits --output json`
 - /kdlc:jobs → `kdlc jobs --output json`
 - /kdlc:sources → `kdlc sources --output json`
+- /kdlc:revisit → `kdlc revisit --output json`

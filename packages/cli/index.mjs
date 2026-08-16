@@ -54,6 +54,7 @@ export const CLI_COMMANDS = Object.freeze([
   "reconcile-edits",
   "jobs",
   "sources",
+  "revisit",
 ]);
 export const EXIT = Object.freeze({
   success: 0,
@@ -93,6 +94,7 @@ const operationScopes = Object.freeze({
   doctor: "read",
   jobs: "read",
   sources: "read",
+  revisit: "publish",
   project_get: "read",
   project_list_mounts: "read",
   kb_search: "read",
@@ -839,6 +841,14 @@ export function parseCli(argv) {
   if (operation === "review") {
     [input.proposal_id, input.decision, input.receipt_id] = positionals;
   }
+  if (operation === "revisit") {
+    const at = positionals.indexOf("--ratify");
+    input.proposal_id = positionals.find((value) => !value.startsWith("--") && positionals[positionals.indexOf(value) - 1] !== "--ratify");
+    if (input.proposal_id === undefined) delete input.proposal_id;
+    if (at !== -1) input.reason = positionals[at + 1];
+    input.args = [];
+    return { operation, input, output };
+  }
   if (operation === "publish") {
     const flags = positionals.filter((value) => value.startsWith("--"));
     const plain = positionals.filter((value, index) => !value.startsWith("--") && !(positionals[index - 1] === "--approve" || positionals[index - 1] === "--reject" || positionals[index - 1] === "--request-changes"));
@@ -860,7 +870,7 @@ export function parseCli(argv) {
       return index === -1 ? undefined : positionals[index + 1];
     };
     if (positionals.includes("--submit")) {
-      input.submit = { workflow_id: flag("--submit") };
+      input.submit = { workflow_id: flag("--submit"), ...(positionals.includes("--auto") ? { auto: true } : {}) };
     } else {
       input.scaffold = {
         job_id: flag("--scaffold"),
@@ -870,6 +880,7 @@ export function parseCli(argv) {
         ...(flag("--source") !== undefined ? { source: flag("--source") } : {}),
         ...(positionals.includes("--all-sources") ? { all_sources: true } : {}),
         ...(flag("--units") ? { units: flag("--units") } : {}),
+        ...(positionals.includes("--save-defaults") ? { save_defaults: true } : {}),
       };
     }
     input.args = [];
@@ -1317,6 +1328,73 @@ export function createLocalProjectEngine(options = {}) {
         }
         return { pending, ...(pending.length === 0 ? { note: "nothing is waiting on you" } : {}) };
       };
+      // FEAT-034 (#127): the ratification queue for auto-approved drafts, and
+      // one-command promotion to stable through a real reviewed update.
+      const revisitQueue = async () => {
+        const runsDirectory = resolve(root, ".kdlc/governed/workflow/runs");
+        if (!existsSync(runsDirectory)) return { awaiting_ratification: [] };
+        const awaiting = [];
+        for (const workflowId of (await readdir(runsDirectory)).sort()) {
+          const reviewsDirectory = resolve(runsDirectory, workflowId, "reviews");
+          if (!existsSync(reviewsDirectory)) continue;
+          for (const proposalId of (await readdir(reviewsDirectory)).sort()) {
+            const rationalePath = resolve(reviewsDirectory, proposalId, "rationale.json");
+            if (!existsSync(rationalePath)) continue;
+            const rationale = JSON.parse(await readFile(rationalePath, "utf8"));
+            if (!rationale.auto || rationale.ratified) continue;
+            const proposal = await store.get(`workflow/runs/${workflowId}/proposals/${proposalId}.json`).catch(() => null);
+            awaiting.push({
+              proposal_id: proposalId, workflow_id: workflowId,
+              title: proposal?.concept?.after?.frontmatter?.title ?? proposalId,
+              subject: proposal?.target?.subject ?? null,
+              auto_approved_at: rationale.decided_at,
+              next: `kdlc revisit ${proposalId} --ratify "<reason>" to promote it to stable (default query answers)`,
+            });
+          }
+        }
+        return { awaiting_ratification: awaiting, ...(awaiting.length === 0 ? { note: "no auto-approved drafts are awaiting ratification" } : {}) };
+      };
+      const ratifyDraft = async ({ proposal_id: proposalId, reason }) => {
+        if (typeof reason !== "string" || reason.trim().length === 0) throw inputError('ratification requires --ratify "<reason>" — it becomes the human review rationale');
+        const index = await proposalIndex(proposalId);
+        const workflowId = index.workflow_id;
+        const rationalePath = `.kdlc/governed/workflow/runs/${workflowId}/reviews/${proposalId}/rationale.json`;
+        if (!(await indexStore.exists(rationalePath))) throw missing("no auto-approval record exists for this proposal");
+        const rationale = await indexStore.readJson(rationalePath);
+        if (!rationale.auto) throw inputError(`${proposalId} was human-decided, not auto-approved — nothing to ratify`);
+        if (rationale.ratified) throw new EngineError("KDLC_STATE_CONFLICT", `${proposalId} is already ratified`, EXIT.conflict);
+        const original = await store.get(`workflow/runs/${workflowId}/proposals/${proposalId}.json`);
+        if (original.concept.after.frontmatter.status !== "draft") throw inputError(`${proposalId} is not a draft-tier concept`);
+        const evidence = await store.get(`workflow/runs/${workflowId}/state/normalized-evidence.json`);
+        const claims = [];
+        for (const claimId of original.claim_ids) claims.push(await store.get(`workflow/runs/${workflowId}/claims/${claimId}.json`));
+        const promotionWorkflow = `${workflowId}r${Date.now().toString(36)}`.slice(0, 40);
+        const contextRecord = await indexStore.readJson(contextPath(workflowId));
+        await indexStore.writeJsonAtomic(contextPath(promotionWorkflow), { workflow_id: promotionWorkflow, context: contextRecord.context });
+        const promotedId = `pr${proposalId.replace(/^pr_?/, "")}s`.replace(/[^a-z0-9]/g, "").replace(/^pr/, "pr_");
+        const recording = {
+          api_version: "kdlc.dev/recorded-model-output/v1alpha1",
+          fixture_id: `ratify-${promotionWorkflow.replace(/[^a-z0-9-]/g, "-")}`,
+          task: "ingest",
+          model: { provider: "recorded", model: "kdlc-revisit", prompt: "promote ratified draft to stable", recorded_at: new Date().toISOString() },
+          input_hashes: { normalized_evidence: artifactHash(evidence) },
+          claims,
+          proposals: [{
+            ...structuredClone(original),
+            id: promotedId,
+            workflow_id: promotionWorkflow,
+            state: "review_pending",
+            concept: {
+              before: structuredClone(original.concept.after),
+              after: { ...structuredClone(original.concept.after), frontmatter: { ...structuredClone(original.concept.after.frontmatter), status: "stable" } },
+            },
+          }].map(({ input_hashes: ignored, ...entry }) => entry),
+        };
+        const submitted = await governed.proposal_create({ proposal: { workflow_id: promotionWorkflow, task: "ingest", recording, normalized_evidence: evidence } });
+        const landed = await governed.publish_request({ proposal_id: promotedId, decide: "approved", reason });
+        await indexStore.writeJsonAtomic(rationalePath, { ...rationale, ratified: true, ratified_by: principal.actor, ratified_at: new Date().toISOString(), ratification_reason: reason, promoted_as: promotedId });
+        return { proposal_id: proposalId, promoted_as: promotedId, workflow_id: promotionWorkflow, published: landed.published, next: "the concept is stable — default kdlc query answers include it now" };
+      };
       governed = {
         proposal_create: async ({ proposal }) => {
           const workflowId = proposal?.workflow_id;
@@ -1349,7 +1427,7 @@ export function createLocalProjectEngine(options = {}) {
           const runtime = await harness(index.workflow_id, true);
           return runtime.decide({ workflowId: index.workflow_id, proposalId, decision, receiptId });
         },
-        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current, decide, reason }) => {
+        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current, decide, reason, auto }) => {
           if (proposalId === undefined) return pendingReviews();
           const index = await proposalIndex(proposalId);
           if (decide) {
@@ -1370,6 +1448,7 @@ export function createLocalProjectEngine(options = {}) {
               api_version: "kdlc.dev/review-rationale/v1",
               proposal_id: proposalId, receipt_id: receiptId, decision: decide,
               reason: reason ?? null, decided_by: principal.actor, decided_at: new Date().toISOString(),
+              ...(auto ? { auto: true, ratified: false } : {}),
             });
             if (decide !== "approved") return { proposal_id: proposalId, decision: decide, receipt_id: receiptId, reason: reason ?? null, published: null };
           }
@@ -1393,6 +1472,7 @@ export function createLocalProjectEngine(options = {}) {
           return runtime.reconcileEdit({ workflowId: index.workflow_id, proposalId, reviewedProposalId, target, reviewedConcept, currentConcept, receiptId });
         },
       };
+      governed.revisit = async (input) => (input.proposal_id ? ratifyDraft(input) : revisitQueue());
     }
   }
   // FEAT-030 (#118): bridge live agents to the recorded-proposal contract.
@@ -1400,13 +1480,27 @@ export function createLocalProjectEngine(options = {}) {
   // completed ingest job into (a) a trusted review context — with the access
   // classification and license the OWNER explicitly declares, never a silent
   // default — and (b) a drafting kit whose hashes the runtime will accept.
-  const scaffoldProposalDrafting = async ({ job_id: jobId, access, license, workflow_id: requestedWorkflow, source, all_sources: allSources, units: unitRange }) => {
+  const sourceDefaultsPath = resolve(root, ".kdlc/source-defaults.json");
+  const scaffoldProposalDrafting = async ({ job_id: jobId, access, license, workflow_id: requestedWorkflow, source, all_sources: allSources, units: unitRange, save_defaults: saveDefaults }) => {
     if (typeof jobId !== "string" || !/^job_[a-f0-9]{16}$/.test(jobId)) throw inputError("scaffold requires the completed ingest job id (job_<16 hex>)");
+    // FEAT-034 (#127): access/license may be declared once for the project.
+    // Explicit flags always win; saved defaults fill gaps and are reported;
+    // with neither, the governance decision still fails closed.
+    let usedDefaults = false;
+    if ((access === undefined || license === undefined) && existsSync(sourceDefaultsPath)) {
+      const saved = JSON.parse(readFileSync(sourceDefaultsPath, "utf8"));
+      if (access === undefined && saved.access) { access = saved.access; usedDefaults = true; }
+      if (license === undefined && saved.license) { license = saved.license; usedDefaults = true; }
+    }
     if (!["public", "internal", "restricted"].includes(access)) {
-      throw inputError("scaffold requires --access <public|internal|restricted> — the source's access classification is a governance decision only you can make");
+      throw inputError("scaffold requires --access <public|internal|restricted> (or saved project defaults via --save-defaults) — the source's access classification is a governance decision only you can make");
     }
     if (typeof license !== "string" || license.length === 0) {
-      throw inputError("scaffold requires --license <spdx-or-LicenseRef> — the source's license is a governance decision only you can make");
+      throw inputError("scaffold requires --license <spdx-or-LicenseRef> (or saved project defaults via --save-defaults) — the source's license is a governance decision only you can make");
+    }
+    if (saveDefaults) {
+      await mkdir(dirname(sourceDefaultsPath), { recursive: true });
+      await writeFile(sourceDefaultsPath, `${canonicalJson({ api_version: "kdlc.dev/source-defaults/v1", access, license, saved_by: principal.actor, saved_at: new Date().toISOString() })}\n`);
     }
     const jobPath = resolve(root, ".kdlc/jobs", `${jobId}.json`);
     if (!existsSync(jobPath)) throw missing("Requested job is unavailable");
@@ -1443,7 +1537,10 @@ export function createLocalProjectEngine(options = {}) {
       if (!/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("workflow_id must match wf_<lowercase letters and digits> (the concept-proposal schema enforces it)");
       scaffolded.push(await scaffoldOneSource({ artifact, workflowId, access, license, sliceBounds, sourceName: job.request?.sources?.[index] ?? artifact.manifest.source_id }));
     }
-    return selection.length === 1 ? scaffolded[0] : { job_id: jobId, scaffolds: scaffolded, next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" };
+    return withDefaultsNote(
+      selection.length === 1 ? scaffolded[0] : { job_id: jobId, scaffolds: scaffolded, next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" },
+      usedDefaults, access, license,
+    );
   };
   const scaffoldOneSource = async ({ artifact, workflowId, access, license, sliceBounds, sourceName }) => {
     let units = artifact.units.filter((unit) => typeof unit.text === "string" && unit.text.trim().length > 0)
@@ -1552,9 +1649,10 @@ export function createLocalProjectEngine(options = {}) {
       next: "fill the recording template (see the kit README), then submit with kdlc proposal --submit " + workflowId,
     };
   };
+  const withDefaultsNote = (result, usedDefaults, access, license) => usedDefaults ? { ...result, defaults: `using saved project defaults: ${access} / ${license}` } : result;
   // FEAT-032 (#123): submit from the kit on disk — evidence and recording
   // never transit the model context; the agent only edits the template file.
-  const submitProposalFromKit = async ({ workflow_id: workflowId }) => {
+  const submitProposalFromKit = async ({ workflow_id: workflowId, auto }) => {
     if (typeof workflowId !== "string" || !/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("--submit requires the scaffolded workflow id (wf_...)");
     const kitDirectory = resolve(root, ".kdlc/drafting", workflowId);
     const read = (name) => {
@@ -1571,7 +1669,23 @@ export function createLocalProjectEngine(options = {}) {
     if (typeof recording.model?.model === "string" && recording.model.model.startsWith("FILL:")) {
       throw inputError("set model.model and model.prompt in the recording template to what actually drafted the content");
     }
-    return governed.proposal_create({ proposal: { workflow_id: workflowId, task: recording.task ?? "ingest", recording, normalized_evidence: normalizedEvidence } });
+    // FEAT-034 (#127): auto mode publishes WITHOUT a human pause, but only at
+    // the draft trust tier — stable publication on model confidence alone is
+    // a spec non-goal and the profile enforces a human for stable anyway.
+    if (auto) {
+      const stableOnes = recording.proposals.filter((entry) => entry?.concept?.after?.frontmatter?.status === "stable");
+      if (stableOnes.length > 0) {
+        throw inputError(`--auto only publishes draft-tier concepts; ${stableOnes.map(({ id }) => id).join(", ")} declare status "stable", which requires a human decision — submit without --auto, or set status: "draft" and ratify later with kdlc revisit`);
+      }
+    }
+    const submitted = await governed.proposal_create({ proposal: { workflow_id: workflowId, task: recording.task ?? "ingest", recording, normalized_evidence: normalizedEvidence } });
+    if (!auto) return submitted;
+    const auto_published = [];
+    for (const item of submitted.proposals) {
+      const landed = await governed.publish_request({ proposal_id: item.proposal.id, decide: "approved", reason: "auto mode — machine-approved draft pending human ratification (kdlc revisit)", auto: true });
+      auto_published.push({ proposal_id: item.proposal.id, packet_hash: item.packet_hash, published: landed.published });
+    }
+    return { ...submitted, auto_published, next: "drafts are live at the draft trust tier (exploratory queries; unreviewed). Ratify with: kdlc revisit" };
   };
   const handlers = policy
     ? {
@@ -1591,6 +1705,7 @@ export function createLocalProjectEngine(options = {}) {
             }
           : {}),
         ...(governed.review_submit ? { review: governed.review_submit } : {}),
+        ...(governed.revisit ? { revisit: governed.revisit } : {}),
         ...(governed.publish_request ? { publish: governed.publish_request } : {}),
         ...(governed.reconcile_edits ? { "reconcile-edits": governed.reconcile_edits, reconcile_edits: governed.reconcile_edits } : {}),
         migrate: async ({ migration, files }) => previewMigration({ migration, files, validator: await createExtensionValidator() }),

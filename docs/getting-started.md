@@ -59,6 +59,7 @@ base and resolve policies. They need no action for a single-base project.
 printf '# Token policy\n\nProduction API tokens expire after 60 minutes.\n' > note.md
 kdlc ingest note.md
 kdlc jobs
+kdlc revisit           # auto-approved drafts awaiting ratification (--ratify "reason" promotes to stable)
 ```
 
 Ingestion returns a job immediately (§16.5) and normalizes the source into
@@ -148,7 +149,7 @@ unauthenticated project server.
 
 ## Command reference
 
-Argument-free: `init`, `status`, `doctor`, `lint`, `jobs`, `conflicts`,
+Argument-free: `init`, `status`, `doctor`, `lint`, `jobs`, `revisit`, `conflicts`,
 `gaps`, `refresh`, `reconcile-edits`. Require arguments: `adopt <source...>`,
 `ingest <source...>`, `query <question>`, `trace <kb://...>`,
 `setup <tool>[,...] <project-dir>`, `review <proposal-id> <decision> <receipt-id>`,
