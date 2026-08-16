@@ -942,6 +942,26 @@
           "tests/governance/readme.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-027",
+      "title": "Harness-first onboarding: README restructure and engine-CLI guidance hints",
+      "issue": 110,
+      "specification_sections": [
+        "9.2",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "README.md",
+          "packages/cli/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/cli-hints.test.mjs",
+          "tests/governance/readme.test.mjs"
+        ]
+      }
     }
   ]
 }

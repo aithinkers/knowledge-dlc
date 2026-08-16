@@ -838,8 +838,31 @@ function humanValue(value) {
   return canonicalJson(value);
 }
 
+// FEAT-027 (#110): plain-language guidance where newcomers get lost, appended
+// only to human/text output — the JSON envelope (the machine contract every
+// harness consumes) stays byte-identical.
+function guidanceHint(envelope) {
+  if (!envelope.ok) return null;
+  if (envelope.operation === "ingest" && envelope.result?.api_version === "kdlc.dev/job/v1") {
+    return [
+      `Ingest runs as a background job (${envelope.result.id}) — "kdlc jobs" shows the outcome and the evidence it produced.`,
+      'Evidence feeds proposals, not answers: knowledge becomes queryable after proposal → review → publish.',
+      'For the guided experience, add K-DLC to your AI tool: kdlc setup <claude-code|codex|kiro|kiro-ide|mcp> <project-dir> — its agents drive the lifecycle and stop at the review gates for you.',
+    ].join("\n");
+  }
+  if (envelope.operation === "query" && envelope.result?.status === "not_found" && (envelope.result.results?.length ?? 0) === 0) {
+    return [
+      "No published knowledge yet — query answers only from published, reviewed concepts.",
+      "If you've ingested sources, that evidence is waiting on proposal → review → publish.",
+      "In an AI harness (kdlc setup <tool> <project-dir>) the agents drive that path conversationally.",
+    ].join("\n");
+  }
+  return null;
+}
+
 export function renderEnvelope(envelope, output = "text") {
   if (output === "json") return `${canonicalJson(envelope)}\n`;
+  const hint = guidanceHint(envelope);
   if (output === "human") {
     if (envelope.ok) {
       const lines = [`✔ ${envelope.operation} completed.`];
@@ -850,13 +873,14 @@ export function renderEnvelope(envelope, output = "text") {
       } else if (result !== null && result !== undefined) {
         lines.push(`  ${humanValue(result)}`);
       }
+      if (hint) lines.push("", ...hint.split("\n").map((line) => `  ${line}`));
       return `${lines.join("\n")}\n`;
     }
     const framing = HUMAN_ERROR_FRAMING[envelope.error.class] ?? HUMAN_ERROR_FRAMING[EXIT.internal];
     return `✖ ${envelope.operation} did not complete.\n  ${framing}\n  Detail: ${envelope.error.message} (${envelope.error.code})\n`;
   }
   if (envelope.ok)
-    return `${envelope.operation}: ok\n${canonicalJson(envelope.result)}\n`;
+    return `${envelope.operation}: ok\n${canonicalJson(envelope.result)}\n${hint ? `${hint}\n` : ""}`;
   return `${envelope.operation}: ${envelope.error.code}: ${envelope.error.message}\n`;
 }
 
