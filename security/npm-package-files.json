@@ -293,6 +293,7 @@
     "packages/cli/index.mjs",
     "packages/cli/setup.mjs",
     "packages/connectors/confluence.mjs",
+    "packages/connectors/google-drive.mjs",
     "packages/connectors/graph.mjs",
     "packages/connectors/index.mjs",
     "packages/connectors/transport.mjs",

@@ -5,4 +5,5 @@
 
 export { GraphConnector, GRAPH_CAPABILITIES } from "./graph.mjs";
 export { ConfluenceConnector, CONFLUENCE_CAPABILITIES } from "./confluence.mjs";
+export { GoogleDriveConnector, GOOGLE_DRIVE_CAPABILITIES, DRIVE_EXPORTS } from "./google-drive.mjs";
 export { ConnectorError, assessReceipts, expectBytes, expectJson, instant } from "./transport.mjs";
