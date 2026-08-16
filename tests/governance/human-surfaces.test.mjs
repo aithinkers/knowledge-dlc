@@ -39,7 +39,10 @@ test("FEAT-017: personas render into every harness agent surface without touchin
 });
 
 test("FEAT-017: every generated command surface carries guidance above an unchanged binding", async () => {
-  for (const command of distributionDefinition.cli_commands) {
+  // setup has no in-harness surface (FEAT-029): it installs harness surfaces
+  // and is circular from inside one. A start surface exists instead.
+  assert.ok((await readFile(join(root, "distribution/claude-code/commands/kdlc-start.md"), "utf8")).includes("pick up where we left off"));
+  for (const command of distributionDefinition.cli_commands.filter((name) => name !== "setup")) {
     const claude = await readFile(join(root, "distribution/claude-code/commands", `kdlc-${command}.md`), "utf8");
     for (const marker of ["**When to use:**", "**What you give it:**", "**What you get back:**", "**Usually next:**"]) {
       assert.ok(claude.includes(marker), `${command}: ${marker}`);
