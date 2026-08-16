@@ -16,7 +16,7 @@ const COMMAND_GUIDANCE = {
     when: "You're starting a brand-new K-DLC project in this repository.",
     give: "A project name and, optionally, a scope profile.",
     get: "A governed project skeleton with its policy, state, and knowledge-base layout.",
-    next: "kdlc setup to configure it, then kdlc ingest to bring in your first sources.",
+    next: "kdlc ingest to bring in your first sources.",
   },
   setup: {
     when: "You want to install K-DLC's surface into ANOTHER tool (codex, kiro, kiro-ide, an MCP client) — from inside an already-installed harness like this one, there is nothing to set up.",
