@@ -2,7 +2,7 @@
   "name": "knowledge-dlc",
   "version": "1.0.0",
   "private": false,
-  "description": "K-DLC development and governance tooling",
+  "description": "K-DLC (Knowledge Development Lifecycle): turn documents, wikis, emails, and Confluence/SharePoint/OneDrive/Google Drive sources into governed, provenance-bearing knowledge that AI agents can trust \u2014 with reviewed publication, conflict retention, and citation-exact retrieval. Works natively in Claude Code, Codex, Kiro, and any MCP client.",
   "license": "MIT",
   "author": "AIThinkers",
   "homepage": "https://github.com/aithinkers/knowledge-dlc#readme",
@@ -13,7 +13,26 @@
   "bugs": {
     "url": "https://github.com/aithinkers/knowledge-dlc/issues"
   },
-  "keywords": ["knowledge-management", "governance", "agents", "provenance", "lifecycle"],
+  "keywords": [
+    "knowledge-management",
+    "knowledge-base",
+    "rag",
+    "ai-agents",
+    "mcp",
+    "mcp-server",
+    "provenance",
+    "governance",
+    "lifecycle",
+    "document-ingestion",
+    "confluence",
+    "sharepoint",
+    "onedrive",
+    "google-drive",
+    "claude-code",
+    "llm",
+    "retrieval",
+    "open-knowledge-format"
+  ],
   "files": [
     "core/",
     "distribution/",
@@ -36,7 +55,10 @@
     "./erasure": "./packages/erasure/index.mjs",
     "./adapters": "./packages/adapters/index.mjs"
   },
-  "bin": {"kdlc": "./packages/cli/bin.mjs"},
+  "bin": {
+    "kdlc": "./packages/cli/bin.mjs",
+    "knowledge-dlc": "./packages/cli/bin.mjs"
+  },
   "packageManager": "npm@11.5.1",
   "engines": {
     "node": ">=22.23.2 <25",

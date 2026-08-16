@@ -1,10 +1,22 @@
 # K-DLC — turn your documents into agent-consumable knowledge
 
 **K-DLC (Knowledge Development Lifecycle)** turns the documents your team
-already has — wikis, PDFs, spreadsheets, decks, diagrams — into durable,
-provenance-bearing knowledge that AI agents can actually trust: curated, linked
-Markdown concepts in the [Open Knowledge Format (OKF)](core/schemas/okf-0.2/),
-produced through a governed lifecycle with explicit human approval gates.
+already has — wikis, PDFs, Word docs, emails, spreadsheets, decks, diagrams,
+web pages, and pages living in **Confluence, SharePoint, OneDrive, or Google
+Drive** — into durable, provenance-bearing knowledge that AI agents can
+actually trust: curated, linked Markdown concepts in the
+[Open Knowledge Format (OKF)](core/schemas/okf-0.2/), produced through a
+governed lifecycle with explicit human approval gates. Think of it as a
+governed knowledge base builder for the agent era: every answer cites the
+exact page, paragraph, or shape it came from, and staleness, conflicts, and
+access rules are first-class instead of afterthoughts.
+
+```bash
+# try it in a minute (Node 22+)
+npx knowledge-dlc init
+npx knowledge-dlc ingest notes.md
+npx knowledge-dlc query "what do we know?"
+```
 
 One harness-neutral core, rendered natively for **Claude Code, Codex CLI,
 Kiro CLI, Kiro IDE, and any MCP client** — the same governed engine, the same
@@ -40,9 +52,18 @@ projections — plain files remain the durable contract.
 
 ## Key features
 
-- **Evidence-first ingestion** — bounded, sandboxed normalization of Markdown,
-  text, CSV, PDF, Office, diagrams, and media into anchored, quality-labeled
-  evidence units ([spec §12](docs/knowledge-development-lifecycle-specification.md))
+- **Evidence-first ingestion** — bounded, sandboxed normalization of thirteen
+  formats — Markdown, text, CSV, PDF, Word (.docx), Excel (.xlsx), PowerPoint
+  (.pptx), Visio (.vsdx), draw.io, GIF, **email (.eml and Outlook .msg,
+  attachments inventoried by hash)**, and **HTML** — into anchored,
+  quality-labeled evidence units ([spec §12](docs/knowledge-development-lifecycle-specification.md))
+- **Remote sources with real provenance** — deterministic read-only connectors
+  for **Confluence, SharePoint, OneDrive (Microsoft Graph), and Google Drive**
+  (native Docs/Sheets/Slides exported to formats the pipeline normalizes);
+  every fetch records the provider's revision identity and a content hash, so
+  staleness checks can tell you when the original changed. A guided
+  `connector-setup` agent walks you through credentials — read-only scopes
+  only, secrets live in environment variables and are refused anywhere else
 - **Claim-to-source provenance** — every assertion carries its source ID,
   version hash, and locator; inferred claims are never dressed up as explicit
   statements
@@ -112,12 +133,21 @@ drift. Setup output is derived from those same authored definitions.
 
 ## Quick start
 
+No install needed — `npx` runs the CLI straight from the registry:
+
+```bash
+mkdir my-knowledge && cd my-knowledge
+npx knowledge-dlc init              # scaffold a governed project workspace
+npx knowledge-dlc ingest notes.md   # normalize a source into anchored evidence
+npx knowledge-dlc query "what do we know about tokens?"
+npx knowledge-dlc setup claude-code .   # or codex | kiro | kiro-ide | mcp
+```
+
+Working from a checkout instead:
+
 ```bash
 npm ci && npm link     # exposes the `kdlc` CLI
-mkdir my-knowledge && cd my-knowledge
-kdlc init              # scaffold a governed project workspace
-kdlc ingest notes.md   # normalize a source into anchored evidence
-kdlc query "what do we know about tokens?"
+kdlc init && kdlc ingest notes.md && kdlc query "what do we know?"
 ```
 
 The full walkthrough — install, ingest, review, publish, plugin and MCP

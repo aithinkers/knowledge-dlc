@@ -923,6 +923,25 @@
           "tests/governance/connector-setup.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-026",
+      "title": "Discoverability: search-friendly README/About, npm keywords, npx-invocable setup",
+      "issue": 107,
+      "specification_sections": [
+        "9.2",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "README.md",
+          "package.json"
+        ],
+        "tests": [
+          "tests/governance/readme.test.mjs"
+        ]
+      }
     }
   ]
 }
