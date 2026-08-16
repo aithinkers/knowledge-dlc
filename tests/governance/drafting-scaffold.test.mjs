@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { KdlcEngine, createLocalProjectEngine, parseCli } from "../../packages/cli/index.mjs";
+import { canonicalJson } from "../../packages/core/index.mjs";
 
 async function completedIngest(engine, root, filename, content) {
   await writeFile(join(root, filename), content);
@@ -399,4 +400,40 @@ test("FEAT-037: publish --show renders the content a reviewer approves — body 
   assert.match(gate.pending[0].next, /--show to read it/);
   // Showing never decides or mutates.
   assert.equal((await engine.execute("publish", {})).pending.length, 1);
+});
+
+test("FEAT-037: --show survives minimal frontmatter — omitted type/status/extraction render, not crash", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-show-min-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "show.minimal" });
+  const engine = createLocalProjectEngine({ root });
+  const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+  const job = await completedIngest(engine, root, "m.md", "# M\n\n## Fact\n\nBackups run nightly at 01:00 UTC.\n");
+  const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
+  const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
+  const evidence = JSON.parse(await readFile(join(kit, "normalized-evidence.json"), "utf8"));
+  const template = JSON.parse(await readFile(join(kit, "recording-template.json"), "utf8"));
+  const unit = evidence.units.find(({ text }) => /nightly/.test(text));
+  template.model = { provider: "recorded", model: "t", prompt: "show", recorded_at: template.model.recorded_at };
+  template.claims = [{ id: "clm_bk", text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+  template.proposals = [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: "pr_bk", workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.min", revision: "rev-1", subject: "kb://local.min/ops/backups" }, concept: { before: null, after: { frontmatter: { type: "Policy", title: "Backups", description: "d", status: "stable", access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "s", resource: "file:m.md", source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" }, body: "# Backups\n\nBackups run nightly at 01:00 UTC.\n" } }, claim_ids: ["clm_bk"], claim_decisions: [{ claim_id: "clm_bk", disposition: "accepted", rationale: "explicit" }], created_by: "kdlc-integrator/0.2.0" }];
+  await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+  await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id } });
+  // Real gate sessions submit frontmatter carrying only title/access/sources
+  // and claims without extraction; strip the stored records to match.
+  const proposalPath = join(root, ".kdlc/governed/workflow/runs", scaffold.workflow_id, "proposals/pr_bk.json");
+  const stored = JSON.parse(await readFile(proposalPath, "utf8"));
+  delete stored.concept.after.frontmatter.type;
+  delete stored.concept.after.frontmatter.status;
+  await writeFile(proposalPath, JSON.stringify(stored));
+  const claimPath = join(root, ".kdlc/governed/workflow/runs", scaffold.workflow_id, "claims/clm_bk.json");
+  const claim = JSON.parse(await readFile(claimPath, "utf8"));
+  delete claim.extraction;
+  await writeFile(claimPath, JSON.stringify(claim));
+
+  const shown = await engine.execute("publish", { proposal_id: "pr_bk", show: true });
+  assert.equal(shown.type, null);
+  assert.equal(shown.status, "stable", "omitted status shows what retrieval resolves it to");
+  assert.equal(shown.claims[0].extraction, null);
+  assert.match(shown.claims[0].source_excerpt, /nightly/);
+  canonicalJson(shown); // the shown packet must render as a JSON envelope
 });

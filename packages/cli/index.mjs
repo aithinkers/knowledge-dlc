@@ -1343,7 +1343,7 @@ export function createLocalProjectEngine(options = {}) {
           claims.push({
             id: claim.id,
             claim: claim.text,
-            extraction: claim.extraction,
+            extraction: claim.extraction ?? null,
             source_excerpt: byLocator.get(canonicalJson(claim.locator)) ?? "(excerpt unavailable)",
             locator: claim.locator,
           });
@@ -1353,8 +1353,9 @@ export function createLocalProjectEngine(options = {}) {
         return {
           proposal_id: proposalId,
           title: frontmatter.title,
-          type: frontmatter.type,
-          status: frontmatter.status,
+          type: frontmatter.type ?? null,
+          // Omitted status resolves as stable at retrieval, so show that.
+          status: frontmatter.status ?? "stable",
           access: frontmatter.access ?? null,
           subject: proposal.target.subject,
           body: proposal.concept.after.body,
