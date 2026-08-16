@@ -21,3 +21,18 @@ been reviewed. The normal path:
 Already-written material that should come under governance wholesale goes
 through **kdlc adopt** instead. Watch any long run with **kdlc status** or
 **kdlc jobs**.
+
+## Sources that live somewhere else
+
+Documents in Google Drive, OneDrive, SharePoint, or Confluence can be
+ingested with their provenance intact. The interactive path: have your
+assistant fetch the **original file bytes** (through an MCP server or a
+download — never an extracted-text rendering), save them locally, and run
+**kdlc ingest** with a remote descriptor (`--remote-json`) naming the
+provider, the item's ID, its revision (Drive revision ID, OneDrive/SharePoint
+eTag, Confluence version number), how it was acquired, the content hash, and
+the source's access sensitivity. K-DLC verifies the hash against the actual
+bytes — a transport that delivered different content than it claims is
+refused — and records an acquisition receipt you can list with
+**kdlc sources**. Those revision identities are what later staleness checks
+compare against.

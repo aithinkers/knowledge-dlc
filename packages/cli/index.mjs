@@ -52,6 +52,7 @@ export const CLI_COMMANDS = Object.freeze([
   "doctor",
   "reconcile-edits",
   "jobs",
+  "sources",
 ]);
 export const EXIT = Object.freeze({
   success: 0,
@@ -90,6 +91,7 @@ const operationScopes = Object.freeze({
   gaps: "read",
   doctor: "read",
   jobs: "read",
+  sources: "read",
   project_get: "read",
   project_list_mounts: "read",
   kb_search: "read",
@@ -264,6 +266,12 @@ export class KdlcEngine {
       ["ingest", "adopt", "ingest_start"].includes(operation)
     )
       this.validateRemoteSources(input.sources);
+    if (
+      ["ingest", "ingest_start"].includes(operation) &&
+      input.remote !== undefined &&
+      (!Array.isArray(input.remote) || input.remote.length !== (input.sources?.length ?? 0))
+    )
+      throw inputError("remote descriptors must be an array aligned one-to-one with sources");
     if (operation === "init" || operation === "project_init")
       return this.init(input);
     if (operation === "setup") {
@@ -281,6 +289,7 @@ export class KdlcEngine {
     if (operation === "job_status") return this.job(input.id);
     if (operation === "job_cancel") return this.cancelJob(input.id);
     if (operation === "jobs") return this.jobs();
+    if (operation === "sources") return this.remoteSourceReceipts();
     if (operation === "doctor") return this.doctor();
     const project = await this.project();
     if (operation === "status" || operation === "project_get")
@@ -642,6 +651,15 @@ export class KdlcEngine {
       return updated;
     });
   }
+  async remoteSourceReceipts() {
+    const directory = this.path("sources");
+    if (!(await exists(directory))) return { sources: [] };
+    const receipts = [];
+    for (const name of (await readdir(directory)).filter((item) => /^src_[a-f0-9]{16}\.receipt\.json$/.test(item)).sort()) {
+      receipts.push(JSON.parse(await readFile(resolve(directory, name), "utf8")));
+    }
+    return { sources: receipts };
+  }
   async jobs() {
     const directory = this.path("jobs");
     if (!(await exists(directory))) return { jobs: [] };
@@ -742,11 +760,21 @@ export function parseCli(argv) {
     throw inputError("A supported command is required");
   const positionals = [];
   let idempotency;
+  let remoteJson;
   for (let cursor = 0; cursor < args.length; cursor += 1) {
     if (args[cursor] === "--idempotency-key") idempotency = args[++cursor];
+    else if (args[cursor] === "--remote-json") remoteJson = args[++cursor];
     else positionals.push(args[cursor]);
   }
   const input = { args: positionals };
+  if (remoteJson !== undefined) {
+    if (operation !== "ingest") throw inputError("--remote-json applies only to ingest");
+    try {
+      input.remote = JSON.parse(remoteJson);
+    } catch {
+      throw inputError("--remote-json must be a JSON array of remote source descriptors (null entries for local sources)");
+    }
+  }
   if (["adopt", "ingest", "refresh"].includes(operation)) {
     if (["adopt", "ingest"].includes(operation) && positionals.length === 0)
       throw inputError(`${operation} requires at least one source`);
@@ -952,10 +980,20 @@ export function createLocalProjectEngine(options = {}) {
     return result;
   };
   const ingest = async (
-    { sources },
+    { sources, remote },
     { durableIdempotencyKey, cancellationPoint },
   ) => {
     const canonicalRoot = await realpath(root);
+    // FEAT-021: optional remote descriptors, aligned by index with sources.
+    if (remote !== undefined && (!Array.isArray(remote) || remote.length !== sources.length)) {
+      throw inputError("remote descriptors must be an array aligned one-to-one with sources");
+    }
+    const { bindReceipt, validateRemoteDescriptor, RemoteSourceError } = await import("../sources/index.mjs");
+    for (const [index, descriptor] of (remote ?? []).entries()) {
+      if (descriptor === null) continue;
+      const failures = validateRemoteDescriptor(descriptor);
+      if (failures.length > 0) throw inputError(`remote descriptor ${index} is invalid: ${failures.join("; ")}`);
+    }
     const normalized = [];
     for (const [index, source] of sources.entries()) {
       if (await cancellationPoint())
@@ -974,14 +1012,29 @@ export function createLocalProjectEngine(options = {}) {
         );
       const bytes = await readFile(candidate);
       const sourceId = `src_${createHash("sha256").update(`${durableIdempotencyKey}:${index}:${source}`).digest("hex").slice(0, 16)}`;
-      normalized.push(
-        await normalize({
-          bytes,
-          filename: basename(candidate),
-          sourceId,
-          normalizedAt: new Date().toISOString(),
-        }),
-      );
+      const result = await normalize({
+        bytes,
+        filename: basename(candidate),
+        sourceId,
+        normalizedAt: new Date().toISOString(),
+      });
+      const descriptor = remote?.[index] ?? null;
+      if (descriptor !== null && descriptor !== undefined) {
+        let receipt;
+        try {
+          receipt = bindReceipt(descriptor, bytes, { sourceId, receivedAt: new Date().toISOString() });
+        } catch (error) {
+          if (error instanceof RemoteSourceError) {
+            throw new EngineError("KDLC_POLICY_DENIED", `${error.message} (${error.failures.join("; ")})`, EXIT.policy);
+          }
+          throw error;
+        }
+        const receiptsDirectory = resolve(root, ".kdlc/sources");
+        await mkdir(receiptsDirectory, { recursive: true });
+        await writeFile(resolve(receiptsDirectory, `${sourceId}.receipt.json`), `${canonicalJson(receipt)}\n`);
+        result.receipt = receipt;
+      }
+      normalized.push(result);
     }
     return { idempotency_key: durableIdempotencyKey, normalized };
   };

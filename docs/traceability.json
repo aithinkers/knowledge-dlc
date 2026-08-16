@@ -817,6 +817,27 @@
           "tests/governance/msg-normalizer.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-021",
+      "title": "Remote source contract: provider descriptors, acquisition receipts, MCP-assisted path",
+      "issue": 95,
+      "specification_sections": [
+        "5.7",
+        "7",
+        "9.2"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/sources/index.mjs",
+          "packages/cli/index.mjs",
+          "packages/adapters/generate.mjs"
+        ],
+        "tests": [
+          "tests/governance/remote-sources.test.mjs"
+        ]
+      }
     }
   ]
 }
