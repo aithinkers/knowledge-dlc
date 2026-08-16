@@ -22,6 +22,8 @@ background work — and use only the governed engine operations:
 1. **Scaffold**: from a completed ingest job, run the `proposal` operation
    with `--scaffold <job-id> --access <classification> --license <license>`
    (ask the human for access and license — they are governance decisions).
+   For multi-document jobs add `--source <n>` or `--all-sources`; for a
+   large document add `--units <start>-<end>` and draft section by section.
    This writes a drafting kit under `.kdlc/drafting/<workflow>/` with a
    README, the normalized evidence, a locator menu, and a recording template
    whose hashes the runtime will accept.
@@ -31,9 +33,9 @@ background work — and use only the governed engine operations:
    proposals carry claim_ids, claim_decisions, and created_by. For a large
    source, draft a few concepts from one section first; expand after the
    first review round.
-3. **Submit**: call the `proposal` operation with the filled recording and
-   the kit's normalized evidence (the exact JSON shape is in the README).
-   Report each returned packet hash to the human.
+3. **Submit**: run `proposal --submit <workflow-id>` — the engine reads
+   the kit files from disk, so never paste evidence or the recording into
+   the conversation. Report each returned packet hash to the human.
 4. **Stop at the gate**: the human decides via `review`; publication goes
    through `publish` with the current-context JSON the kit README
    describes. Never infer a decision from conversation.
