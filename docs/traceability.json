@@ -776,6 +776,20 @@
           "tests/governance/session-runtime.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-019",
+      "title": "RFC 822 email (.eml) normalizer with MIME part and attachment inventory",
+      "issue": 88,
+      "specification_sections": [
+        "5.7",
+        "9.2"
+      ],
+      "status": "planned",
+      "evidence": {
+        "implementation": [],
+        "tests": []
+      }
     }
   ]
 }

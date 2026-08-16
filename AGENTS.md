@@ -304,7 +304,8 @@ and expires immediately when PR #42 merges, and authorizes no later statistical
 corpus, gold, prompt, schema, scorer, verifier, or protected-list change.
 
 PR #89, linked to issue #88, may use a one-time protected release-schema
-bypass solely at head `7fe7694088b4be17d9ca0387c61ddff4e2fc065b` on base
+bypass for the eml normalizer. The authorized pre-contract head is
+`7fe7694088b4be17d9ca0387c61ddff4e2fc065b` on pre-contract base
 `0061ee07245ebbc7d5e52dfcdbbcccaa37c34932`. It authorizes exactly one
 protected transition:
 `core/schemas/release/conformance-statement.schema.json` from SHA-256
@@ -312,25 +313,33 @@ protected transition:
 to SHA-256
 `f08e18d3a824b2112f4a50781181b77f9b769056ee676da8c1ea632d10432158`,
 whose complete byte difference is the insertion of the single enum value
-`"eml"` into the `format_profiles` items list. The complete PR #89 diff is
-limited to 8 paths (241 additions, 5 deletions): that schema transition; the
-eml normalizer descriptor and parser (`packages/normalizers/src/
-descriptors.mjs`, `packages/normalizers/src/normalize.mjs`); the two new
-locator kinds in the unprotected `core/schemas/normalization/
-normalized-unit.schema.json`; the derived `"eml"` entries in
-`distribution/conformance.json` and `distribution/release/
-conformance-statement.json` (including the mechanical traceability evidence
-rebind); the FEAT-019 entry in `docs/traceability.json`; and the new
+`"eml"` into the `format_profiles` items list.
+
+After this AGENTS-only contract (which also pre-registers FEAT-019 as
+planned and mechanically rebinds the traceability evidence hash) merges,
+PR #89 may target only the descendant base produced by merging main into the
+pre-contract head. The permitted delta beyond that mechanical merge is
+limited to: flipping the FEAT-019 traceability status from planned to
+implemented and filling its evidence arrays, and the mechanical
+traceability evidence-hash rebind in
+`distribution/release/conformance-statement.json`. The protected schema byte
+transition must remain exactly the pair above. The complete PR #89 content
+diff against its base is limited to 8 paths: that schema transition; the eml
+normalizer descriptor and parser (`packages/normalizers/src/descriptors.mjs`,
+`packages/normalizers/src/normalize.mjs`); the two new locator kinds in the
+unprotected `core/schemas/normalization/normalized-unit.schema.json`; the
+derived `"eml"` entries in `distribution/conformance.json` and
+`distribution/release/conformance-statement.json` (including the mechanical
+evidence rebind); the FEAT-019 entry in `docs/traceability.json`; and the new
 `tests/governance/eml-normalizer.test.mjs`. No workflow, validator, scorer,
 statistical, release-status, or other schema byte may change. Candidate tests
 and every non-self required or security check must pass; the owner exception
 record must identify the Repository policy protected self-difference on that
 single schema as its sole failed check and bypass reason. An independent
-read-only agent review of exactly that head with no unresolved critical or
-high finding must be attached. This authority is consumed and expires
+read-only agent review of the exact merged head with no unresolved critical
+or high finding must be attached. This authority is consumed and expires
 immediately when PR #89 merges or is closed, and it does not authorize any
 later protected change.
-
 
 ## Scope and safety
 
