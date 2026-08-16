@@ -20,6 +20,7 @@ export const descriptors = Object.freeze({
   pptx: descriptor("pptx", { name: "fflate+saxes", version: "0.8.3+6.0.0", license: "MIT+ISC" }, { media_types: ["application/vnd.openxmlformats-officedocument.presentationml.presentation"], extensions: [".pptx"] }, ["slide", "slide-shape"]),
   drawio: descriptor("drawio", { name: "saxes+fflate", version: "6.0.0+0.8.3", license: "ISC+MIT" }, { media_types: ["application/vnd.jgraph.mxfile", "application/xml"], extensions: [".drawio"] }, ["diagram-cell"]),
   gif: descriptor("gif", { name: "gifuct-js", version: "2.1.2", license: "MIT" }, { media_types: ["image/gif"], extensions: [".gif"] }, ["frame", "time-range"], ["No OCR or generated captions in deterministic output"]),
+  eml: descriptor("eml", { name: "kdlc-core-mime", version: "1.0.0", license: "Apache-2.0" }, { media_types: ["message/rfc822"], extensions: [".eml"] }, ["header", "mime-part"], ["HTML bodies are tag-stripped to text", "Attachments are inventoried with content hashes, not extracted in place — ingest them as separate sources", "Unknown header charsets are retained undecoded"]),
   vsdx: descriptor("vsdx", { name: "fflate+saxes", version: "0.8.3+6.0.0", license: "MIT+ISC" }, { media_types: ["application/vnd.ms-visio.drawing.main+xml", "application/vnd.ms-visio.drawing"], extensions: [".vsdx"] }, ["visio-page", "visio-shape"])
 });
 

@@ -27,7 +27,7 @@
         }
       }
     },
-    "format_profiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["markdown", "text", "csv", "pdf", "docx", "xlsx", "pptx", "drawio", "gif", "vsdx"]}},
+    "format_profiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["markdown", "text", "csv", "pdf", "docx", "xlsx", "pptx", "drawio", "gif", "eml", "vsdx"]}},
     "tools": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
     "transports": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["stdio", "streamable-http"]}},
     "pending_requirements": {

@@ -785,10 +785,17 @@
         "5.7",
         "9.2"
       ],
-      "status": "planned",
+      "status": "implemented",
       "evidence": {
-        "implementation": [],
-        "tests": []
+        "implementation": [
+          "packages/normalizers/src/descriptors.mjs",
+          "packages/normalizers/src/normalize.mjs",
+          "core/schemas/normalization/normalized-unit.schema.json",
+          "core/schemas/release/conformance-statement.schema.json"
+        ],
+        "tests": [
+          "tests/governance/eml-normalizer.test.mjs"
+        ]
       }
     }
   ]
