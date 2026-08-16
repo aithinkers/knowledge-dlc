@@ -1,0 +1,12 @@
+{
+  "name": "kdlc",
+  "owner": { "name": "AIThinkers", "url": "https://github.com/aithinkers" },
+  "plugins": [
+    {
+      "name": "kdlc",
+      "source": "./distribution/claude-code",
+      "description": "Governed K-DLC knowledge lifecycle: /kdlc:* commands, role agents, session hooks, and plain-language guides.",
+      "version": "0.2.0"
+    }
+  ]
+}

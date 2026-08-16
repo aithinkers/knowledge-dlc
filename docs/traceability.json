@@ -962,6 +962,27 @@
           "tests/governance/readme.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-028",
+      "title": "Claude Code marketplace manifest and two-step plugin install",
+      "issue": 112,
+      "specification_sections": [
+        "9.2",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          ".claude-plugin/marketplace.json",
+          "packages/cli/setup.mjs",
+          "README.md",
+          "docs/getting-started.md"
+        ],
+        "tests": [
+          "tests/governance/getting-started.test.mjs"
+        ]
+      }
     }
   ]
 }
