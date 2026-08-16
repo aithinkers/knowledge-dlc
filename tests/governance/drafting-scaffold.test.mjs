@@ -340,3 +340,32 @@ test("FEAT-034: auto mode requires an explicit draft status — omission and cas
   // Nothing reached default answers through any refused attempt.
   assert.equal((await engine.execute("query", { question: "guarded fact" })).status, "not_found");
 });
+
+test("FEAT-035: --all-sources re-runs skip already-scaffolded documents and continue", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-skip-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "skip.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  await writeFile(join(root, "a.md"), "# A\n\nFact A.\n");
+  await writeFile(join(root, "b.md"), "# B\n\nFact B.\n");
+  const started = await engine.execute("ingest_start", { sources: ["a.md", "b.md"], idempotency_key: "skip-1" });
+  let job = started;
+  for (let attempt = 0; attempt < 100 && !["completed", "failed"].includes(job.state); attempt += 1) {
+    await new Promise((r) => setTimeout(r, 50));
+    job = await engine.execute("job_status", { id: started.id });
+  }
+  const first = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal", all_sources: true } });
+  assert.equal(first.scaffolds.length, 2);
+  // Full re-run: everything skips, nothing throws, batch reports it.
+  const rerun = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal", all_sources: true } });
+  assert.equal(rerun.scaffolds.length, 0);
+  assert.equal(rerun.skipped.length, 2);
+  assert.match(rerun.next, /already scaffolded/);
+  // Partial: delete one context, re-run scaffolds only that one.
+  const { rm } = await import("node:fs/promises");
+  await rm(join(root, ".kdlc/governed/review-contexts", `${first.scaffolds[1].workflow_id}.json`));
+  await rm(join(root, ".kdlc/drafting", first.scaffolds[1].workflow_id), { recursive: true });
+  const partial = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal", all_sources: true } });
+  assert.equal(partial.scaffolds.length, 1);
+  assert.equal(partial.scaffolds[0].workflow_id, first.scaffolds[1].workflow_id);
+  assert.equal(partial.skipped.length, 1);
+});
