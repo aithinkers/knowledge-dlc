@@ -1,5 +1,5 @@
 ---
-description: Run the governed K-DLC init operation
+description: You're starting a brand-new K-DLC project in this repository.
 argument-hint: JSON string array
 ---
 

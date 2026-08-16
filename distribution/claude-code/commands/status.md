@@ -1,5 +1,5 @@
 ---
-description: Run the governed K-DLC status operation
+description: You want to know where everything stands — runs, gates, pending work.
 argument-hint: JSON string array
 ---
 

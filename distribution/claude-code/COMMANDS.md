@@ -1,7 +1,12 @@
 <!-- generated: packages/adapters/generate.mjs -->
 # K-DLC Claude Code commands
 
-All commands invoke the same governed CLI engine.
+All operations invoke the same governed CLI engine. The slash-command palette
+carries the human tier only — /kdlc:start, /kdlc:init, /kdlc:ingest,
+/kdlc:query, /kdlc:publish, /kdlc:revisit, /kdlc:status, /kdlc:doctor. The
+rows below document the FULL operation → CLI mapping; operations without a
+palette entry are invoked through the governed runner
+(distribution/claude-code/run.mjs), which is how the kdlc agents drive them.
 
 - /kdlc:init → `kdlc init --output json`
 - /kdlc:setup → `kdlc setup --output json`

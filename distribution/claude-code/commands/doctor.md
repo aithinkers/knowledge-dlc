@@ -1,5 +1,5 @@
 ---
-description: Run the governed K-DLC doctor operation
+description: Something is off and you want diagnosis plus safe, guided repair.
 argument-hint: JSON string array
 ---
 
