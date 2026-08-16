@@ -1083,6 +1083,27 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-034",
+      "title": "Project source defaults, auto-approve draft tier, and revisit ratification",
+      "issue": 127,
+      "specification_sections": [
+        "4",
+        "14",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/adapters/generate.mjs",
+          "docs/getting-started.md"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }

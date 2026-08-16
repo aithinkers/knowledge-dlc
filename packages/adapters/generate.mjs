@@ -123,6 +123,12 @@ const COMMAND_GUIDANCE = {
     get: "Job states, progress, and outcomes.",
     next: "kdlc status for the wider picture.",
   },
+  revisit: {
+    when: "Auto mode published drafts without you — see what's awaiting your ratification, or ratify one.",
+    give: "Nothing to list; or <proposal-id> --ratify \"reason\" to promote a draft to stable through a real reviewed update.",
+    get: "Ratified concepts enter default query answers; unratified drafts stay at the draft trust tier (exploratory queries only).",
+    next: "kdlc query to see promoted knowledge live.",
+  },
   sources: {
     when: "You want to see the remote sources this project ingested — where each came from, which revision, and how it was acquired.",
     give: "Nothing — it lists the acquisition receipts.",

@@ -250,3 +250,93 @@ test("FEAT-033: sanitized-subject collisions refuse instead of silently destroyi
   await assert.rejects(engine.execute("publish", { proposal_id: "pr_alpha", decide: "approved" }),
     (error) => error.code === "KDLC_STATE_CONFLICT" && /already has a recorded decision/.test(error.message) && /kdlc publish pr_alpha rr_/.test(error.message));
 });
+
+test("FEAT-034: saved project defaults fill governance flags; absence still fails closed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-defaults-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "defaults.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const job = await completedIngest(engine, root, "a.md", "# A\n\n## F\n\nFact A stands.\n");
+  await assert.rejects(engine.execute("proposal", { scaffold: { job_id: job.id } }), /saved project defaults via --save-defaults/);
+  const first = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal", save_defaults: true } });
+  assert.equal(first.defaults, undefined, "explicit flags carry no defaults note");
+  const job2 = await completedIngest(engine, root, "b.md", "# B\n\n## G\n\nFact B stands.\n");
+  const second = await engine.execute("proposal", { scaffold: { job_id: job2.id } });
+  assert.match(second.defaults, /using saved project defaults: internal \/ LicenseRef-Internal/);
+  assert.equal(second.access.classification, "internal");
+});
+
+test("FEAT-034: auto mode publishes drafts only, at the draft tier; revisit ratifies into default answers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-auto-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "auto.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+  const job = await completedIngest(engine, root, "spec.md", "# Spec\n\n## Quota\n\nEach tenant gets 500 requests per minute.\n");
+  const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
+  const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
+  const evidence = JSON.parse(await readFile(join(kit, "normalized-evidence.json"), "utf8"));
+  const template = JSON.parse(await readFile(join(kit, "recording-template.json"), "utf8"));
+  const unit = evidence.units.find(({ text }) => /500 requests/.test(text));
+  template.model = { provider: "recorded", model: "t", prompt: "auto", recorded_at: template.model.recorded_at };
+  template.claims = [{ id: "clm_quota", text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+  const proposal = (status) => [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: "pr_quota", workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.auto", revision: "rev-1", subject: "kb://local.auto/limits/tenant-quota" }, concept: { before: null, after: { frontmatter: { type: "Policy", title: "Tenant quota", description: "Rate limit policy.", status, access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "spec", resource: "file:spec.md", source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" }, body: "# Tenant quota\n\nEach tenant gets 500 requests per minute.\n" } }, claim_ids: ["clm_quota"], claim_decisions: [{ claim_id: "clm_quota", disposition: "accepted", rationale: "explicit" }], created_by: "kdlc-integrator/0.2.0" }];
+
+  // stable + --auto refuses
+  template.proposals = proposal("stable");
+  await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+  await assert.rejects(engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id, auto: true } }), /--auto only publishes concepts that explicitly declare/);
+
+  // draft + --auto lands without a human pause
+  template.proposals = proposal("draft");
+  await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+  const submitted = await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id, auto: true } });
+  assert.equal(submitted.auto_published.length, 1);
+  assert.equal(submitted.auto_published[0].published.materialized, true);
+
+  // draft tier: default answers exclude it; exploratory sees it as unverified
+  const wiki = await engine.execute("query", { question: "tenant quota" });
+  assert.equal(wiki.status, "not_found", "drafts never enter default wiki answers");
+  const exploratory = await engine.execute("query", { question: "tenant quota", mode: "exploratory" });
+  assert.equal(exploratory.status, "ok");
+  assert.equal(exploratory.results[0].trust, "unverified");
+
+  // revisit lists it; ratification promotes through a real reviewed update
+  const queue = await engine.execute("revisit", {});
+  assert.equal(queue.awaiting_ratification.length, 1);
+  assert.equal(queue.awaiting_ratification[0].proposal_id, "pr_quota");
+  await assert.rejects(engine.execute("revisit", { proposal_id: "pr_quota" }), /requires --ratify/);
+  const promoted = await engine.execute("revisit", { proposal_id: "pr_quota", reason: "verified against the spec" });
+  assert.equal(promoted.published.materialized, true);
+  assert.equal((await engine.execute("revisit", {})).awaiting_ratification.length, 0);
+  const answer = await engine.execute("query", { question: "tenant quota" });
+  assert.equal(answer.status, "ok", "ratified concept enters default answers");
+  assert.match(answer.results[0].title, /Tenant quota/);
+  // ratifying twice refuses
+  await assert.rejects(engine.execute("revisit", { proposal_id: "pr_quota", reason: "again" }), /already ratified/);
+});
+
+test("FEAT-034: auto mode requires an explicit draft status — omission and casing cannot reach default answers (review CRITICAL)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-autoguard-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "autoguard.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+  const job = await completedIngest(engine, root, "s.md", "# S\n\n## F\n\nThe guarded fact stands.\n");
+  const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
+  const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
+  const evidence = JSON.parse(await readFile(join(kit, "normalized-evidence.json"), "utf8"));
+  const template = JSON.parse(await readFile(join(kit, "recording-template.json"), "utf8"));
+  const unit = evidence.units.find(({ text }) => /guarded fact/.test(text));
+  template.model = { provider: "recorded", model: "t", prompt: "g", recorded_at: template.model.recorded_at };
+  template.claims = [{ id: "clm_g", text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+  const proposalWith = (frontmatterStatus) => {
+    const frontmatter = { type: "Policy", title: "Guarded", description: "d", access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "s", resource: "file:s.md", source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" };
+    if (frontmatterStatus !== undefined) frontmatter.status = frontmatterStatus;
+    return [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: "pr_g", workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.autoguard", revision: "rev-1", subject: "kb://local.autoguard/g" }, concept: { before: null, after: { frontmatter, body: "# G\n\nThe guarded fact stands.\n" } }, claim_ids: ["clm_g"], claim_decisions: [{ claim_id: "clm_g", disposition: "accepted", rationale: "r" }], created_by: "kdlc-integrator/0.2.0" }];
+  };
+  for (const status of [undefined, "Stable", "stable", "Draft"]) {
+    template.proposals = proposalWith(status);
+    await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+    await assert.rejects(engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id, auto: true } }), /explicitly declare status: "draft"/, `status=${status}`);
+  }
+  // Nothing reached default answers through any refused attempt.
+  assert.equal((await engine.execute("query", { question: "guarded fact" })).status, "not_found");
+});
