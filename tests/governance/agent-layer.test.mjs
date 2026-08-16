@@ -78,7 +78,10 @@ test("FEAT-012 generated Codex agents match a fresh build and keep §27.1 guidan
 test("FEAT-010 generated Claude Code agents match a fresh build", async () => {
   await execute(process.execPath, ["packages/adapters/generate.mjs", "--check"]);
   const plugin = JSON.parse(await readFile("distribution/claude-code/.claude-plugin/plugin.json", "utf8"));
-  assert.equal(plugin.agents, "./agents");
+  // Current Claude Code auto-discovers root agents/ and commands/; the
+  // manifest must not name them as slash-less directory strings (FEAT-028).
+  assert.equal(plugin.agents, undefined);
+  assert.equal(plugin.name, "kdlc");
   for (const { role } of AGENT_DEFINITIONS) {
     const generatedAgent = await readFile(`distribution/claude-code/agents/${role}.md`, "utf8");
     assert.equal(generatedAgent, renderAgentMarkdown(AGENT_DEFINITIONS.find((definition) => definition.role === role)));
