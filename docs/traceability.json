@@ -983,6 +983,27 @@
           "tests/governance/getting-started.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-029",
+      "title": "kdlc start entry point and removal of the in-harness setup surface",
+      "issue": 116,
+      "specification_sections": [
+        "9.2",
+        "9.4",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/adapters/generate.mjs",
+          "distribution/claude-code/commands/kdlc-start.md",
+          "security/npm-package-files.json"
+        ],
+        "tests": [
+          "tests/governance/human-surfaces.test.mjs"
+        ]
+      }
     }
   ]
 }

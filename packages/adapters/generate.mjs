@@ -7,6 +7,9 @@ import { distributionDefinition as definition } from "./definitions.mjs";
 import { AGENT_DEFINITIONS, renderAgentMarkdown, renderCodexAgentMarkdown, renderCodexAgentToml, renderKiroAgentManifest, renderKiroAgentPrompt } from "../agents/definitions/index.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+// In-harness surfaces exclude `setup`: it installs harness surfaces and is
+// circular from inside one (FEAT-029, #116). The CLI operation is unchanged.
+const surfaceCommands = definition.cli_commands.filter((command) => command !== "setup");
 
 // Plain-language guidance rendered above each command's host binding. Written
 // for the humans invoking the command — knowledge owners, analysts, reviewers
@@ -127,6 +130,33 @@ const COMMAND_GUIDANCE = {
     next: "kdlc refresh to re-check published knowledge against its sources.",
   },
 };
+
+const START_SURFACE = `**When to use:** You want to work on this knowledge base and don't want to
+learn the command palette — start here, or say "pick up where we left off".
+
+**What happens:** The assistant assesses where things stand and offers the
+right next step; you choose in plain language.
+
+Follow this routine (read-only assessment first — never mutate while assessing):
+
+1. Invoke the \`status\`, \`jobs\`, and \`sources\` operations (JSON output)
+   through the governed runner.
+2. Route by what they show, offering at most three next actions:
+   - Project not initialized → offer to run \`init\`.
+   - Jobs still running → report progress and what they will produce.
+   - Evidence exists but nothing proposed → offer conductor-driven proposal
+     drafting from that evidence.
+   - Proposals pending review → present the review packet and its hash; the
+     user's decision goes through the governed \`review\` operation.
+   - Approved but unpublished → offer \`publish\`.
+   - Published knowledge present → offer \`query\`, \`refresh\`, or \`gaps\`.
+   - Remote connectors configured but not ready → point at the
+     connector-setup agent and \`sources\` readiness.
+3. Do the chosen step, then repeat the assessment and offer what's next.
+
+Never bypass review, routing, or publication policy; approval decisions are
+never inferred from conversation.
+`;
 
 function guidanceBlock(command) {
   const guide = COMMAND_GUIDANCE[command];
@@ -386,7 +416,7 @@ const generated = new Map([
   ],
   [
     "distribution/codex/SKILL.md",
-    `---\nname: kdlc\ndescription: Operate a K-DLC project through its governed CLI engine.\nargument-hint: JSON string array\n---\n\n# K-DLC\n\nThe native host binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/codex/run.mjs\", operation, \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Do not bypass review, routing, or publication policy. Supported operations: ${definition.cli_commands.join(", ")}.\n`,
+    `---\nname: kdlc\ndescription: Operate a K-DLC project through its governed CLI engine.\nargument-hint: JSON string array\n---\n\n# K-DLC\n\nThe native host binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/codex/run.mjs\", operation, \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Do not bypass review, routing, or publication policy. Supported operations: ${definition.cli_commands.join(", ")}. When the user does not name an operation, follow the start routine: assess with status/jobs/sources, then offer the right next step.\n`,
   ],
   [
     "distribution/mcp/desktop.json",
@@ -401,11 +431,15 @@ const generated = new Map([
     `${canonicalJson({ api_version: "kdlc.dev/conformance/v1", specification_version: definition.specification, canonicalization: definition.canonicalization, modules: definition.conformance_modules, transports: definition.transports, formats: definition.format_profiles, tools: definition.mcp_tools, repository_analysis: false })}\n`,
   ],
 ]);
-for (const command of definition.cli_commands)
+for (const command of surfaceCommands)
   generated.set(
     `distribution/claude-code/commands/kdlc-${command}.md`,
     `---\ndescription: Run the governed K-DLC ${command} operation\nargument-hint: JSON string array\n---\n\n${guidanceBlock(command)}The native Claude Code binding is \`$ARGUMENTS\`. Interpret it as the JSON serialization of the user argument vector and invoke [\"node\", \"distribution/claude-code/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", \"$ARGUMENTS\"] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
   );
+generated.set(
+  "distribution/claude-code/commands/kdlc-start.md",
+  `---\ndescription: Start or resume K-DLC work — assesses state and offers the right next step\nargument-hint: optional goal in plain language\n---\n\n${START_SURFACE.replace("through the governed runner.", 'by invoking ["node", "distribution/claude-code/run.mjs", <operation>, "--output", "json"] directly without a shell.')}`,
+);
 generated.set("distribution/claude-code/hooks/hooks.json", CLAUDE_HOOKS_MANIFEST);
 generated.set("distribution/claude-code/hooks/orient.mjs", ORIENT_HOOK);
 generated.set("distribution/claude-code/hooks/guard.mjs", GUARD_HOOK);
@@ -422,13 +456,17 @@ for (const harness of ["kiro", "kiro-ide"]) {
   generated.set(`distribution/${harness}/run.mjs`, adapterRunner);
   generated.set(
     `distribution/${harness}/AGENTS.md`,
-    `<!-- generated: packages/adapters/generate.mjs -->\n# K-DLC on ${harness === "kiro" ? "Kiro CLI" : "Kiro IDE"}\n\nAll operations invoke the same governed CLI engine and return its versioned\nJSON envelope. Do not bypass review, routing, or publication policy, and never\nedit canonical knowledge-base files directly. Invoke operations as\n[\"node\", \"distribution/${harness}/run.mjs\", <operation>, \"--output\", \"json\", ...args]\ndirectly without a shell. Supported operations: ${definition.cli_commands.join(", ")}.\n`,
+    `<!-- generated: packages/adapters/generate.mjs -->\n# K-DLC on ${harness === "kiro" ? "Kiro CLI" : "Kiro IDE"}\n\nAll operations invoke the same governed CLI engine and return its versioned\nJSON envelope. Do not bypass review, routing, or publication policy, and never\nedit canonical knowledge-base files directly. Invoke operations as\n[\"node\", \"distribution/${harness}/run.mjs\", <operation>, \"--output\", \"json\", ...args]\ndirectly without a shell. Supported operations: ${definition.cli_commands.join(", ")}. When the user does not name an operation, follow the start routine: assess with status/jobs/sources, then offer the right next step.\n`,
   );
-  for (const command of definition.cli_commands)
+  for (const command of surfaceCommands)
     generated.set(
       `distribution/${harness}/.kiro/skills/kdlc-${command}/SKILL.md`,
       `---\nname: kdlc-${command}\ndescription: Run the governed K-DLC ${command} operation\nuser-invocable: true\n---\n\n${guidanceBlock(command)}Interpret the user arguments as a JSON string array and invoke [\"node\", \"distribution/${harness}/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", <arguments-json>] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
     );
+  generated.set(
+    `distribution/${harness}/.kiro/skills/kdlc-start/SKILL.md`,
+    `---\nname: kdlc-start\ndescription: Start or resume K-DLC work — assesses state and offers the right next step\nuser-invocable: true\n---\n\n${START_SURFACE.replace("through the governed runner.", `by invoking ["node", "distribution/${harness}/run.mjs", <operation>, "--output", "json"] directly without a shell.`)}`,
+  );
   for (const agent of AGENT_DEFINITIONS) {
     generated.set(`distribution/${harness}/.kiro/agents/${agent.role}.md`, renderKiroAgentPrompt(agent));
     generated.set(`distribution/${harness}/.kiro/agents/${agent.role}.json`, `${canonicalJson(renderKiroAgentManifest(agent, { harness }))}\n`);
