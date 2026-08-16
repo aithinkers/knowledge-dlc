@@ -70,6 +70,25 @@ test("FEAT-022: sanitization survives the CodeQL-class evasions", async () => {
   assert.equal(first.text, "&lt;kept&gt; & done", "single-pass entity decode never double-decodes");
 });
 
+test("FEAT-022: table cells honor the single-pass entity invariant; obfuscated active links are dropped (review round)", async () => {
+  const page2 = `<html><body>
+<table><tr><td>&amp;lt;kept&amp;gt;</td></tr></table>
+<p><a href="java\tscript:alert(1)">tab</a>
+<a href="&#106;avascript:alert(1)">entity</a>
+<a href="javascript&colon;alert(1)">colon-entity</a>
+<a href="https://safe.example/x">safe</a></p>
+</body></html>`;
+  const result = await normalize({ bytes: Buffer.from(page2), filename: "t2.html" });
+  const row = result.units.find(({ kind }) => kind === "table-row");
+  assert.deepEqual(row.structured_data.cells, ["&lt;kept&gt;"], "cells decode exactly once");
+  const links = result.units.filter(({ kind }) => kind === "link");
+  // &colon; is not a decoded entity, so that target survives as literal text —
+  // but tab and numeric-entity obfuscations must be dropped.
+  assert.ok(!links.some(({ structured_data }) => /alert\(1\)/.test(structured_data.destination) && /^java/i.test(structured_data.destination.replace(/[\s]/g, ""))), "obfuscated javascript: targets dropped");
+  assert.ok(links.some(({ structured_data }) => structured_data.destination === "https://safe.example/x"));
+  assert.ok(result.manifest.quality_warnings.includes("active-link-targets-dropped"));
+});
+
 test("FEAT-022: malformed and hostile structures degrade or quarantine deterministically", async () => {
   const misnested = "<html><body><p>one<div>two</p></div><h3>tail</h3>";
   const result = await normalize({ bytes: Buffer.from(misnested), filename: "m.html" });

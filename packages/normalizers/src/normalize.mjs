@@ -330,7 +330,7 @@ function emlProfile(bytes, sourceHash, limits) {
 // patterns from the eml/msg work; nothing is ever fetched.
 const HTML_VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
 const HTML_BLOCK = new Set(["p", "li", "dd", "dt", "blockquote", "pre", "figcaption", "caption", "summary"]);
-const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', copy: "©", reg: "®", trade: "™" };
+const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', copy: "©", reg: "®", trade: "™", colon: ":", sol: "/", tab: "\t", newline: "\n" };
 // Single pass: each entity site decodes at most once, so &amp;lt; → &lt;
 // (never <) by construction.
 const decodeHtmlEntities = (value) => value.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (whole, body) => {
@@ -372,6 +372,8 @@ function htmlProfile(bytes, sourceHash, limits) {
       const text = decodeHtmlEntities(token[3]);
       flush.text += text;
       if (flush.link) flush.link.text += text;
+      // Cells accumulate already-decoded text; the close handler must not
+      // decode again (single-pass invariant, review round MEDIUM 1).
       if (flush.cells && flush.cells.open) flush.cells.current += text;
       continue;
     }
@@ -387,7 +389,11 @@ function htmlProfile(bytes, sourceHash, limits) {
       if (name === "a") {
         const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(token[2] ?? "");
         const target = (href?.[1] ?? href?.[2] ?? href?.[3] ?? "").trim();
-        if (/^(?:javascript|data|vbscript):/i.test(target)) { activeLinksDropped += 1; flush.link = { text: "", href: null, path: domPath() }; }
+        // Judge the scheme on the decoded, control-stripped form: entity or
+        // whitespace obfuscation (java\tscript:, &#106;avascript:) must not
+        // slip an active target past the filter (review round MEDIUM 2).
+        const judged = decodeHtmlEntities(target).replace(/[\s -]+/g, "").toLowerCase();
+        if (/^(?:javascript|data|vbscript):/.test(judged)) { activeLinksDropped += 1; flush.link = { text: "", href: null, path: domPath() }; }
         else flush.link = { text: "", href: target || null, path: domPath() };
       }
       if (name === "tr") { flush.cells = { row: [], open: false, current: "", path: domPath() }; }
@@ -405,7 +411,7 @@ function htmlProfile(bytes, sourceHash, limits) {
       if (flush.link.href && text) units.push(make("link", { kind: "dom-path", path: flush.link.path }, { text, structured_data: { destination: flush.link.href } }));
       flush.link = null;
     }
-    if ((name === "td" || name === "th") && flush.cells?.open) { flush.cells.row.push(collapseSpace(decodeHtmlEntities(flush.cells.current))); flush.cells.open = false; }
+    if ((name === "td" || name === "th") && flush.cells?.open) { flush.cells.row.push(collapseSpace(flush.cells.current)); flush.cells.open = false; }
     if (name === "tr" && flush.cells) {
       if (flush.cells.row.length > 0) units.push(make("table-row", { kind: "dom-path", path: flush.cells.path }, { structured_data: { cells: flush.cells.row } }));
       flush.cells = null;
