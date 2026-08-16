@@ -433,6 +433,18 @@ no unresolved critical or high finding must be attached. This authority is
 consumed and expires immediately when PR #100 merges or is closed, and it
 does not authorize any later protected change.
 
+Amendment (one-time, same authority): the PR #100 bypass above applies at
+exact head `b46f456e981d6d5bdf822ce3d07906b18a5696a8`, which relative to the
+previously bound merged head `210e0d2fd159b4d9857fb59267e6aeb3c50cbb42`
+additionally contains only the independent-review-driven fixes in
+`packages/normalizers/src/normalize.mjs` (table cells decode entities
+exactly once, preserving the single-pass invariant; the active-link scheme
+filter judges the entity-decoded, control-stripped target, with `colon`,
+`sol`, `tab`, and `newline` added to the entity map) and their regression
+coverage in `tests/governance/html-normalizer.test.mjs`. The protected
+schema transition pair, the 8-path confinement, and every other term above
+are unchanged and remain binding.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
