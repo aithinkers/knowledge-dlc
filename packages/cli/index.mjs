@@ -852,7 +852,6 @@ export function parseCli(argv) {
   if (operation === "publish") {
     const flags = positionals.filter((value) => value.startsWith("--"));
     const plain = positionals.filter((value, index) => !value.startsWith("--") && !(positionals[index - 1] === "--approve" || positionals[index - 1] === "--reject" || positionals[index - 1] === "--request-changes"));
-    void 0;
     const reasonFor = (flag) => {
       const at = positionals.indexOf(flag);
       return at !== -1 && positionals[at + 1] && !positionals[at + 1].startsWith("--") ? positionals[at + 1] : undefined;
@@ -1468,7 +1467,12 @@ export function createLocalProjectEngine(options = {}) {
         },
         publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current, decide, reason, auto, show }) => {
           if (proposalId === undefined) return pendingReviews();
-          if (show) return showPacket(proposalId);
+          if (show) {
+            // Showing only — any decision flags in the same invocation are
+            // ignored so reading can never accidentally decide.
+            const packet = await showPacket(proposalId);
+            return decide ? { ...packet, note: "showing only — decision flags were ignored; decide with a separate --approve/--reject" } : packet;
+          }
           const index = await proposalIndex(proposalId);
           if (decide) {
             // --approve/--reject/--request-changes: record the human decision
