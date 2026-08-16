@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"path": "../../../../requirements-dlc"
+		},
+		{
+			"path": "../../../../../aidlc-workflows-aws"
+		}
+	],
+	"settings": {}
+}

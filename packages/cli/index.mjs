@@ -735,8 +735,8 @@ export function parseCli(argv) {
     output = args[index + 1];
     args.splice(index, 2);
   }
-  if (!new Set(["text", "json"]).has(output))
-    throw inputError("--output must be text or json");
+  if (!new Set(["text", "json", "human"]).has(output))
+    throw inputError("--output must be text, json, or human");
   const operation = args.shift();
   if (!CLI_COMMANDS.includes(operation))
     throw inputError("A supported command is required");
@@ -781,8 +781,41 @@ export function parseCli(argv) {
   if (["proposal", "reconcile-edits", "migrate"].includes(operation) && positionals[0]) Object.assign(input, JSON.parse(positionals[0]));
   return { operation, input, output };
 }
+// Plain-language framing per failure class for --output human. The exact
+// error code and message are still shown; this adds what the failure means
+// for the person at the keyboard and what is safe to do next.
+const HUMAN_ERROR_FRAMING = Object.freeze({
+  [EXIT.input]: "The command couldn't be understood as given — nothing was changed. Adjust the arguments and try again.",
+  [EXIT.policy]: "Project policy stopped this — it isn't permitted for this principal or project state. Nothing was changed.",
+  [EXIT.conflict]: "This collided with a concurrent change — re-check the current state before retrying.",
+  [EXIT.dependency]: "Something this operation needs is missing or not configured yet.",
+  [EXIT.transient]: "A temporary problem occurred — it is safe to retry the same command.",
+  [EXIT.internal]: "An internal error occurred. The governed state is protected; report this if it persists.",
+});
+
+function humanValue(value) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value !== "object") return String(value);
+  return canonicalJson(value);
+}
+
 export function renderEnvelope(envelope, output = "text") {
   if (output === "json") return `${canonicalJson(envelope)}\n`;
+  if (output === "human") {
+    if (envelope.ok) {
+      const lines = [`✔ ${envelope.operation} completed.`];
+      const result = envelope.result;
+      if (result && typeof result === "object" && !Array.isArray(result)) {
+        for (const [key, value] of Object.entries(result))
+          lines.push(`  ${key.replaceAll("_", " ")}: ${humanValue(value)}`);
+      } else if (result !== null && result !== undefined) {
+        lines.push(`  ${humanValue(result)}`);
+      }
+      return `${lines.join("\n")}\n`;
+    }
+    const framing = HUMAN_ERROR_FRAMING[envelope.error.class] ?? HUMAN_ERROR_FRAMING[EXIT.internal];
+    return `✖ ${envelope.operation} did not complete.\n  ${framing}\n  Detail: ${envelope.error.message} (${envelope.error.code})\n`;
+  }
   if (envelope.ok)
     return `${envelope.operation}: ok\n${canonicalJson(envelope.result)}\n`;
   return `${envelope.operation}: ${envelope.error.code}: ${envelope.error.message}\n`;
