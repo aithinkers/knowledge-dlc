@@ -422,7 +422,7 @@ const generated = new Map([
   ],
   [
     "distribution/claude-code/COMMANDS.md",
-    `<!-- generated: packages/adapters/generate.mjs -->\n# K-DLC Claude Code commands\n\nAll commands invoke the same governed CLI engine.\n\n${commandLines}\n`,
+    `<!-- generated: packages/adapters/generate.mjs -->\n# K-DLC Claude Code commands\n\nAll operations invoke the same governed CLI engine. The slash-command palette\ncarries the human tier only — /kdlc:start, /kdlc:init, /kdlc:ingest,\n/kdlc:query, /kdlc:publish, /kdlc:revisit, /kdlc:status, /kdlc:doctor. The\nrows below document the FULL operation → CLI mapping; operations without a\npalette entry are invoked through the governed runner\n(distribution/claude-code/run.mjs), which is how the kdlc agents drive them.\n\n${commandLines}\n`,
   ],
   [
     "distribution/codex/SKILL.md",
