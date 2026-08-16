@@ -1255,8 +1255,21 @@ export function createLocalProjectEngine(options = {}) {
         const kept = oldIndex.split("\n").filter((existing) => existing.trim().length > 0 && !existing.includes(`](${conceptRelative})`));
         const indexContent = `${[...kept, line].join("\n")}\n`;
         const priorToken = async (path) => (await indexStore.exists(path)) ? sha256Token(await indexStore.readText(path)) : null;
-        if (await priorToken(`${base}/${conceptRelative}`) === sha256Token(conceptContent)) {
+        const existingConceptToken = await priorToken(`${base}/${conceptRelative}`);
+        if (existingConceptToken === sha256Token(conceptContent)) {
           return { materialized: true, concept: `${base}/${conceptRelative}`, index: indexPathRel, catalog: catalogPath, already_published: true };
+        }
+        // A creation proposal (concept.before === null) was reviewed as NEW
+        // content. Lossy subject sanitization can collide distinct subjects
+        // onto one path — the CAS must refuse, never bless a silent overwrite
+        // of a different reviewed concept (review round HIGH).
+        if (proposal.concept.before === null && existingConceptToken !== null) {
+          throw new EngineError(
+            "KDLC_STATE_CONFLICT",
+            `a different concept already occupies ${conceptRelative} (subjects may collide after path sanitization) — this proposal was reviewed as a creation, so publishing it would silently destroy reviewed content; re-draft it as an update (concept.before set to the current content) or choose a distinct subject`,
+            EXIT.conflict,
+            { path: `${base}/${conceptRelative}` },
+          );
         }
         const transactions = new TransactionManager({
           store: indexStore,
@@ -1268,7 +1281,7 @@ export function createLocalProjectEngine(options = {}) {
         const journal = await transactions.prepare({
           workflowId,
           targets: [
-            { path: `${base}/${conceptRelative}`, expectedToken: await priorToken(`${base}/${conceptRelative}`), content: conceptContent },
+            { path: `${base}/${conceptRelative}`, expectedToken: proposal.concept.before === null ? null : existingConceptToken, content: conceptContent },
             { path: indexPathRel, expectedToken: await priorToken(indexPathRel), content: indexContent },
             { path: catalogPath, expectedToken: await priorToken(catalogPath), content: catalogContent },
           ],
@@ -1344,7 +1357,20 @@ export function createLocalProjectEngine(options = {}) {
             // first; only approvals continue into publication.
             const reviewRuntime = await harness(index.workflow_id, true);
             receiptId = receiptId ?? `rr_${digest(`${proposalId}:${decide}:${Date.now()}`).slice(7, 19)}`;
-            await reviewRuntime.decide({ workflowId: index.workflow_id, proposalId, decision: decide, receiptId });
+            try {
+              await reviewRuntime.decide({ workflowId: index.workflow_id, proposalId, decision: decide, receiptId });
+            } catch (error) {
+              if (error?.code === "KDLC_DECISION_CONFLICT") {
+                throw new EngineError("KDLC_STATE_CONFLICT", `${proposalId} already has a recorded decision (receipt ${error.details?.current ?? "on file"}) — your earlier decision stands; finish with: kdlc publish ${proposalId} ${error.details?.current ?? "<receipt-id>"}`, EXIT.conflict, structuredClone(error.details ?? {}));
+              }
+              throw error;
+            }
+            // The human's stated rationale is part of the governance record.
+            await indexStore.writeJsonAtomic(`.kdlc/governed/workflow/runs/${index.workflow_id}/reviews/${proposalId}/rationale.json`, {
+              api_version: "kdlc.dev/review-rationale/v1",
+              proposal_id: proposalId, receipt_id: receiptId, decision: decide,
+              reason: reason ?? null, decided_by: principal.actor, decided_at: new Date().toISOString(),
+            });
             if (decide !== "approved") return { proposal_id: proposalId, decision: decide, receipt_id: receiptId, reason: reason ?? null, published: null };
           }
           if (!receiptId) throw inputError("publish requires a receipt id (or use --approve to decide and publish in one step)");

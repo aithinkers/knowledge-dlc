@@ -215,3 +215,38 @@ test("FEAT-032: unit slicing drafts a section whose anchors still verify; text o
   const json = renderEnvelope(envelope, "json");
   assert.ok(json.includes("First fact."), "JSON envelope keeps full fidelity");
 });
+
+test("FEAT-033: sanitized-subject collisions refuse instead of silently destroying reviewed concepts (review HIGH)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-collide-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "collide.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+  const publishOne = async (tag, subject, body) => {
+    const job = await completedIngest(engine, root, `${tag}.md`, `# ${tag}\n\n## Fact\n\nThe ${tag} fact is recorded here.\n`);
+    const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
+    const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
+    const evidence = JSON.parse(await readFile(join(kit, "normalized-evidence.json"), "utf8"));
+    const template = JSON.parse(await readFile(join(kit, "recording-template.json"), "utf8"));
+    const unit = evidence.units.find(({ text }) => /fact is recorded/.test(text));
+    template.model = { provider: "recorded", model: "t", prompt: "p", recorded_at: template.model.recorded_at };
+    template.claims = [{ id: `clm_${tag}`, text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+    template.proposals = [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: `pr_${tag}`, workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.collide", revision: "rev-1", subject }, concept: { before: null, after: { frontmatter: { type: "Policy", title: `T ${tag}`, description: "d", status: "stable", access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: tag, resource: `file:${tag}.md`, source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" }, body: `# ${tag}\n\n${body}\n` } }, claim_ids: [`clm_${tag}`], claim_decisions: [{ claim_id: `clm_${tag}`, disposition: "accepted", rationale: "r" }], created_by: "kdlc-integrator/0.2.0" }];
+    await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+    await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id } });
+    return engine.execute("publish", { proposal_id: `pr_${tag}`, decide: "approved", reason: "test" });
+  };
+  const first = await publishOne("alpha", "kb://local.collide/policies/my-topic", "First content.");
+  assert.equal(first.published.materialized, true);
+  const firstBytes = await readFile(join(root, first.published.concept), "utf8");
+  // Distinct subject, same sanitized path — must refuse, first concept intact.
+  await assert.rejects(publishOne("beta", "kb://local.collide/policies/My.Topic", "Attacker content."),
+    (error) => error.code === "KDLC_STATE_CONFLICT" && /reviewed as a creation/.test(error.message));
+  assert.equal(await readFile(join(root, first.published.concept), "utf8"), firstBytes, "first concept untouched");
+  // Rationale sidecar persisted for the approval.
+  const rationale = JSON.parse(await readFile(join(root, `.kdlc/governed/workflow/runs/${first.intent.workflow_id}/reviews/pr_alpha/rationale.json`), "utf8"));
+  assert.equal(rationale.reason, "test");
+  assert.match(rationale.decided_by, /^human:/);
+  // Duplicate --approve gets an actionable message naming the receipt.
+  await assert.rejects(engine.execute("publish", { proposal_id: "pr_alpha", decide: "approved" }),
+    (error) => error.code === "KDLC_STATE_CONFLICT" && /already has a recorded decision/.test(error.message) && /kdlc publish pr_alpha rr_/.test(error.message));
+});
