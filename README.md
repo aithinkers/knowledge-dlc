@@ -99,7 +99,7 @@ kdlc setup <claude-code|codex|kiro|kiro-ide|mcp>[,...] <project-directory>
 
 | Harness | Setup | Invoke |
 | --- | --- | --- |
-| **Claude Code** | `kdlc setup claude-code .` prints the `claude plugin install …/distribution/claude-code` command | `/kdlc:<operation>`, `kdlc:<role>` agents |
+| **Claude Code** | `kdlc setup claude-code .` prints the marketplace add + `claude plugin install kdlc@kdlc` commands | `/kdlc:<operation>`, `kdlc:<role>` agents |
 | **Codex CLI** (≥ 0.145) | `kdlc setup codex <project>` writes `.codex/` (skill + agents) into your project; surface source in `distribution/codex/` | `$kdlc` skill, `.codex/agents/<role>` |
 | **Kiro CLI** (≥ 2.6) | `kdlc setup kiro <project>` writes `.kiro/` (skills + agents) into your project; surface source in `distribution/kiro/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
 | **Kiro IDE** | `kdlc setup kiro-ide <project>`; surface source in `distribution/kiro-ide/.kiro/` | `/kdlc-<operation>`, `.kiro/agents/<role>` |
