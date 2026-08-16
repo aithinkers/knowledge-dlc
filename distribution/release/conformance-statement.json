@@ -14,5 +14,5 @@
   "tools": ["project_init", "project_get", "project_list_mounts", "kb_search", "kb_fetch", "kb_trace", "kb_conflicts", "kb_gaps", "source_excerpt", "job_status", "ingest_start", "proposal_create", "review_submit", "publish_request", "job_cancel"],
   "transports": ["stdio", "streamable-http"],
   "pending_requirements": [],
-  "evidence": [{"path":"distribution/release/evaluation-report.json","sha256":"sha256:91ac77187c3d09fdf0a8d17ddda589d2afd276fe387ed7555a675073b6ee56da"},{"path":"docs/traceability.json","sha256":"sha256:ec947e9f95403fc6b0e05f8bac0c4a7d581ebdf3fd3fdd1138dbd48c554dbf6d"},{"path":"docs/release-readiness.md","sha256":"sha256:759a9a58ca4032d9fedb21732cfd1fd4962f1a768b537b4a87c03f2e24306f63"}]
+  "evidence": [{"path":"distribution/release/evaluation-report.json","sha256":"sha256:91ac77187c3d09fdf0a8d17ddda589d2afd276fe387ed7555a675073b6ee56da"},{"path":"docs/traceability.json","sha256":"sha256:2f1562a333535c8b53d639c545ea4e83c452918db015fb6097bf7accc41f7692"},{"path":"docs/release-readiness.md","sha256":"sha256:759a9a58ca4032d9fedb21732cfd1fd4962f1a768b537b4a87c03f2e24306f63"}]
 }

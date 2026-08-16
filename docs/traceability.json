@@ -1144,6 +1144,25 @@
           "tests/governance/human-surfaces.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-037",
+      "title": "The gate shows what you approve: publish --show renders packet content",
+      "issue": 133,
+      "specification_sections": [
+        "14",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/agents/definitions/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }
