@@ -1062,6 +1062,27 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-033",
+      "title": "Publish last mile: atomic materialization, auto current-context, approval gate",
+      "issue": 125,
+      "specification_sections": [
+        "5.1",
+        "14",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/adapters/generate.mjs",
+          "packages/agents/definitions/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }

@@ -4,11 +4,11 @@ description: Run the governed K-DLC publish operation
 user-invocable: true
 ---
 
-**When to use:** Approved knowledge should become visible at its access level.
+**When to use:** You want to see what's waiting on your decision, or decide it — this is the human gate.
 
-**What you give it:** The approved item to publish.
+**What you give it:** Nothing to list pending review packets; or <proposal-id> --approve "reason" (or --reject / --request-changes) to decide and land it in one step.
 
-**What you get back:** Published, versioned knowledge — refused if approvals are missing.
+**What you get back:** On approval: the concept file, index, and retrieval catalog updated atomically — kdlc query answers with citations immediately. Refusals and rejections change nothing.
 
 **Usually next:** kdlc query to see it live; kdlc status for the audit trail.
 

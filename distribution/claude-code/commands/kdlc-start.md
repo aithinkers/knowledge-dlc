@@ -21,9 +21,10 @@ Follow this routine (read-only assessment first — never mutate while assessing
      user for --access and --license — governance decisions), then follow the
      kit README under `.kdlc/drafting/<workflow>/` to draft and submit.
      Work in the foreground and report the returned packet hashes.
-   - Proposals pending review → present the review packet and its hash; the
-     user's decision goes through the governed `review` operation.
-   - Approved but unpublished → offer `publish`.
+   - Proposals pending review → run `publish` bare to list them, present
+     each packet and hash, and record the user's decision with
+     `publish <proposal-id> --approve|--reject|--request-changes` — on
+     approval the concept lands atomically and query answers immediately.
    - Published knowledge present → offer `query`, `refresh`, or `gaps`.
    - Remote connectors configured but not ready → point at the
      connector-setup agent and `sources` readiness.

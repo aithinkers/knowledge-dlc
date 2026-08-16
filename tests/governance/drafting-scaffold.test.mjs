@@ -58,7 +58,7 @@ test("FEAT-030: scaffold → fill → submit → review → publish runs end to 
     api_version: "kdlc.dev/concept-proposal/v1alpha1", id: "pr_token", workflow_id: scaffold.workflow_id,
     task: "ingest", state: "review_pending",
     target: { knowledge_base_id: "local.scaffold-fixture", revision: "rev-1", subject: "kb://local.scaffold-fixture/policies/token-lifetime" },
-    concept: { before: null, after: { frontmatter: { type: "Policy", title: "API token lifetime", description: "Token lifetime policy.", status: "stable", generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "spec", source_hash: evidence.source_hash }], stale_after: "2030-01-01" }, body: "# API token lifetime\n\nProduction API tokens expire after 60 minutes.\n" } },
+    concept: { before: null, after: { frontmatter: { type: "Policy", title: "API token lifetime", description: "Token lifetime policy.", status: "stable", access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "spec", resource: "file:spec.md", source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" }, body: "# API token lifetime\n\nProduction API tokens expire after 60 minutes.\n" } },
     claim_ids: ["clm_token"],
     claim_decisions: [{ claim_id: "clm_token", disposition: "accepted", rationale: "explicit statement" }],
     created_by: "kdlc-integrator/0.2.0"
@@ -81,6 +81,67 @@ test("FEAT-030: scaffold → fill → submit → review → publish runs end to 
   const publication = await engine.execute("publish", { proposal_id: "pr_token", receipt_id: "rr_token", current });
   assert.equal(publication.intent.proposal_id, "pr_token");
   assert.equal(publication.intent.packet_hash, submitted.proposals[0].packet_hash);
+  // FEAT-033: the last mile — concept file, index, catalog land atomically…
+  assert.equal(publication.published.materialized, true);
+  const conceptText = await readFile(join(root, publication.published.concept), "utf8");
+  assert.match(conceptText, /^---\n/);
+  assert.match(conceptText, /Production API tokens expire after 60 minutes\./);
+  assert.match(await readFile(join(root, "knowledge/primary/index.md"), "utf8"), /API token lifetime/);
+  // …republish is idempotent…
+  const again = await engine.execute("publish", { proposal_id: "pr_token", receipt_id: "rr_token", current });
+  assert.equal(again.published.already_published, true);
+  // …and query answers with revision-pinned citations immediately.
+  const answer = await engine.execute("query", { question: "what is the token lifetime?" });
+  assert.equal(answer.status, "ok");
+  assert.equal(answer.results[0].title, "API token lifetime");
+  assert.match(answer.citations[0].concept, /^kb:\/\/scaffold\.fixture@sha256:[a-f0-9]{64}\//);
+});
+
+test("FEAT-033: bare publish lists the gate; --approve chains decision and atomic landing with auto current-context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-gate-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "gate.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const job = await completedIngest(engine, root, "spec.md", "# Spec\n\n## Retention\n\nBackups are kept for 35 days.\n");
+  const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
+  const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
+  const evidence = JSON.parse(await readFile(join(kit, "normalized-evidence.json"), "utf8"));
+  const template = JSON.parse(await readFile(join(kit, "recording-template.json"), "utf8"));
+  const unit = evidence.units.find(({ text }) => /35 days/.test(text));
+  const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+  template.model = { provider: "recorded", model: "test-model", prompt: "gate", recorded_at: template.model.recorded_at };
+  template.claims = [{ id: "clm_ret", text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+  template.proposals = [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: "pr_ret", workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.gate.fixture", revision: "rev-1", subject: "kb://local.gate.fixture/policies/retention" }, concept: { before: null, after: { frontmatter: { type: "Policy", title: "Backup retention", description: "Retention policy.", status: "stable", access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "spec", resource: "file:spec.md", source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" }, body: "# Backup retention\n\nBackups are kept for 35 days.\n" } }, claim_ids: ["clm_ret"], claim_decisions: [{ claim_id: "clm_ret", disposition: "accepted", rationale: "explicit" }], created_by: "kdlc-integrator/0.2.0" }];
+  await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+  await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id } });
+
+  const gate = await engine.execute("publish", {});
+  assert.equal(gate.pending.length, 1);
+  assert.equal(gate.pending[0].proposal_id, "pr_ret");
+  assert.match(gate.pending[0].next, /--approve/);
+
+  const landed = await engine.execute("publish", { proposal_id: "pr_ret", decide: "approved", reason: "explicit and anchored" });
+  assert.equal(landed.published.materialized, true, JSON.stringify(landed.published));
+  assert.equal((await engine.execute("publish", {})).pending.length, 0);
+  const answer = await engine.execute("query", { question: "how long are backups kept?" });
+  assert.equal(answer.status, "ok");
+  assert.match(answer.results[0].title, /Backup retention/);
+
+  // Rejection path never publishes.
+  const job2 = await completedIngest(engine, root, "note.md", "# N\n\n## Extra\n\nAnother fact here.\n");
+  const scaffold2 = await engine.execute("proposal", { scaffold: { job_id: job2.id, access: "internal", license: "LicenseRef-Internal" } });
+  const kit2 = join(root, ".kdlc/drafting", scaffold2.workflow_id);
+  const evidence2 = JSON.parse(await readFile(join(kit2, "normalized-evidence.json"), "utf8"));
+  const template2 = JSON.parse(await readFile(join(kit2, "recording-template.json"), "utf8"));
+  const unit2 = evidence2.units.find(({ text }) => /Another fact/.test(text));
+  template2.model = { provider: "recorded", model: "test-model", prompt: "gate", recorded_at: template2.model.recorded_at };
+  template2.claims = [{ id: "clm_x", text: unit2.text, source_id: evidence2.source_id, source_hash: evidence2.source_hash, locator: unit2.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+  template2.proposals = [{ ...template.proposals[0], id: "pr_x", workflow_id: scaffold2.workflow_id, target: { knowledge_base_id: "local.gate.fixture", revision: "rev-1", subject: "kb://local.gate.fixture/notes/extra" }, claim_ids: ["clm_x"], claim_decisions: [{ claim_id: "clm_x", disposition: "accepted", rationale: "r" }] }];
+  template2.proposals[0].concept = { before: null, after: { ...template.proposals[0].concept.after, frontmatter: { ...template.proposals[0].concept.after.frontmatter, title: "Extra note", sources: [{ id: "note", resource: "file:note.md", source_hash: evidence2.source_hash, access: { classification: "internal" }, rights }] } } };
+  await writeFile(join(kit2, "recording-template.json"), JSON.stringify(template2));
+  await engine.execute("proposal", { submit: { workflow_id: scaffold2.workflow_id } });
+  const rejected = await engine.execute("publish", { proposal_id: "pr_x", decide: "rejected", reason: "not needed" });
+  assert.equal(rejected.published, null);
+  assert.ok(!(await readFile(join(root, "knowledge/primary/index.md"), "utf8")).includes("Extra note"));
 });
 
 test("FEAT-030: the CLI accepts the scaffold flags and refuses malformed access", async () => {
