@@ -91,3 +91,39 @@ test("FEAT-031: coded refusals keep the exit-class taxonomy and never break the 
   assert.equal(hostile.error.code, "KDLC_MODEL_RECORDING_INVALID");
   assert.deepEqual(hostile.error.details, {});
 });
+
+test("FEAT-035: the bare front door is a pure-filesystem assessment — correct next steps, zero mutation", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtemp, writeFile: writeFsFile, readdir } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const bin = resolve("packages/cli/bin.mjs");
+  const empty = await mkdtemp(join(tmpdir(), "kdlc-bare-"));
+  const emptyOut = execFileSync(process.execPath, [bin], { cwd: empty }).toString();
+  assert.match(emptyOut, /No K-DLC project here yet/);
+  assert.match(emptyOut, /kdlc init/);
+  assert.deepEqual(await readdir(empty), [], "assessment creates nothing");
+
+  // Corrupt project record → doctor, not a fake "ready".
+  const broken = await mkdtemp(join(tmpdir(), "kdlc-broken-"));
+  const { mkdir: mkdirFs } = await import("node:fs/promises");
+  await mkdirFs(join(broken, ".kdlc"), { recursive: true });
+  await writeFsFile(join(broken, ".kdlc/project.json"), "{not json");
+  assert.match(execFileSync(process.execPath, [bin], { cwd: broken }).toString(), /cannot be read[\s\S]*kdlc doctor/);
+
+  // A queued job on disk is REPORTED, never resumed (review HIGH).
+  const queued = await mkdtemp(join(tmpdir(), "kdlc-queued-"));
+  await new KdlcEngine({ root: queued }).execute("init", { project_id: "queued.fixture" });
+  await mkdirFs(join(queued, ".kdlc/jobs"), { recursive: true });
+  const jobRecord = { api_version: "kdlc.dev/job/v1", id: "job_00000000000000aa", operation: "ingest", state: "queued", principal: "human:someone", request: { sources: ["x.md"] }, attempts: [], progress: { completed: 0, total: 0 }, created_at: "2026-08-16T00:00:00Z", updated_at: "2026-08-16T00:00:00Z", revision: 0, checkpoints: [], dependencies: {}, error: null, result: null, idempotency_key: "k", input_hashes: {}, resource_budget: {}, cancellation_requested: false, workflow_id: null };
+  await writeFsFile(join(queued, ".kdlc/jobs/job_00000000000000aa.json"), JSON.stringify(jobRecord));
+  const queuedOut = execFileSync(process.execPath, [bin], { cwd: queued }).toString();
+  assert.match(queuedOut, /1 in flight/);
+  assert.match(queuedOut, /kdlc jobs/);
+  const after = JSON.parse(await (await import("node:fs/promises")).readFile(join(queued, ".kdlc/jobs/job_00000000000000aa.json"), "utf8"));
+  assert.equal(after.state, "queued", "bare kdlc must not resume jobs");
+
+  // resume alias + JSON output.
+  const json = JSON.parse(execFileSync(process.execPath, [bin, "resume", "--output", "json"], { cwd: queued }).toString());
+  assert.match(json.state, /1 in flight/);
+});
