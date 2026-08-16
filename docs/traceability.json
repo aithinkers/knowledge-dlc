@@ -754,6 +754,28 @@
           "tests/governance/human-surfaces.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-018",
+      "title": "Human-first session runtime: orient/guard hooks, workflow guides, hook-aware setup",
+      "issue": 86,
+      "specification_sections": [
+        "5.7",
+        "9.2",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/adapters/generate.mjs",
+          "packages/cli/setup.mjs",
+          "distribution/claude-code/hooks/hooks.json",
+          "security/npm-package-files.json"
+        ],
+        "tests": [
+          "tests/governance/session-runtime.test.mjs"
+        ]
+      }
     }
   ]
 }
