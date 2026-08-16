@@ -25,7 +25,10 @@ test("FEAT-018: guard blocks direct edits to governed paths, including normaliza
     "knowledge-bases//x.json",
     "./knowledge-bases/x",
     "docs/../knowledge-bases/x",
+    "KNOWLEDGE-BASES/x.json",
+    "Knowledge-Bases/main/c.json",
     "workflow/runs/r1/receipts/a.json",
+    "Workflow/runs/r1.json",
   ]) {
     const result = runGuard({ tool_name: "Edit", tool_input: { file_path: path } });
     assert.equal(result.blocked, true, path);

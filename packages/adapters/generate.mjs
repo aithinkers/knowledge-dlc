@@ -255,7 +255,7 @@ try {
       if (runs > 0) lines.push(\`Workflow runs on record: \${runs} — "kdlc status --output human" shows where they stand.\`);
     } catch { /* no runs yet */ }
     lines.push("Knowledge changes flow through proposals and review — never edit files under knowledge-bases/ directly; use the kdlc commands or agents.");
-    lines.push("New here? The guides in distribution/*/guides/ walk through bringing knowledge in, reviewing, querying, and upkeep.");
+    lines.push("New here? The kdlc plugin ships plain-language guides (guides/ in the plugin directory) covering bringing knowledge in, reviewing, querying, and upkeep.");
   } else {
     lines.push("No K-DLC project detected in this directory. \\"kdlc init\\" starts one; \\"kdlc adopt\\" brings existing documents under governance.");
   }
@@ -278,7 +278,11 @@ if (!raw) process.exit(0);
 // must not smuggle a governed path past the prefix check.
 const cleaned = raw.replaceAll("\\\\", "/").replace(/\\/{2,}/g, "/");
 const path = relative(process.cwd(), resolve(process.cwd(), cleaned)).split(sep).join("/");
-const inside = (root) => path === root || path.startsWith(root + "/");
+// Case-insensitive compare: on APFS/NTFS (the default desktop filesystems)
+// KNOWLEDGE-BASES/x lands in knowledge-bases/. Symlink aliasing is out of
+// scope — creating one needs Bash, which this matcher does not cover.
+const judged = path.toLowerCase();
+const inside = (root) => judged === root || judged.startsWith(root + "/");
 if (!path.startsWith("..") && (inside("knowledge-bases") || inside("workflow"))) {
   process.stderr.write(
     \`Direct edits to \${path} are not allowed: this file is governed K-DLC state, and hand edits would bypass review and break provenance. \` +
