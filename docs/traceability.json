@@ -1004,6 +1004,27 @@
           "tests/governance/human-surfaces.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-030",
+      "title": "Proposal drafting scaffold bridging live agents to the recorded-proposal contract",
+      "issue": 118,
+      "specification_sections": [
+        "5.2",
+        "7",
+        "9.4"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/agents/definitions/index.mjs",
+          "packages/adapters/generate.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }
