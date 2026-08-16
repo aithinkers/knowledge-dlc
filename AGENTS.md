@@ -352,6 +352,46 @@ entity double-decoding) and its regression coverage in
 pair, the 8-path confinement, and every other term above are unchanged and
 remain binding.
 
+PR #93, linked to issue #92, may use a one-time protected release-schema
+bypass for the Outlook msg normalizer. The authorized pre-contract head is
+`2f0edd44131cf6120138f0c318875cde42d2f143` on pre-contract base
+`041b7fef410a903bf80939fb12e0b1601130a98e`. It authorizes exactly one
+protected transition:
+`core/schemas/release/conformance-statement.schema.json` from SHA-256
+`f08e18d3a824b2112f4a50781181b77f9b769056ee676da8c1ea632d10432158`
+to SHA-256
+`7846b5dc04f1d6297a6a8db34835a54605794fd8d402661cd48d603eeede0ee1`,
+whose complete byte difference is the insertion of the single enum value
+`"msg"` into the `format_profiles` items list.
+
+After this AGENTS-only contract (which also pre-registers FEAT-020 as
+planned and mechanically rebinds the traceability evidence hash) merges,
+PR #93 may target only the descendant base produced by merging main into
+the pre-contract head. The permitted delta beyond that mechanical merge is
+limited to: flipping the FEAT-020 traceability status from planned to
+implemented and filling its evidence arrays; the mechanical traceability
+evidence-hash rebind in `distribution/release/conformance-statement.json`;
+and, if a required security scanner raises findings on the pre-contract
+head, minimal fixes confined to `packages/normalizers/src/normalize.mjs`
+and `tests/governance/msg-normalizer.test.mjs` that must be enumerated in
+the owner exception record and covered by the attached independent review.
+The protected schema byte transition must remain exactly the pair above.
+The complete PR #93 content diff against its base is limited to 7 paths:
+that schema transition; `packages/normalizers/src/descriptors.mjs`;
+`packages/normalizers/src/normalize.mjs`; the derived entries in
+`distribution/conformance.json` and
+`distribution/release/conformance-statement.json`; the FEAT-020 entry in
+`docs/traceability.json`; and the new
+`tests/governance/msg-normalizer.test.mjs`. No workflow, validator, scorer,
+statistical, release-status, or other schema byte may change. Candidate
+tests and every non-self required or security check must pass; the owner
+exception record must identify the Repository policy protected
+self-difference on that single schema as its sole failed check and bypass
+reason. An independent read-only agent review of the exact merged head with
+no unresolved critical or high finding must be attached. This authority is
+consumed and expires immediately when PR #93 merges or is closed, and it
+does not authorize any later protected change.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
