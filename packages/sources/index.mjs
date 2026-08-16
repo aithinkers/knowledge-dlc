@@ -78,8 +78,11 @@ export class RemoteSourceError extends Error {
 export function bindReceipt(descriptor, bytes, { sourceId, receivedAt }) {
   const failures = validateRemoteDescriptor(descriptor);
   if (failures.length > 0) throw new RemoteSourceError("remote descriptor is invalid", failures);
+  // Snapshot once: a live object with a content_hash getter must not be able
+  // to pass the comparison and persist a different value in the receipt.
+  const declaredHash = descriptor.content_hash;
   const actual = byteHash(bytes);
-  if (actual !== descriptor.content_hash) {
+  if (actual !== declaredHash) {
     throw new RemoteSourceError(
       "acquired bytes do not match the declared content_hash — the transport delivered different content than it claimed (extracted text instead of original bytes is the usual cause)",
       [`declared ${descriptor.content_hash}`, `actual ${actual}`],
@@ -94,7 +97,7 @@ export function bindReceipt(descriptor, bytes, { sourceId, receivedAt }) {
     acquired_via: descriptor.acquired_via,
     acquired_at: descriptor.acquired_at,
     received_at: receivedAt,
-    content_hash: descriptor.content_hash,
+    content_hash: declaredHash,
     byte_length: bytes.byteLength,
     access_context: Object.freeze({ visibility: descriptor.access_context.visibility, ...(descriptor.access_context.detail ? { detail: descriptor.access_context.detail } : {}) }),
     ...(descriptor.display_name ? { display_name: descriptor.display_name } : {}),
