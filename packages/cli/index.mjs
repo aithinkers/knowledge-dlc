@@ -842,17 +842,24 @@ export function parseCli(argv) {
     [input.proposal_id, input.receipt_id] = positionals;
     if (positionals[2]) input.current = JSON.parse(positionals[2]);
   }
-  if (operation === "proposal" && positionals.includes("--scaffold")) {
+  if (operation === "proposal" && (positionals.includes("--scaffold") || positionals.includes("--submit"))) {
     const flag = (name) => {
       const index = positionals.indexOf(name);
       return index === -1 ? undefined : positionals[index + 1];
     };
-    input.scaffold = {
-      job_id: flag("--scaffold"),
-      access: flag("--access"),
-      license: flag("--license"),
-      ...(flag("--workflow") ? { workflow_id: flag("--workflow") } : {}),
-    };
+    if (positionals.includes("--submit")) {
+      input.submit = { workflow_id: flag("--submit") };
+    } else {
+      input.scaffold = {
+        job_id: flag("--scaffold"),
+        access: flag("--access"),
+        license: flag("--license"),
+        ...(flag("--workflow") ? { workflow_id: flag("--workflow") } : {}),
+        ...(flag("--source") !== undefined ? { source: flag("--source") } : {}),
+        ...(positionals.includes("--all-sources") ? { all_sources: true } : {}),
+        ...(flag("--units") ? { units: flag("--units") } : {}),
+      };
+    }
     input.args = [];
     return { operation, input, output };
   }
@@ -899,8 +906,26 @@ function guidanceHint(envelope) {
   return null;
 }
 
+// FEAT-032 (#123): human/text output never carries evidence unit bodies — a
+// single document was transiting agent context repeatedly via job echoes.
+// The JSON envelope (machine contract) is untouched.
+function elideUnits(value, depth = 0) {
+  if (depth > 6 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => elideUnits(item, depth + 1));
+  const out = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if ((key === "units" || key === "probabilisticUnits") && Array.isArray(entry)) {
+      out[key] = `[${entry.length} unit${entry.length === 1 ? "" : "s"} elided — kdlc proposal --scaffold to draft from them, source_excerpt to inspect one]`;
+    } else {
+      out[key] = elideUnits(entry, depth + 1);
+    }
+  }
+  return out;
+}
+
 export function renderEnvelope(envelope, output = "text") {
   if (output === "json") return `${canonicalJson(envelope)}\n`;
+  envelope = envelope.ok && envelope.result ? { ...envelope, result: elideUnits(envelope.result) } : envelope;
   const hint = guidanceHint(envelope);
   if (output === "human") {
     if (envelope.ok) {
@@ -1221,7 +1246,7 @@ export function createLocalProjectEngine(options = {}) {
   // completed ingest job into (a) a trusted review context — with the access
   // classification and license the OWNER explicitly declares, never a silent
   // default — and (b) a drafting kit whose hashes the runtime will accept.
-  const scaffoldProposalDrafting = async ({ job_id: jobId, access, license, workflow_id: requestedWorkflow }) => {
+  const scaffoldProposalDrafting = async ({ job_id: jobId, access, license, workflow_id: requestedWorkflow, source, all_sources: allSources, units: unitRange }) => {
     if (typeof jobId !== "string" || !/^job_[a-f0-9]{16}$/.test(jobId)) throw inputError("scaffold requires the completed ingest job id (job_<16 hex>)");
     if (!["public", "internal", "restricted"].includes(access)) {
       throw inputError("scaffold requires --access <public|internal|restricted> — the source's access classification is a governance decision only you can make");
@@ -1233,13 +1258,45 @@ export function createLocalProjectEngine(options = {}) {
     if (!existsSync(jobPath)) throw missing("Requested job is unavailable");
     const job = JSON.parse(readFileSync(jobPath, "utf8"));
     if (job.operation !== "ingest" || job.state !== "completed") throw inputError(`scaffold needs a completed ingest job; ${jobId} is ${job.operation}/${job.state}`);
-    const artifact = job.result?.normalized?.[0];
-    if (!artifact?.manifest || artifact.manifest.status !== "complete") throw inputError("the job's normalization did not complete — nothing to draft from");
-    const workflowId = requestedWorkflow ?? `wf_${jobId.slice(4)}`;
-    if (!/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("workflow_id must match wf_<lowercase letters and digits> (the concept-proposal schema enforces it)");
-    const units = artifact.units.filter((unit) => typeof unit.text === "string" && unit.text.trim().length > 0)
+    const artifacts = (job.result?.normalized ?? []).filter((entry) => entry?.manifest?.status === "complete");
+    if (artifacts.length === 0) throw inputError("the job's normalization did not complete — nothing to draft from");
+    // Fail closed on multi-document jobs: silently drafting only the first
+    // file loses the rest. Each document gets its own workflow and kit.
+    let selection;
+    if (allSources) {
+      if (requestedWorkflow) throw inputError("--workflow cannot combine with --all-sources (each document gets its own workflow)");
+      selection = artifacts.map((artifact, index) => ({ artifact, index }));
+    } else if (source !== undefined) {
+      const index = Number(source);
+      if (!Number.isInteger(index) || index < 0 || index >= artifacts.length) throw inputError(`--source must be 0..${artifacts.length - 1} for this job`);
+      selection = [{ artifact: artifacts[index], index }];
+    } else if (artifacts.length === 1) {
+      selection = [{ artifact: artifacts[0], index: 0 }];
+    } else {
+      const menu = artifacts.map((artifact, index) => `${index}: ${job.request?.sources?.[index] ?? artifact.manifest.source_id} (${artifact.units.length} units)`).join("; ");
+      throw inputError(`this job ingested ${artifacts.length} documents — pick one with --source <n> or scaffold every document with --all-sources. Sources: ${menu}`);
+    }
+    let sliceBounds = null;
+    if (unitRange !== undefined) {
+      const match = /^([0-9]+)-([0-9]+)$/.exec(String(unitRange));
+      if (!match) throw inputError("--units must be <start>-<end> (1-based positions among the document's text units)");
+      sliceBounds = [Number(match[1]), Number(match[2])];
+      if (sliceBounds[0] < 1 || sliceBounds[1] < sliceBounds[0]) throw inputError("--units range must satisfy 1 <= start <= end");
+    }
+    const scaffolded = [];
+    for (const { artifact, index } of selection) {
+      const workflowId = requestedWorkflow ?? (selection.length > 1 || source !== undefined ? `wf_${jobId.slice(4)}s${index}` : `wf_${jobId.slice(4)}`);
+      if (!/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("workflow_id must match wf_<lowercase letters and digits> (the concept-proposal schema enforces it)");
+      scaffolded.push(await scaffoldOneSource({ artifact, workflowId, access, license, sliceBounds, sourceName: job.request?.sources?.[index] ?? artifact.manifest.source_id }));
+    }
+    return selection.length === 1 ? scaffolded[0] : { job_id: jobId, scaffolds: scaffolded, next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" };
+  };
+  const scaffoldOneSource = async ({ artifact, workflowId, access, license, sliceBounds, sourceName }) => {
+    let units = artifact.units.filter((unit) => typeof unit.text === "string" && unit.text.trim().length > 0)
       .map((unit) => ({ locator: unit.locator, text: unit.text }));
-    if (units.length === 0) throw inputError("the ingested source produced no text units to draft from");
+    const totalUnits = units.length;
+    if (sliceBounds) units = units.slice(sliceBounds[0] - 1, sliceBounds[1]);
+    if (units.length === 0) throw inputError(sliceBounds ? `--units ${sliceBounds[0]}-${sliceBounds[1]} selects nothing (the document has ${totalUnits} text units)` : "the ingested source produced no text units to draft from");
     const normalizedEvidence = {
       api_version: "kdlc.dev/recorded-normalized-fixture/v1alpha1",
       source_id: artifact.manifest.source_id,
@@ -1310,7 +1367,10 @@ export function createLocalProjectEngine(options = {}) {
       "3. Set model.model and model.prompt to what actually drafted the content.",
       "4. Submit:",
       "",
-      "   kdlc proposal '{\"proposal\":{\"workflow_id\":\"" + workflowId + "\",\"task\":\"ingest\",\"recording\":<recording-template.json contents>,\"normalized_evidence\":<normalized-evidence.json contents>}}'",
+      "   kdlc proposal --submit " + workflowId,
+      "",
+      "   (the engine reads this kit's recording-template.json and normalized-evidence.json from disk —",
+      "   never paste their contents into the conversation).",
       "",
       "   (or pass the same object through the harness runner). The response carries each proposal's review",
       "   packet and packet hash — bring that to the human for the review decision.",
@@ -1324,13 +1384,36 @@ export function createLocalProjectEngine(options = {}) {
     ].join("\n"));
     return {
       workflow_id: workflowId,
+      source: sourceName,
       review_context: contextRecordPath,
       kit: [".kdlc/drafting/" + workflowId + "/README.md", ".kdlc/drafting/" + workflowId + "/recording-template.json", ".kdlc/drafting/" + workflowId + "/normalized-evidence.json", ".kdlc/drafting/" + workflowId + "/locators.json"],
       units: units.length,
+      ...(sliceBounds ? { slice: `${sliceBounds[0]}-${sliceBounds[1]} of ${totalUnits} text units` } : {}),
       access: { classification: access },
       rights,
-      next: "fill the recording template (see the kit README), then submit it with kdlc proposal",
+      next: "fill the recording template (see the kit README), then submit with kdlc proposal --submit " + workflowId,
     };
+  };
+  // FEAT-032 (#123): submit from the kit on disk — evidence and recording
+  // never transit the model context; the agent only edits the template file.
+  const submitProposalFromKit = async ({ workflow_id: workflowId }) => {
+    if (typeof workflowId !== "string" || !/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("--submit requires the scaffolded workflow id (wf_...)");
+    const kitDirectory = resolve(root, ".kdlc/drafting", workflowId);
+    const read = (name) => {
+      const path = resolve(kitDirectory, name);
+      if (!existsSync(path)) throw missing(`the drafting kit for ${workflowId} is missing ${name} — run kdlc proposal --scaffold first`);
+      try { return JSON.parse(readFileSync(path, "utf8")); }
+      catch { throw inputError(`${name} in the ${workflowId} kit is not valid JSON — fix the file and retry`); }
+    };
+    const recording = read("recording-template.json");
+    const normalizedEvidence = read("normalized-evidence.json");
+    if (!Array.isArray(recording.claims) || recording.claims.length === 0 || !Array.isArray(recording.proposals) || recording.proposals.length === 0) {
+      throw inputError(`the recording template for ${workflowId} has empty claims or proposals — fill it per the kit README before submitting`);
+    }
+    if (typeof recording.model?.model === "string" && recording.model.model.startsWith("FILL:")) {
+      throw inputError("set model.model and model.prompt in the recording template to what actually drafted the content");
+    }
+    return governed.proposal_create({ proposal: { workflow_id: workflowId, task: recording.task ?? "ingest", recording, normalized_evidence: normalizedEvidence } });
   };
   const handlers = policy
     ? {
@@ -1344,7 +1427,9 @@ export function createLocalProjectEngine(options = {}) {
               proposal: async (input, extras) =>
                 input.scaffold
                   ? scaffoldProposalDrafting(input.scaffold)
-                  : governed.proposal_create(input, extras),
+                  : input.submit
+                    ? submitProposalFromKit(input.submit)
+                    : governed.proposal_create(input, extras),
             }
           : {}),
         ...(governed.review_submit ? { review: governed.review_submit } : {}),
