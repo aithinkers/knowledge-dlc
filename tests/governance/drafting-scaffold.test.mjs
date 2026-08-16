@@ -283,7 +283,7 @@ test("FEAT-034: auto mode publishes drafts only, at the draft tier; revisit rati
   // stable + --auto refuses
   template.proposals = proposal("stable");
   await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
-  await assert.rejects(engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id, auto: true } }), /--auto only publishes draft-tier/);
+  await assert.rejects(engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id, auto: true } }), /--auto only publishes concepts that explicitly declare/);
 
   // draft + --auto lands without a human pause
   template.proposals = proposal("draft");
