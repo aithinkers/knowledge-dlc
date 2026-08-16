@@ -881,6 +881,26 @@
           "tests/governance/source-connectors.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-024",
+      "title": "Google Drive source connector with native-format export",
+      "issue": 98,
+      "specification_sections": [
+        "5.7",
+        "7",
+        "9.2"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/connectors/google-drive.mjs",
+          "packages/connectors/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/gdrive-connector.test.mjs"
+        ]
+      }
     }
   ]
 }
