@@ -1673,9 +1673,13 @@ export function createLocalProjectEngine(options = {}) {
     // the draft trust tier — stable publication on model confidence alone is
     // a spec non-goal and the profile enforces a human for stable anyway.
     if (auto) {
-      const stableOnes = recording.proposals.filter((entry) => entry?.concept?.after?.frontmatter?.status === "stable");
-      if (stableOnes.length > 0) {
-        throw inputError(`--auto only publishes draft-tier concepts; ${stableOnes.map(({ id }) => id).join(", ")} declare status "stable", which requires a human decision — submit without --auto, or set status: "draft" and ratify later with kdlc revisit`);
+      // Positive assertion: every proposal must EXPLICITLY be draft-tier.
+      // A negative check on the "stable" literal was bypassable by omitting
+      // status (the retriever resolves missing status AS stable) or casing
+      // tricks — the review round's critical finding.
+      const nonDraft = recording.proposals.filter((entry) => entry?.concept?.after?.frontmatter?.status !== "draft");
+      if (nonDraft.length > 0) {
+        throw inputError(`--auto only publishes concepts that explicitly declare status: "draft"; ${nonDraft.map(({ id }) => id).join(", ")} ${nonDraft.length === 1 ? "does" : "do"} not — anything else requires a human decision (submit without --auto), because a missing status counts as stable at retrieval`);
       }
     }
     const submitted = await governed.proposal_create({ proposal: { workflow_id: workflowId, task: recording.task ?? "ingest", recording, normalized_evidence: normalizedEvidence } });
