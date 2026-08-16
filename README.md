@@ -5,7 +5,8 @@ already has — wikis, PDFs, Word docs, emails, spreadsheets, decks, diagrams,
 web pages, and pages living in **Confluence, SharePoint, OneDrive, or Google
 Drive** — into durable, provenance-bearing knowledge that AI agents can
 actually trust: curated, linked Markdown concepts in the
-[Open Knowledge Format (OKF)](core/schemas/okf-0.2/), produced through a
+[Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)
+(schemas vendored at [core/schemas/okf-0.2/](core/schemas/okf-0.2/)), produced through a
 governed lifecycle with explicit human approval gates. Think of it as a
 governed knowledge base builder for the agent era: every answer cites the
 exact page, paragraph, or shape it came from, and staleness, conflicts, and
@@ -14,6 +15,7 @@ access rules are first-class instead of afterthoughts.
 ```bash
 # try it in a minute (Node 22+, from a checkout)
 npm ci && npm link
+mkdir ~/my-knowledge && cd ~/my-knowledge
 kdlc init && kdlc ingest notes.md && kdlc query "what do we know?"
 ```
 
