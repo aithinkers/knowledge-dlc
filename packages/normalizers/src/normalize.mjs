@@ -354,7 +354,7 @@ function htmlProfile(bytes, sourceHash, limits) {
   value = value.replace(/<(?:script|style)\b[^>]*>[\s\S]*?<\/\s*(?:script|style)\b[^>]*>/gi, " ").replace(/<(?:script|style)\b[^>]*>[\s\S]*$/gi, " ");
   if (value.length !== activeBefore) warnings.push("scripts-and-styles-removed");
   const language = /<html\b[^>]*\blang\s*=\s*["']?([A-Za-z0-9-]+)/i.exec(value)?.[1] ?? null;
-  const title = collapseSpace(decodeHtmlEntities(/<title\b[^>]*>([\s\S]*?)<\/\s*title\b[^>]*>/i.exec(value)?.[1] ?? "").replace(/<[^>]*>/g, " ")) || null;
+  const title = collapseSpace(decodeHtmlEntities((/<title\b[^>]*>([\s\S]*?)<\/\s*title\b[^>]*>/i.exec(value)?.[1] ?? "").replace(/<[^>]*>/g, " "))) || null;
 
   units.push(make("html-metadata", { kind: "dom-path", path: "/" }, { structured_data: { title, language } }));
   const stack = []; const childCounts = [new Map()];

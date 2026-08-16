@@ -859,6 +859,28 @@
           "tests/governance/html-normalizer.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-023",
+      "title": "Microsoft Graph (OneDrive/SharePoint) and Confluence source connectors",
+      "issue": 97,
+      "specification_sections": [
+        "5.7",
+        "7",
+        "9.2"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/connectors/graph.mjs",
+          "packages/connectors/confluence.mjs",
+          "packages/connectors/transport.mjs",
+          "packages/connectors/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/source-connectors.test.mjs"
+        ]
+      }
     }
   ]
 }
