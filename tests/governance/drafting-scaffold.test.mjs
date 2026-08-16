@@ -369,3 +369,34 @@ test("FEAT-035: --all-sources re-runs skip already-scaffolded documents and cont
   assert.equal(partial.scaffolds[0].workflow_id, first.scaffolds[1].workflow_id);
   assert.equal(partial.skipped.length, 1);
 });
+
+test("FEAT-037: publish --show renders the content a reviewer approves — body and anchored excerpts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-show-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "show.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+  const job = await completedIngest(engine, root, "s.md", "# S\n\n## Window\n\nMaintenance windows are Sundays 02:00-04:00 UTC.\n");
+  const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
+  const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
+  const evidence = JSON.parse(await readFile(join(kit, "normalized-evidence.json"), "utf8"));
+  const template = JSON.parse(await readFile(join(kit, "recording-template.json"), "utf8"));
+  const unit = evidence.units.find(({ text }) => /Sundays/.test(text));
+  template.model = { provider: "recorded", model: "t", prompt: "show", recorded_at: template.model.recorded_at };
+  template.claims = [{ id: "clm_win", text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
+  template.proposals = [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: "pr_win", workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.show", revision: "rev-1", subject: "kb://local.show/ops/maintenance-window" }, concept: { before: null, after: { frontmatter: { type: "Policy", title: "Maintenance window", description: "d", status: "stable", access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "s", resource: "file:s.md", source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], stale_after: "2030-01-01" }, body: "# Maintenance window\n\nMaintenance windows are Sundays 02:00-04:00 UTC.\n" } }, claim_ids: ["clm_win"], claim_decisions: [{ claim_id: "clm_win", disposition: "accepted", rationale: "explicit" }], created_by: "kdlc-integrator/0.2.0" }];
+  await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
+  const submitted = await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id } });
+
+  const shown = await engine.execute("publish", { proposal_id: "pr_win", show: true });
+  assert.equal(shown.title, "Maintenance window");
+  assert.match(shown.body, /Sundays 02:00-04:00 UTC/);
+  assert.equal(shown.claims.length, 1);
+  assert.match(shown.claims[0].source_excerpt, /Sundays 02:00-04:00 UTC/, "the anchored source excerpt is shown beside the claim");
+  assert.equal(shown.packet_hash, submitted.proposals[0].packet_hash);
+  assert.match(shown.next, /--approve/);
+  // The gate list advertises reading before deciding.
+  const gate = await engine.execute("publish", {});
+  assert.match(gate.pending[0].next, /--show to read it/);
+  // Showing never decides or mutates.
+  assert.equal((await engine.execute("publish", {})).pending.length, 1);
+});

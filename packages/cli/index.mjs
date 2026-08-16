@@ -856,6 +856,7 @@ export function parseCli(argv) {
       const at = positionals.indexOf(flag);
       return at !== -1 && positionals[at + 1] && !positionals[at + 1].startsWith("--") ? positionals[at + 1] : undefined;
     };
+    if (flags.includes("--show")) input.show = true;
     if (flags.includes("--approve")) { input.decide = "approved"; input.reason = reasonFor("--approve"); }
     else if (flags.includes("--reject")) { input.decide = "rejected"; input.reason = reasonFor("--reject"); }
     else if (flags.includes("--request-changes")) { input.decide = "changes_requested"; input.reason = reasonFor("--request-changes"); }
@@ -1323,10 +1324,47 @@ export function createLocalProjectEngine(options = {}) {
             packet_hash: record.packet_hash,
             title: proposal?.concept?.after?.frontmatter?.title ?? record.proposal_id,
             subject: proposal?.target?.subject ?? null,
-            next: `kdlc publish ${record.proposal_id} --approve "<reason>" (or --reject / --request-changes)`,
+            next: `kdlc publish ${record.proposal_id} --show to read it, then --approve "<reason>" (or --reject / --request-changes)`,
           });
         }
         return { pending, ...(pending.length === 0 ? { note: "nothing is waiting on you" } : {}) };
+      };
+      // FEAT-037 (#133): the gate shows what you approve — render the packet
+      // content for a human: body, claims, and the anchored source excerpts.
+      const showPacket = async (proposalId) => {
+        const index = await proposalIndex(proposalId);
+        const proposal = await store.get(`workflow/runs/${index.workflow_id}/proposals/${proposalId}.json`);
+        const evidence = await store.get(`workflow/runs/${index.workflow_id}/state/normalized-evidence.json`).catch(() => null);
+        const byLocator = new Map((evidence?.units ?? []).map((unit) => [canonicalJson(unit.locator), unit.text]));
+        const claims = [];
+        for (const claimId of proposal.claim_ids ?? []) {
+          const claim = await store.get(`workflow/runs/${index.workflow_id}/claims/${claimId}.json`).catch(() => null);
+          if (!claim) continue;
+          claims.push({
+            id: claim.id,
+            claim: claim.text,
+            extraction: claim.extraction,
+            source_excerpt: byLocator.get(canonicalJson(claim.locator)) ?? "(excerpt unavailable)",
+            locator: claim.locator,
+          });
+        }
+        const decided = await indexStore.exists(`.kdlc/governed/workflow/runs/${index.workflow_id}/reviews/${proposalId}/decision.json`);
+        const frontmatter = proposal.concept.after.frontmatter;
+        return {
+          proposal_id: proposalId,
+          title: frontmatter.title,
+          type: frontmatter.type,
+          status: frontmatter.status,
+          access: frontmatter.access ?? null,
+          subject: proposal.target.subject,
+          body: proposal.concept.after.body,
+          claims,
+          sources: frontmatter.sources ?? [],
+          packet_hash: index.packet_hash,
+          ...(decided
+            ? { decided: true }
+            : { next: `read it above, then decide: kdlc publish ${proposalId} --approve "<reason>" (or --reject / --request-changes)` }),
+        };
       };
       // FEAT-034 (#127): the ratification queue for auto-approved drafts, and
       // one-command promotion to stable through a real reviewed update.
@@ -1427,8 +1465,14 @@ export function createLocalProjectEngine(options = {}) {
           const runtime = await harness(index.workflow_id, true);
           return runtime.decide({ workflowId: index.workflow_id, proposalId, decision, receiptId });
         },
-        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current, decide, reason, auto }) => {
+        publish_request: async ({ proposal_id: proposalId, receipt_id: receiptId, current, decide, reason, auto, show }) => {
           if (proposalId === undefined) return pendingReviews();
+          if (show) {
+            // Showing only — any decision flags in the same invocation are
+            // ignored so reading can never accidentally decide.
+            const packet = await showPacket(proposalId);
+            return decide ? { ...packet, note: "showing only — decision flags were ignored; decide with a separate --approve/--reject" } : packet;
+          }
           const index = await proposalIndex(proposalId);
           if (decide) {
             // --approve/--reject/--request-changes: record the human decision
