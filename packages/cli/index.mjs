@@ -1344,15 +1344,15 @@ export function createLocalProjectEngine(options = {}) {
             id: claim.id,
             claim: claim.text,
             extraction: claim.extraction ?? null,
-            source_excerpt: byLocator.get(canonicalJson(claim.locator)) ?? "(excerpt unavailable)",
-            locator: claim.locator,
+            source_excerpt: (claim.locator ? byLocator.get(canonicalJson(claim.locator)) : undefined) ?? "(excerpt unavailable)",
+            locator: claim.locator ?? null,
           });
         }
         const decided = await indexStore.exists(`.kdlc/governed/workflow/runs/${index.workflow_id}/reviews/${proposalId}/decision.json`);
         const frontmatter = proposal.concept.after.frontmatter;
         return {
           proposal_id: proposalId,
-          title: frontmatter.title,
+          title: frontmatter.title ?? proposalId,
           type: frontmatter.type ?? null,
           // Omitted status resolves as stable at retrieval, so show that.
           status: frontmatter.status ?? "stable",

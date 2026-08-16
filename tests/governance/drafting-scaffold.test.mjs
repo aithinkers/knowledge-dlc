@@ -424,6 +424,7 @@ test("FEAT-037: --show survives minimal frontmatter — omitted type/status/extr
   const stored = JSON.parse(await readFile(proposalPath, "utf8"));
   delete stored.concept.after.frontmatter.type;
   delete stored.concept.after.frontmatter.status;
+  delete stored.concept.after.frontmatter.title;
   await writeFile(proposalPath, JSON.stringify(stored));
   const claimPath = join(root, ".kdlc/governed/workflow/runs", scaffold.workflow_id, "claims/clm_bk.json");
   const claim = JSON.parse(await readFile(claimPath, "utf8"));
@@ -431,6 +432,7 @@ test("FEAT-037: --show survives minimal frontmatter — omitted type/status/extr
   await writeFile(claimPath, JSON.stringify(claim));
 
   const shown = await engine.execute("publish", { proposal_id: "pr_bk", show: true });
+  assert.equal(shown.title, "pr_bk", "omitted title falls back to the proposal id");
   assert.equal(shown.type, null);
   assert.equal(shown.status, "stable", "omitted status shows what retrieval resolves it to");
   assert.equal(shown.claims[0].extraction, null);
