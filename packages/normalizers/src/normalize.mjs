@@ -65,6 +65,9 @@ function detect(bytes, filename = "", mediaType = "") {
   if (prefix.startsWith("%PDF-")) return "pdf";
   if (prefix.startsWith("GIF87a") || prefix.startsWith("GIF89a")) return "gif";
   if (prefix.startsWith("PK\x03\x04")) return "zip";
+  // .eml may be latin1; route on extension/media type before the strict UTF-8
+  // sample decode (the eml profile handles its own charset fallback).
+  if (ext === ".eml" || mediaType === "message/rfc822") return "eml";
   let sample; try { sample = text(bytes.subarray(0, Math.min(bytes.length, 4096))); } catch { throw new Quarantine("unsupported", "Unknown binary content signature"); }
   if (/^\s*<mxfile(?:\s|>)/.test(sample)) return "drawio";
   if (ext === ".md" || mediaType === "text/markdown") return "markdown";
@@ -203,6 +206,117 @@ function gifProfile(bytes, sourceHash, settings, limits) {
   return { descriptor, units, discovered: frames.length, warnings: sampleCount < frames.length ? ["frames-sampled"] : [], coverage: { duration_ms: elapsed, width: gif.lsd.width, height: gif.lsd.height } };
 }
 
+// RFC 822 / MIME (FEAT-019). Deterministic and bounded: headers are unfolded
+// and RFC 2047-decoded, text bodies are decoded (base64/quoted-printable) and
+// HTML is tag-stripped, attachments are inventoried with content hashes and
+// never expanded in place. Everything else quarantines.
+const MIME_MAX_DEPTH = 10;
+function emlDecodeBytes(bytes, warnings) {
+  try { return decoder.decode(bytes).normalize("NFC").replace(/\r\n?/g, "\n"); }
+  catch { if (!warnings.includes("non-utf8-decoded-as-latin1")) warnings.push("non-utf8-decoded-as-latin1"); return new TextDecoder("latin1").decode(bytes).normalize("NFC").replace(/\r\n?/g, "\n"); }
+}
+function decodeEncodedWords(value, warnings) {
+  return value.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (whole, charset, scheme, payload) => {
+    const lower = charset.toLowerCase().split("*")[0];
+    if (!["utf-8", "us-ascii", "iso-8859-1", "latin1", "windows-1252"].includes(lower)) { if (!warnings.includes("unknown-header-charset-retained")) warnings.push("unknown-header-charset-retained"); return whole; }
+    try {
+      const raw = /b/i.test(scheme)
+        ? Uint8Array.from(Buffer.from(payload, "base64"))
+        : Uint8Array.from(payload.replace(/_/g, " ").replace(/=([0-9A-Fa-f]{2})/g, (m, hex) => String.fromCharCode(parseInt(hex, 16))), (char) => char.charCodeAt(0));
+      return new TextDecoder(lower === "utf-8" || lower === "us-ascii" ? "utf-8" : "latin1", { fatal: false }).decode(raw);
+    } catch { if (!warnings.includes("unknown-header-charset-retained")) warnings.push("unknown-header-charset-retained"); return whole; }
+  });
+}
+function parseHeaderBlock(raw) {
+  const headers = [];
+  for (const line of raw.split("\n")) {
+    if (/^[ \t]/.test(line) && headers.length > 0) headers[headers.length - 1].value += ` ${line.trim()}`;
+    else { const match = /^([!-9;-~]+):[ \t]?(.*)$/.exec(line); if (match) headers.push({ name: match[1], value: match[2] }); else if (line.trim()) return null; }
+  }
+  return headers;
+}
+const headerValue = (headers, name) => headers.find((header) => header.name.toLowerCase() === name.toLowerCase())?.value ?? null;
+function contentTypeOf(headers) {
+  const raw = headerValue(headers, "Content-Type") ?? "text/plain";
+  const type = raw.split(";")[0].trim().toLowerCase() || "text/plain";
+  const boundary = /boundary\s*=\s*"([^"]+)"/i.exec(raw)?.[1] ?? /boundary\s*=\s*([^;\s]+)/i.exec(raw)?.[1] ?? null;
+  const charset = (/charset\s*=\s*"?([A-Za-z0-9._-]+)"?/i.exec(raw)?.[1] ?? "utf-8").toLowerCase();
+  return { type, boundary, charset };
+}
+function decodeBody(body, encoding, warnings) {
+  const declared = (encoding ?? "7bit").trim().toLowerCase();
+  if (declared === "base64") { try { return Uint8Array.from(Buffer.from(body.replace(/\s+/g, ""), "base64")); } catch { throw new Quarantine("malformed", "Malformed base64 body part"); } }
+  if (declared === "quoted-printable") {
+    const decoded = body.replace(/=\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
+    return Uint8Array.from(decoded, (char) => char.charCodeAt(0) & 0xff);
+  }
+  if (!["7bit", "8bit", "binary", ""].includes(declared)) warnings.push("unknown-transfer-encoding-treated-as-identity");
+  return new TextEncoder().encode(body);
+}
+function emlProfile(bytes, sourceHash, limits) {
+  const descriptor = descriptors.eml; const make = unitFactory(sourceHash, descriptor); const warnings = []; const units = [];
+  const raw = emlDecodeBytes(bytes, warnings);
+  const separator = raw.indexOf("\n\n");
+  const headerText = separator === -1 ? raw : raw.slice(0, separator);
+  const headers = parseHeaderBlock(headerText);
+  if (!headers || headers.length === 0 || !headers.some(({ name }) => /^(from|to|subject|date|received|message-id|return-path|mime-version)$/i.test(name))) {
+    throw new Quarantine("malformed", "Input does not carry RFC 822 message headers");
+  }
+  let partCount = 0; let attachmentCount = 0;
+  const coreHeaders = {};
+  for (const name of ["From", "To", "Cc", "Subject", "Date", "Message-ID", "In-Reply-To", "References"]) {
+    const value = headerValue(headers, name);
+    if (value !== null) coreHeaders[name.toLowerCase().replace(/-/g, "_")] = decodeEncodedWords(value, warnings);
+  }
+  units.push(make("email-structure", { kind: "header", name: "*" }, { structured_data: { ...coreHeaders, header_count: headers.length } }));
+  for (const header of headers) {
+    units.push(make("email-header", { kind: "header", name: header.name }, { text: decodeEncodedWords(header.value, warnings) }));
+  }
+  const walk = (headersHere, body, depth) => {
+    if (depth > MIME_MAX_DEPTH) throw new Quarantine("limit-exceeded", "MIME nesting exceeds depth limit", { maximum: MIME_MAX_DEPTH });
+    const { type, boundary, charset } = contentTypeOf(headersHere);
+    if (type.startsWith("multipart/")) {
+      if (!boundary) throw new Quarantine("malformed", "Multipart body without a boundary");
+      const pieces = body.split(`--${boundary}`).slice(1);
+      for (const piece of pieces) {
+        if (piece === "--" || piece.startsWith("--\n") || piece.trim() === "--") break;
+        const segment = piece.replace(/^\n/, "");
+        const split = segment.indexOf("\n\n");
+        const childHeaders = parseHeaderBlock(split === -1 ? segment : segment.slice(0, split)) ?? [];
+        walk(childHeaders, split === -1 ? "" : segment.slice(split + 2), depth + 1);
+      }
+      return;
+    }
+    partCount += 1; exceed("shapes", partCount, limits.shapes);
+    const part = partCount;
+    const disposition = (headerValue(headersHere, "Content-Disposition") ?? "").toLowerCase();
+    const filename = decodeEncodedWords(/filename\s*=\s*"([^"]+)"/i.exec(headerValue(headersHere, "Content-Disposition") ?? "")?.[1] ?? /name\s*=\s*"([^"]+)"/i.exec(headerValue(headersHere, "Content-Type") ?? "")?.[1] ?? "", warnings) || null;
+    const transferEncoding = (headerValue(headersHere, "Content-Transfer-Encoding") ?? "7bit").trim().toLowerCase();
+    const identity = !["base64", "quoted-printable"].includes(transferEncoding);
+    const decoded = decodeBody(body, transferEncoding, warnings);
+    const isAttachment = disposition.startsWith("attachment") || (!type.startsWith("text/") && type !== "message/rfc822");
+    if (isAttachment) {
+      attachmentCount += 1;
+      units.push(make("email-attachment", { kind: "mime-part", part }, { structured_data: { filename, media_type: type, bytes: decoded.byteLength, content_hash: byteHash(decoded), disposition: disposition.split(";")[0] || "inline" } }, ["attachment-content-not-extracted; ingest it as a separate source"]));
+      return;
+    }
+    if (type === "message/rfc822") { units.push(make("email-attached-message", { kind: "mime-part", part }, { structured_data: { media_type: type, bytes: decoded.byteLength, content_hash: byteHash(decoded) } }, ["attached-message-not-recursed; ingest it as a separate source"])); return; }
+    // Identity-encoded bodies were already charset-decoded with the whole
+    // message; re-decoding their UTF-16 round-trip would mojibake latin1.
+    let value = identity
+      ? body
+      : charset === "utf-8" || charset === "us-ascii"
+        ? emlDecodeBytes(decoded, warnings)
+        : new TextDecoder("latin1").decode(decoded).normalize("NFC").replace(/\r\n?/g, "\n");
+    const partWarnings = [];
+    if (type === "text/html") { value = value.replace(/<(?:style|script)\b[\s\S]*?<\/(?:style|script)>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/[ \t]+/g, " "); partWarnings.push("html-tags-stripped"); }
+    const trimmed = value.split("\n").map((line) => line.trimEnd()).join("\n").trim();
+    if (trimmed) units.push(make("email-body", { kind: "mime-part", part }, { text: trimmed, structured_data: { media_type: type, ...(filename ? { filename } : {}) } }, partWarnings));
+  };
+  walk(headers, separator === -1 ? "" : raw.slice(separator + 2), 0);
+  return { descriptor, units, discovered: partCount + headers.length, warnings: [...warnings, ...(attachmentCount > 0 ? ["attachments-inventoried-not-extracted"] : [])] };
+}
+
 function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJson(value)); } catch { return fallback; } }
 function safeQuarantineSettings(settings) {
   if (!plainObject(settings)) return {};
@@ -237,6 +351,7 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     if (format === "zip") result = officeProfile(input, hash, resolvedLimits);
     else if (format === "markdown" || format === "text") result = linesProfile(input, format, hash);
     else if (format === "csv") result = csvProfile(input, hash, settings, resolvedLimits);
+    else if (format === "eml") result = emlProfile(input, hash, resolvedLimits);
     else if (format === "pdf") result = await pdfProfile(input, hash, resolvedLimits);
     else if (format === "drawio") result = drawioProfile(input, hash, resolvedLimits);
     else if (format === "gif") result = gifProfile(input, hash, settings, resolvedLimits);
