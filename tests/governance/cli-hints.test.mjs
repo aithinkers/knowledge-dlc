@@ -77,3 +77,17 @@ test("FEAT-031: governed refusals surface their real code and details through th
   assert.equal(masked.error.code, "KDLC_INTERNAL");
   assert.ok(!JSON.stringify(masked).includes("secret internals"));
 });
+
+test("FEAT-031: coded refusals keep the exit-class taxonomy and never break the envelope", async () => {
+  const { GovernanceError } = await import("../../packages/governance/index.mjs");
+  const make = (code, extra = {}) => new KdlcEngine({ handlers: { status: () => { throw Object.assign(new GovernanceError(code, "m"), extra); } } });
+  assert.equal((await make("KDLC_DECISION_CONFLICT").envelope("status", {})).error.class, 4, "conflicts exit 4");
+  assert.equal((await make("KDLC_RECEIPT_IMMUTABLE").envelope("status", {})).error.class, 4, "immutability is a conflict");
+  assert.equal((await make("KDLC_GOVERNANCE_CONTROLS_REQUIRED").envelope("status", {})).error.class, 5, "missing controls are a dependency");
+  assert.equal((await make("KDLC_MODEL_RECORDING_INVALID").envelope("status", {})).error.class, 3, "refusals stay policy");
+  // Uncloneable details never break the envelope contract.
+  const hostile = await make("KDLC_MODEL_RECORDING_INVALID", { details: { fn: () => {} } }).envelope("status", {});
+  assert.equal(hostile.ok, false);
+  assert.equal(hostile.error.code, "KDLC_MODEL_RECORDING_INVALID");
+  assert.deepEqual(hostile.error.details, {});
+});

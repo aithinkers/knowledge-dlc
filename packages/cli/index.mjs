@@ -214,11 +214,25 @@ export class KdlcEngine {
         typeof error?.code === "string" &&
         error.code.startsWith("KDLC_") &&
         ["GovernanceError", "AgentPolicyError"].includes(error?.name);
+      // Exit classes are a stable §25 contract: conflicts and missing
+      // dependencies must not masquerade as policy refusals.
+      const codedClass = !coded
+        ? EXIT.internal
+        : /_(?:CONFLICT|IMMUTABLE)$/.test(error.code)
+          ? EXIT.conflict
+          : /_REQUIRED$/.test(error.code)
+            ? EXIT.dependency
+            : EXIT.policy;
+      // envelope() must never throw: details fall back to {} if uncloneable.
+      let codedDetails = {};
+      if (coded) {
+        try { codedDetails = JSON.parse(canonicalJson(error.details ?? {})); } catch { codedDetails = {}; }
+      }
       const known =
         error instanceof EngineError
           ? error
           : coded
-            ? new EngineError(error.code, error.message, EXIT.policy, structuredClone(error.details ?? {}))
+            ? new EngineError(error.code, error.message, codedClass, codedDetails)
             : new EngineError(
                 "KDLC_INTERNAL",
                 "Internal operation failure",
