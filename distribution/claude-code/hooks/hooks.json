@@ -1,0 +1,1 @@
+{"hooks":{"PreToolUse":[{"hooks":[{"command":"node ${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs","type":"command"}],"matcher":"Write|Edit|MultiEdit|NotebookEdit"}],"SessionStart":[{"hooks":[{"command":"node ${CLAUDE_PLUGIN_ROOT}/hooks/orient.mjs","type":"command"}]}]}}

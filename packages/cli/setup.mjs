@@ -67,6 +67,7 @@ export async function runSetup({ tool, project }) {
   for (const requested of tools) {
     if (requested === "claude-code") {
       instructions.push(`Install the Claude Code plugin with: claude plugin install ${resolve(packageRoot, "distribution/claude-code")}`);
+      instructions.push("The plugin includes session hooks: an orientation note at session start and a guard that blocks direct edits to governed knowledge-bases/ and workflow/ files (use kdlc proposal / kdlc reconcile-edits instead). Plain-language workflow guides are in its guides/ directory.");
       continue;
     }
     const surface = requested === "codex" ? codexSurface(commands) : requested === "mcp" ? mcpSurface() : kiroSurface(requested, commands);
