@@ -341,6 +341,17 @@ or high finding must be attached. This authority is consumed and expires
 immediately when PR #89 merges or is closed, and it does not authorize any
 later protected change.
 
+Amendment (one-time, same authority): the PR #89 bypass above applies at
+exact head `0119f57a986c5e84e7f4bd07dad598f562735cf5`, which relative to the
+previously bound merged head `4f05bd70b56b60d271b91e2f2b8e3e8fe01bc2f9`
+additionally contains only the CodeQL-driven text/html sanitization
+hardening in `packages/normalizers/src/normalize.mjs` (whitespace/attribute-
+tolerant script/style close-tag matching; `&amp;` resolved last to prevent
+entity double-decoding) and its regression coverage in
+`tests/governance/eml-normalizer.test.mjs`. The protected schema transition
+pair, the 8-path confinement, and every other term above are unchanged and
+remain binding.
+
 ## Scope and safety
 
 - Preserve user changes and do not perform destructive Git operations.
