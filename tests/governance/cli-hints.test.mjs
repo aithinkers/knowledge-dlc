@@ -54,3 +54,11 @@ test("FEAT-027: hints appear only where confusion lives — populated queries an
   const failed = { ...ingestEnvelope, ok: false, result: null, error: { code: "KDLC_POLICY_DENIED", message: "no", class: 3, details: {} } };
   assert.ok(!renderEnvelope(failed, "text").includes("background job"));
 });
+
+test("FEAT-028: claude-code setup prints the two-step marketplace install", async () => {
+  const { runSetup } = await import("../../packages/cli/setup.mjs");
+  const { instructions } = await runSetup({ tool: "claude-code", project: "." });
+  const install = instructions.find((line) => line.includes("claude plugin"));
+  assert.match(install, /claude plugin marketplace add .+ && claude plugin install kdlc@kdlc/);
+  assert.ok(!install.includes("claude plugin install /"), "no bare-path install instruction remains");
+});
