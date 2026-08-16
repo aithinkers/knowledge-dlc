@@ -17,7 +17,7 @@ test("FEAT-013 generated Kiro trees match a fresh build", async () => {
 test("FEAT-013 every CLI operation has a Kiro skill bound to the governed runner", async () => {
   for (const harness of HARNESSES) {
     // setup has no in-harness skill (FEAT-029); the CLI operation remains.
-  for (const command of CLI_COMMANDS.filter((name) => name !== "setup")) {
+    for (const command of CLI_COMMANDS.filter((name) => name !== "setup")) {
       const skill = await readFile(`distribution/${harness}/.kiro/skills/kdlc-${command}/SKILL.md`, "utf8");
       assert.ok(skill.startsWith(`---\nname: kdlc-${command}\n`));
       assert.ok(skill.includes(`"distribution/${harness}/run.mjs", "${command}"`), "skill must invoke the governed runner");
