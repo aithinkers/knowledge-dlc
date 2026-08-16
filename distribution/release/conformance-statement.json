@@ -10,9 +10,9 @@
     {"name": "Federated", "status": "implemented", "requirement_ids": ["FEAT-005"], "evidence": [{"path":"tests/governance/federation-retrieval.test.mjs","sha256":"sha256:93fc47f5b611034d888fcf1bdb2c1ea4b8001c1b307660adb841f2dfbc27fd0f"}]},
     {"name": "Served", "status": "implemented", "requirement_ids": ["FEAT-006"], "evidence": [{"path":"tests/governance/distribution.test.mjs","sha256":"sha256:4e84aefd0804df3da6ee94d93319d9455cba1b429548365c2707b9384bc025a7"}]}
   ],
-  "format_profiles": ["markdown", "text", "csv", "pdf", "docx", "xlsx", "pptx", "drawio", "gif", "eml", "vsdx"],
+  "format_profiles": ["markdown", "text", "csv", "pdf", "docx", "xlsx", "pptx", "drawio", "gif", "msg", "eml", "vsdx"],
   "tools": ["project_init", "project_get", "project_list_mounts", "kb_search", "kb_fetch", "kb_trace", "kb_conflicts", "kb_gaps", "source_excerpt", "job_status", "ingest_start", "proposal_create", "review_submit", "publish_request", "job_cancel"],
   "transports": ["stdio", "streamable-http"],
   "pending_requirements": [],
-  "evidence": [{"path":"distribution/release/evaluation-report.json","sha256":"sha256:91ac77187c3d09fdf0a8d17ddda589d2afd276fe387ed7555a675073b6ee56da"},{"path":"docs/traceability.json","sha256":"sha256:47d06521497860a46059750e254e086730c773f3d44077dd11d40412ea63b00d"},{"path":"docs/release-readiness.md","sha256":"sha256:759a9a58ca4032d9fedb21732cfd1fd4962f1a768b537b4a87c03f2e24306f63"}]
+  "evidence": [{"path":"distribution/release/evaluation-report.json","sha256":"sha256:91ac77187c3d09fdf0a8d17ddda589d2afd276fe387ed7555a675073b6ee56da"},{"path":"docs/traceability.json","sha256":"sha256:8ad4404b2c7311e95255b34e8225054aa8a1e93e3c3c7db99a331f07833c5d39"},{"path":"docs/release-readiness.md","sha256":"sha256:759a9a58ca4032d9fedb21732cfd1fd4962f1a768b537b4a87c03f2e24306f63"}]
 }

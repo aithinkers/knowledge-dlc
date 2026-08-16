@@ -65,6 +65,7 @@ function detect(bytes, filename = "", mediaType = "") {
   if (prefix.startsWith("%PDF-")) return "pdf";
   if (prefix.startsWith("GIF87a") || prefix.startsWith("GIF89a")) return "gif";
   if (prefix.startsWith("PK\x03\x04")) return "zip";
+  if (prefix.startsWith("ÐÏà¡±á")) return "cfb";
   // .eml may be latin1; route on extension/media type before the strict UTF-8
   // sample decode (the eml profile handles its own charset fallback).
   if (ext === ".eml" || mediaType === "message/rfc822") return "eml";
@@ -319,6 +320,156 @@ function emlProfile(bytes, sourceHash, limits) {
   return { descriptor, units, discovered: partCount + headers.length, warnings: [...warnings, ...(attachmentCount > 0 ? ["attachments-inventoried-not-extracted"] : [])] };
 }
 
+// CFBF / Outlook .msg (FEAT-020). A bounded, loop-safe Compound File Binary
+// reader plus MAPI property-stream extraction. Attachments are inventoried
+// with content hashes and never expanded; non-msg CFBF (legacy .doc/.xls)
+// quarantines as unsupported instead of misparsing.
+const CFB_FREE = 0xfffffffe + 1; // sentinel space: >= 0xfffffffa are specials
+function cfbParse(bytes, limits) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes.byteLength < 512) throw new Quarantine("malformed", "CFBF container is truncated");
+  const sectorShift = view.getUint16(30, true);
+  if (![9, 12].includes(sectorShift)) throw new Quarantine("malformed", "CFBF sector size is not v3/v4");
+  const sectorSize = 1 << sectorShift;
+  const miniSectorSize = 1 << view.getUint16(32, true);
+  if (miniSectorSize !== 64) throw new Quarantine("malformed", "CFBF mini sector size is not 64");
+  const sectorCount = Math.ceil((bytes.byteLength - 512) / sectorSize);
+  exceed("expanded_bytes", sectorCount * sectorSize, limits.expanded_bytes);
+  const sectorAt = (index) => {
+    const start = 512 + index * sectorSize;
+    if (index < 0 || index >= 0xfffffffa || start + sectorSize > bytes.byteLength + sectorSize - 1) throw new Quarantine("malformed", "CFBF sector index out of range", { sector: index });
+    return bytes.subarray(start, Math.min(start + sectorSize, bytes.byteLength));
+  };
+  // DIFAT -> FAT sector list
+  const fatSectors = [];
+  for (let index = 0; index < 109; index += 1) { const entry = view.getUint32(76 + index * 4, true); if (entry < 0xfffffffa) fatSectors.push(entry); }
+  let difat = view.getUint32(68, true); const difatSeen = new Set();
+  while (difat < 0xfffffffa) {
+    if (difatSeen.has(difat) || difatSeen.size > sectorCount) throw new Quarantine("malformed", "CFBF DIFAT chain loops");
+    difatSeen.add(difat);
+    const sector = sectorAt(difat); const entries = sectorSize / 4;
+    const sectorView = new DataView(sector.buffer, sector.byteOffset, sector.byteLength);
+    for (let index = 0; index < entries - 1; index += 1) { const entry = sectorView.getUint32(index * 4, true); if (entry < 0xfffffffa) fatSectors.push(entry); }
+    difat = sectorView.getUint32((entries - 1) * 4, true);
+  }
+  const fat = new Uint32Array(fatSectors.length * (sectorSize / 4));
+  fatSectors.forEach((fatSector, position) => {
+    const sector = sectorAt(fatSector); const sectorView = new DataView(sector.buffer, sector.byteOffset, sector.byteLength);
+    for (let index = 0; index < sectorSize / 4; index += 1) fat[position * (sectorSize / 4) + index] = sectorView.getUint32(index * 4, true);
+  });
+  const chain = (start, table, guard) => {
+    const sectors = []; const seen = new Set(); let cursor = start;
+    while (cursor < 0xfffffffa) {
+      if (seen.has(cursor) || sectors.length > guard) throw new Quarantine("malformed", "CFBF chain loops or exceeds bounds");
+      seen.add(cursor); sectors.push(cursor); cursor = table[cursor] ?? CFB_FREE;
+    }
+    return sectors;
+  };
+  const readChain = (start, size) => {
+    const sectors = chain(start, fat, sectorCount + 1); const out = new Uint8Array(Math.min(size, sectors.length * sectorSize));
+    let offset = 0;
+    for (const index of sectors) { const sector = sectorAt(index); const take = Math.min(sector.byteLength, out.byteLength - offset); out.set(sector.subarray(0, take), offset); offset += take; if (offset >= out.byteLength) break; }
+    return out;
+  };
+  // Directory
+  const directoryBytes = readChain(view.getUint32(48, true), sectorCount * sectorSize);
+  const entries = [];
+  for (let offset = 0; offset + 128 <= directoryBytes.byteLength; offset += 128) {
+    const entryView = new DataView(directoryBytes.buffer, directoryBytes.byteOffset + offset, 128);
+    const nameLength = entryView.getUint16(64, true); const type = entryView.getUint8(66);
+    if (type === 0 || nameLength < 2 || nameLength > 64) { entries.push(null); continue; }
+    let name = ""; for (let index = 0; index < nameLength - 2; index += 2) name += String.fromCharCode(entryView.getUint16(index, true));
+    entries.push({ name, type, left: entryView.getInt32(68, true), right: entryView.getInt32(72, true), child: entryView.getInt32(76, true), start: entryView.getUint32(116, true), size: entryView.getUint32(120, true) });
+  }
+  if (!entries[0] || entries[0].type !== 5) throw new Quarantine("malformed", "CFBF root storage missing");
+  // Mini stream
+  const cutoff = view.getUint32(56, true);
+  const miniFatBytes = view.getUint32(64, true) > 0 ? readChain(view.getUint32(60, true), view.getUint32(64, true) * sectorSize) : new Uint8Array(0);
+  const miniFat = new Uint32Array(miniFatBytes.buffer, miniFatBytes.byteOffset, Math.floor(miniFatBytes.byteLength / 4));
+  const miniStream = entries[0].size > 0 ? readChain(entries[0].start, entries[0].size) : new Uint8Array(0);
+  const readStream = (entry) => {
+    exceed("expanded_bytes", entry.size, limits.expanded_bytes);
+    if (entry.size >= cutoff) return readChain(entry.start, entry.size);
+    const sectors = chain(entry.start, miniFat, Math.ceil(miniStream.byteLength / miniSectorSize) + 1);
+    const out = new Uint8Array(entry.size); let offset = 0;
+    for (const index of sectors) {
+      const start = index * miniSectorSize;
+      if (start >= miniStream.byteLength) throw new Quarantine("malformed", "CFBF mini sector out of range");
+      const take = Math.min(miniSectorSize, out.byteLength - offset);
+      out.set(miniStream.subarray(start, start + take), offset); offset += take; if (offset >= out.byteLength) break;
+    }
+    return out;
+  };
+  // Tree traversal -> path map (bounded, cycle-safe)
+  const tree = new Map(); const visited = new Set();
+  const visit = (index, path) => {
+    if (index < 0 || index >= entries.length || !entries[index]) return;
+    if (visited.has(index)) throw new Quarantine("malformed", "CFBF directory tree loops");
+    visited.add(index);
+    const entry = entries[index];
+    visit(entry.left, path);
+    visit(entry.right, path);
+    const full = path ? `${path}/${entry.name}` : entry.name;
+    tree.set(full, entry);
+    if (entry.type === 1 || entry.type === 5) visit(entry.child, entry.type === 5 ? "" : full);
+  };
+  visit(0, null);
+  return { tree, readStream };
+}
+const utf16 = (bytes) => { let out = ""; for (let index = 0; index + 1 < bytes.byteLength; index += 2) out += String.fromCharCode(bytes[index] | (bytes[index + 1] << 8)); return out.normalize("NFC").replace(/\r\n?/g, "\n").replace(/\0+$/, ""); };
+function msgProfile(bytes, sourceHash, limits) {
+  const descriptor = descriptors.msg; const make = unitFactory(sourceHash, descriptor); const warnings = []; const units = [];
+  const { tree, readStream } = cfbParse(bytes, limits);
+  const isMsg = [...tree.keys()].some((name) => name.startsWith("__substg1.0_") || name === "__properties_version1.0");
+  if (!isMsg) throw new Quarantine("unsupported", "CFBF container is not an Outlook message (legacy Office documents are not supported)");
+  const prop = (path, id) => {
+    for (const [suffix, decode] of [["001F", (entry) => utf16(readStream(entry))], ["001E", (entry) => new TextDecoder("latin1").decode(readStream(entry)).normalize("NFC").replace(/\r\n?/g, "\n").replace(/\0+$/, "")]]) {
+      const entry = tree.get(`${path}__substg1.0_${id}${suffix}`);
+      if (entry) return decode(entry);
+    }
+    return null;
+  };
+  const binaryProp = (path, id) => tree.get(`${path}__substg1.0_${id}0102`) ?? null;
+  const structured = {};
+  for (const [key, id] of [["subject", "0037"], ["from", "0C1A"], ["to", "0E04"], ["cc", "0E03"]]) {
+    const value = prop("", id); if (value) structured[key] = value;
+  }
+  const transport = prop("", "007D");
+  const headers = transport ? parseHeaderBlock(transport.split("\n\n")[0]) ?? [] : [];
+  units.push(make("email-structure", { kind: "header", name: "*" }, { structured_data: { ...structured, header_count: headers.length } }));
+  for (const header of headers) units.push(make("email-header", { kind: "header", name: header.name }, { text: decodeEncodedWords(header.value, warnings) }));
+  let part = 0;
+  const body = prop("", "1000");
+  if (body?.trim()) { part += 1; units.push(make("email-body", { kind: "mime-part", part }, { text: body.trim(), structured_data: { media_type: "text/plain" } })); }
+  const html = binaryProp("", "1013");
+  if (html) {
+    part += 1;
+    let value; try { value = decoder.decode(readStream(html)); } catch { value = new TextDecoder("latin1").decode(readStream(html)); }
+    value = value.replace(/<(?:style|script)\b[\s\S]*?<\/\s*(?:style|script)\b[^>]*>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&").replace(/[ \t]+/g, " ").trim();
+    if (value) units.push(make("email-body", { kind: "mime-part", part }, { text: value, structured_data: { media_type: "text/html" } }, ["html-tags-stripped"]));
+  }
+  if (!body?.trim() && !html && [...tree.keys()].some((name) => name === "__substg1.0_10090102")) warnings.push("rtf-compressed-body-not-decompressed");
+  let attachments = 0;
+  for (const [name, entry] of tree) {
+    const match = /^__attach_version1\.0_#(\d{8})$/.exec(name);
+    if (!match || entry.type !== 1) continue;
+    attachments += 1; part += 1; exceed("shapes", part, limits.shapes);
+    const prefix = `${name}/`;
+    const filename = prop(prefix, "3707") ?? prop(prefix, "3704");
+    const mediaType = prop(prefix, "370E");
+    const data = binaryProp(prefix, "3701");
+    const embedded = tree.get(`${prefix}__substg1.0_3701000D`);
+    if (data) {
+      const content = readStream(data);
+      units.push(make("email-attachment", { kind: "mime-part", part }, { structured_data: { filename: filename ?? null, media_type: mediaType ?? null, bytes: content.byteLength, content_hash: byteHash(content), disposition: "attachment" } }, ["attachment-content-not-extracted; ingest it as a separate source"]));
+    } else if (embedded) {
+      units.push(make("email-attached-message", { kind: "mime-part", part }, { structured_data: { filename: filename ?? null, media_type: "application/vnd.ms-outlook" } }, ["attached-message-not-recursed; ingest it as a separate source"]));
+    }
+  }
+  if (units.length <= 1 && Object.keys(structured).length === 0) throw new Quarantine("malformed", "Outlook message carries no extractable content");
+  return { descriptor, units, discovered: tree.size, warnings: [...warnings, ...(attachments > 0 ? ["attachments-inventoried-not-extracted"] : [])] };
+}
+
 function serializable(value, fallback = {}) { try { return JSON.parse(canonicalJson(value)); } catch { return fallback; } }
 function safeQuarantineSettings(settings) {
   if (!plainObject(settings)) return {};
@@ -354,6 +505,7 @@ export async function normalizeInRestrictedWorker({ bytes, filename = "", mediaT
     else if (format === "markdown" || format === "text") result = linesProfile(input, format, hash);
     else if (format === "csv") result = csvProfile(input, hash, settings, resolvedLimits);
     else if (format === "eml") result = emlProfile(input, hash, resolvedLimits);
+    else if (format === "cfb") { result = msgProfile(input, hash, resolvedLimits); format = "msg"; }
     else if (format === "pdf") result = await pdfProfile(input, hash, resolvedLimits);
     else if (format === "drawio") result = drawioProfile(input, hash, resolvedLimits);
     else if (format === "gif") result = gifProfile(input, hash, settings, resolvedLimits);
