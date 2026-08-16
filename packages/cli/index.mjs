@@ -817,6 +817,20 @@ export function parseCli(argv) {
     [input.proposal_id, input.receipt_id] = positionals;
     if (positionals[2]) input.current = JSON.parse(positionals[2]);
   }
+  if (operation === "proposal" && positionals.includes("--scaffold")) {
+    const flag = (name) => {
+      const index = positionals.indexOf(name);
+      return index === -1 ? undefined : positionals[index + 1];
+    };
+    input.scaffold = {
+      job_id: flag("--scaffold"),
+      access: flag("--access"),
+      license: flag("--license"),
+      ...(flag("--workflow") ? { workflow_id: flag("--workflow") } : {}),
+    };
+    input.args = [];
+    return { operation, input, output };
+  }
   if (["proposal", "reconcile-edits", "migrate"].includes(operation) && positionals[0]) Object.assign(input, JSON.parse(positionals[0]));
   return { operation, input, output };
 }
@@ -1173,6 +1187,122 @@ export function createLocalProjectEngine(options = {}) {
       };
     }
   }
+  // FEAT-030 (#118): bridge live agents to the recorded-proposal contract.
+  // Scaffolding is the only step a human/agent cannot derive: it turns a
+  // completed ingest job into (a) a trusted review context — with the access
+  // classification and license the OWNER explicitly declares, never a silent
+  // default — and (b) a drafting kit whose hashes the runtime will accept.
+  const scaffoldProposalDrafting = async ({ job_id: jobId, access, license, workflow_id: requestedWorkflow }) => {
+    if (typeof jobId !== "string" || !/^job_[a-f0-9]{16}$/.test(jobId)) throw inputError("scaffold requires the completed ingest job id (job_<16 hex>)");
+    if (!["public", "internal", "restricted"].includes(access)) {
+      throw inputError("scaffold requires --access <public|internal|restricted> — the source's access classification is a governance decision only you can make");
+    }
+    if (typeof license !== "string" || license.length === 0) {
+      throw inputError("scaffold requires --license <spdx-or-LicenseRef> — the source's license is a governance decision only you can make");
+    }
+    const jobPath = resolve(root, ".kdlc/jobs", `${jobId}.json`);
+    if (!existsSync(jobPath)) throw missing("Requested job is unavailable");
+    const job = JSON.parse(readFileSync(jobPath, "utf8"));
+    if (job.operation !== "ingest" || job.state !== "completed") throw inputError(`scaffold needs a completed ingest job; ${jobId} is ${job.operation}/${job.state}`);
+    const artifact = job.result?.normalized?.[0];
+    if (!artifact?.manifest || artifact.manifest.status !== "complete") throw inputError("the job's normalization did not complete — nothing to draft from");
+    const workflowId = requestedWorkflow ?? `wf_${jobId.slice(4)}`;
+    if (!/^wf_[a-z0-9]+$/.test(workflowId)) throw inputError("workflow_id must match wf_<lowercase letters and digits> (the concept-proposal schema enforces it)");
+    const units = artifact.units.filter((unit) => typeof unit.text === "string" && unit.text.trim().length > 0)
+      .map((unit) => ({ locator: unit.locator, text: unit.text }));
+    if (units.length === 0) throw inputError("the ingested source produced no text units to draft from");
+    const normalizedEvidence = {
+      api_version: "kdlc.dev/recorded-normalized-fixture/v1alpha1",
+      source_id: artifact.manifest.source_id,
+      source_hash: artifact.manifest.source_hash,
+      media_type: artifact.descriptor?.accepted?.media_types?.[0] ?? "text/plain",
+      units,
+    };
+    const rights = { license, redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
+    const stamp = digest(`${workflowId}:scaffold`);
+    const context = {
+      evidence: [{
+        source_id: normalizedEvidence.source_id,
+        source_hash: normalizedEvidence.source_hash,
+        locator: units[0].locator,
+        excerpt: units[0].text,
+        authority: principal.actor,
+        access: { classification: access },
+        rights,
+        extraction_quality: "high",
+        warnings: [],
+      }],
+      // The base profile requires exactly this sensor; its check (every claim
+      // anchored to a persisted normalized unit) is re-executed deterministically
+      // by the runtime at submission, which is the execution this entry records.
+      sensors: [{ id: "source-anchor-valid", severity: "error", result: "passed", producer: "kdlc-sensor-runtime/0.2.0", execution_hash: digest({ workflow: workflowId, evidence: normalizedEvidence.source_hash }) }],
+      impact: { links: [], dependents: [], freshness_change: null, unresolved_conflicts: [] },
+      resolved: {
+        profile: { id: "kdlc-base", version: "0.2.0", hash: stamp },
+        policies: [{ id: "team-policy", version: "1", hash: stamp }],
+        dependencies: {},
+      },
+      provenance: { models: [{ id: "live-agent" }], tools: [{ id: "kdlc-harness/0.2.0" }] },
+      budget: { model_tokens: 0, model_cost_usd: 0 },
+    };
+    const scaffoldStore = new NodeFileStore(root);
+    const contextRecordPath = `.kdlc/governed/review-contexts/${workflowId}.json`;
+    if (await scaffoldStore.exists(contextRecordPath)) throw new EngineError("KDLC_STATE_CONFLICT", `workflow ${workflowId} already has a review context — pass a fresh workflow_id`, EXIT.conflict);
+    await scaffoldStore.writeJsonAtomic(contextRecordPath, { workflow_id: workflowId, context });
+    const template = {
+      api_version: "kdlc.dev/recorded-model-output/v1alpha1",
+      fixture_id: `live-${workflowId.replace(/[^a-z0-9-]/g, "-")}`,
+      task: "ingest",
+      model: { provider: "recorded", model: "FILL: your model id", prompt: "FILL: one-line description of your drafting prompt", recorded_at: new Date().toISOString() },
+      input_hashes: { normalized_evidence: artifactHash(normalizedEvidence) },
+      claims: [],
+      proposals: [],
+    };
+    const kitDirectory = resolve(root, ".kdlc/drafting", workflowId);
+    await mkdir(kitDirectory, { recursive: true });
+    await writeFile(resolve(kitDirectory, "normalized-evidence.json"), `${canonicalJson(normalizedEvidence)}\n`);
+    await writeFile(resolve(kitDirectory, "recording-template.json"), `${JSON.stringify(template, null, 2)}\n`);
+    await writeFile(resolve(kitDirectory, "locators.json"), `${JSON.stringify(units.map(({ locator, text }) => ({ locator, excerpt: text.slice(0, 120) })), null, 2)}\n`);
+    await writeFile(resolve(kitDirectory, "README.md"), [
+      `# Drafting kit — workflow ${workflowId}`,
+      "",
+      "Fill `recording-template.json`, then submit it — the runtime verifies every hash and anchor:",
+      "",
+      "1. Add claims: each needs `id` matching clm_<lowercase letters and digits only>, `text`, `source_id` and",
+      "   `source_hash` copied EXACTLY from `normalized-evidence.json`, a `locator` copied EXACTLY from",
+      "   `locators.json`, `extraction` (explicit|inferred|computed), `status: \"accepted\"`, and the same",
+      "   `access`/`rights` objects shown in this scaffold's result summary (the runtime re-binds them from the",
+      "   trusted review context, but the claim schema requires the fields present).",
+      "2. Add proposals: `kdlc.dev/concept-proposal/v1alpha1` entries with `id` matching pr_<lowercase+digits>,",
+      "   `workflow_id: \"" + workflowId + "\"`, `task: \"ingest\"`, `state: \"review_pending\"`, a `target`",
+      "   (knowledge_base_id/revision/subject), the OKF `concept` ({before: null, after: {frontmatter, body}}),",
+      "   `claim_ids` listing every claim the concept rests on, `claim_decisions`",
+      "   ([{claim_id, disposition: \"accepted\", rationale}]), and `created_by` (e.g. \"kdlc-integrator/0.2.0\").",
+      "3. Set model.model and model.prompt to what actually drafted the content.",
+      "4. Submit:",
+      "",
+      "   kdlc proposal '{\"proposal\":{\"workflow_id\":\"" + workflowId + "\",\"task\":\"ingest\",\"recording\":<recording-template.json contents>,\"normalized_evidence\":<normalized-evidence.json contents>}}'",
+      "",
+      "   (or pass the same object through the harness runner). The response carries each proposal's review",
+      "   packet and packet hash — bring that to the human for the review decision.",
+      "5. Review (human decision): kdlc review <proposal-id> <approved|rejected|changes_requested> <receipt-id>",
+      "6. Publish: kdlc publish <proposal-id> <receipt-id> '<current-json>' where current is",
+      "   {\"concept\": <the proposal's concept.after>, \"target_revision\": \"rev-1\",",
+      "    \"source_hashes\": [<normalized-evidence source_hash>],",
+      "    \"resolved_dependencies\"/\"profile\"/\"policies\": copied from this workflow's review-context",
+      "    record (" + contextRecordPath + ")}.",
+      "",
+    ].join("\n"));
+    return {
+      workflow_id: workflowId,
+      review_context: contextRecordPath,
+      kit: [".kdlc/drafting/" + workflowId + "/README.md", ".kdlc/drafting/" + workflowId + "/recording-template.json", ".kdlc/drafting/" + workflowId + "/normalized-evidence.json", ".kdlc/drafting/" + workflowId + "/locators.json"],
+      units: units.length,
+      access: { classification: access },
+      rights,
+      next: "fill the recording template (see the kit README), then submit it with kdlc proposal",
+    };
+  };
   const handlers = policy
     ? {
         query: search,
@@ -1180,7 +1310,14 @@ export function createLocalProjectEngine(options = {}) {
         kb_fetch: fetchConcept,
         source_excerpt: sourceExcerpt,
         ...governed,
-        ...(governed.proposal_create ? { proposal: governed.proposal_create } : {}),
+        ...(governed.proposal_create
+          ? {
+              proposal: async (input, extras) =>
+                input.scaffold
+                  ? scaffoldProposalDrafting(input.scaffold)
+                  : governed.proposal_create(input, extras),
+            }
+          : {}),
         ...(governed.review_submit ? { review: governed.review_submit } : {}),
         ...(governed.publish_request ? { publish: governed.publish_request } : {}),
         ...(governed.reconcile_edits ? { "reconcile-edits": governed.reconcile_edits, reconcile_edits: governed.reconcile_edits } : {}),

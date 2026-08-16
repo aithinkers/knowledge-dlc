@@ -4,12 +4,12 @@ description: Run the governed K-DLC proposal operation
 user-invocable: true
 ---
 
-**When to use:** You want to see, create, or update proposed knowledge changes awaiting review.
+**When to use:** Evidence is ingested and you want it drafted into reviewable knowledge — or you want to submit a filled drafting kit.
 
-**What you give it:** A proposal action and its details, or nothing to list what's pending.
+**What you give it:** To begin: --scaffold <ingest-job-id> --access <public|internal|restricted> --license <license>. To submit: the filled recording per the kit README.
 
-**What you get back:** The proposal record — proposals only become knowledge after review.
+**What you get back:** A drafting kit (scaffold), or review packets with hashes (submit) — proposals only become knowledge after review.
 
-**Usually next:** kdlc review when a proposal is ready for a decision.
+**Usually next:** Fill the kit per its README, submit, then kdlc review for the decision.
 
 Interpret the user arguments as a JSON string array and invoke ["node", "distribution/kiro-ide/run.mjs", "proposal", "--output", "json", "--host-args-json", <arguments-json>] directly without a shell. Return the exact versioned envelope and do not infer success when `ok` is false.

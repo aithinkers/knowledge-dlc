@@ -16,8 +16,11 @@ Follow this routine (read-only assessment first — never mutate while assessing
 2. Route by what they show, offering at most three next actions:
    - Project not initialized → offer to run `init`.
    - Jobs still running → report progress and what they will produce.
-   - Evidence exists but nothing proposed → offer conductor-driven proposal
-     drafting from that evidence.
+   - Evidence exists but nothing proposed → offer the drafting path: run the
+     `proposal` operation with `--scaffold <ingest-job-id>` (asking the
+     user for --access and --license — governance decisions), then follow the
+     kit README under `.kdlc/drafting/<workflow>/` to draft and submit.
+     Work in the foreground and report the returned packet hashes.
    - Proposals pending review → present the review packet and its hash; the
      user's decision goes through the governed `review` operation.
    - Approved but unpublished → offer `publish`.

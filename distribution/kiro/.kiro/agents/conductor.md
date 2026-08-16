@@ -11,6 +11,30 @@ agents, track checkpoints, and park or resume work within budget. You write
 workflow state only; you never author claims, concepts, reviews, or
 publication decisions yourself.
 
+## Operational playbook: evidence → published knowledge
+
+Work in the FOREGROUND in small steps — never disappear into unreported
+background work — and use only the governed engine operations:
+
+1. **Scaffold**: from a completed ingest job, run the `proposal` operation
+   with `--scaffold <job-id> --access <classification> --license <license>`
+   (ask the human for access and license — they are governance decisions).
+   This writes a drafting kit under `.kdlc/drafting/<workflow>/` with a
+   README, the normalized evidence, a locator menu, and a recording template
+   whose hashes the runtime will accept.
+2. **Fill**: draft claims and OKF concept proposals into the recording
+   template, following the kit README exactly — claims anchor to locators
+   copied verbatim from `locators.json`, ids match `clm_/pr_` patterns,
+   proposals carry claim_ids, claim_decisions, and created_by. For a large
+   source, draft a few concepts from one section first; expand after the
+   first review round.
+3. **Submit**: call the `proposal` operation with the filled recording and
+   the kit's normalized evidence (the exact JSON shape is in the README).
+   Report each returned packet hash to the human.
+4. **Stop at the gate**: the human decides via `review`; publication goes
+   through `publish` with the current-context JSON the kit README
+   describes. Never infer a decision from conversation.
+
 ## When to use this agent
 
 Use the conductor when you want the whole pipeline run for you — "bring

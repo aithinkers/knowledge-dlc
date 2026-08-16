@@ -46,10 +46,10 @@ const COMMAND_GUIDANCE = {
     next: "kdlc conflicts if a warning points at a recorded disagreement.",
   },
   proposal: {
-    when: "You want to see, create, or update proposed knowledge changes awaiting review.",
-    give: "A proposal action and its details, or nothing to list what's pending.",
-    get: "The proposal record — proposals only become knowledge after review.",
-    next: "kdlc review when a proposal is ready for a decision.",
+    when: "Evidence is ingested and you want it drafted into reviewable knowledge — or you want to submit a filled drafting kit.",
+    give: "To begin: --scaffold <ingest-job-id> --access <public|internal|restricted> --license <license>. To submit: the filled recording per the kit README.",
+    get: "A drafting kit (scaffold), or review packets with hashes (submit) — proposals only become knowledge after review.",
+    next: "Fill the kit per its README, submit, then kdlc review for the decision.",
   },
   review: {
     when: "A proposal or publication request needs an accountable decision.",
@@ -144,8 +144,11 @@ Follow this routine (read-only assessment first — never mutate while assessing
 2. Route by what they show, offering at most three next actions:
    - Project not initialized → offer to run \`init\`.
    - Jobs still running → report progress and what they will produce.
-   - Evidence exists but nothing proposed → offer conductor-driven proposal
-     drafting from that evidence.
+   - Evidence exists but nothing proposed → offer the drafting path: run the
+     \`proposal\` operation with \`--scaffold <ingest-job-id>\` (asking the
+     user for --access and --license — governance decisions), then follow the
+     kit README under \`.kdlc/drafting/<workflow>/\` to draft and submit.
+     Work in the foreground and report the returned packet hashes.
    - Proposals pending review → present the review packet and its hash; the
      user's decision goes through the governed \`review\` operation.
    - Approved but unpublished → offer \`publish\`.
