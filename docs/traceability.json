@@ -797,6 +797,20 @@
           "tests/governance/eml-normalizer.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-020",
+      "title": "Outlook .msg normalizer (CFBF/MAPI) with attachment inventory",
+      "issue": 92,
+      "specification_sections": [
+        "5.7",
+        "9.2"
+      ],
+      "status": "planned",
+      "evidence": {
+        "implementation": [],
+        "tests": []
+      }
     }
   ]
 }
