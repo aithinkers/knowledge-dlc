@@ -205,14 +205,25 @@ export class KdlcEngine {
         error: null,
       };
     } catch (error) {
+      // Governance and policy errors carry precise KDLC_ codes, messages, and
+      // details an agent can act on (which claim drifted, which schema field
+      // failed) — masking them as internal made every governed refusal look
+      // like a crash (FEAT-032 round, observed live). Only truly unknown
+      // errors stay scrubbed.
+      const coded =
+        typeof error?.code === "string" &&
+        error.code.startsWith("KDLC_") &&
+        ["GovernanceError", "AgentPolicyError"].includes(error?.name);
       const known =
         error instanceof EngineError
           ? error
-          : new EngineError(
-              "KDLC_INTERNAL",
-              "Internal operation failure",
-              EXIT.internal,
-            );
+          : coded
+            ? new EngineError(error.code, error.message, EXIT.policy, structuredClone(error.details ?? {}))
+            : new EngineError(
+                "KDLC_INTERNAL",
+                "Internal operation failure",
+                EXIT.internal,
+              );
       return {
         api_version: "kdlc.dev/engine-envelope/v1",
         ok: false,
@@ -891,11 +902,15 @@ export function renderEnvelope(envelope, output = "text") {
       return `${lines.join("\n")}\n`;
     }
     const framing = HUMAN_ERROR_FRAMING[envelope.error.class] ?? HUMAN_ERROR_FRAMING[EXIT.internal];
-    return `✖ ${envelope.operation} did not complete.\n  ${framing}\n  Detail: ${envelope.error.message} (${envelope.error.code})\n`;
+    const details = envelope.error.details && Object.keys(envelope.error.details).length > 0
+      ? `\n  Specifics: ${canonicalJson(envelope.error.details).slice(0, 2000)}`
+      : "";
+    return `✖ ${envelope.operation} did not complete.\n  ${framing}\n  Detail: ${envelope.error.message} (${envelope.error.code})${details}\n`;
   }
   if (envelope.ok)
     return `${envelope.operation}: ok\n${canonicalJson(envelope.result)}\n${hint ? `${hint}\n` : ""}`;
-  return `${envelope.operation}: ${envelope.error.code}: ${envelope.error.message}\n`;
+  const textDetails = envelope.error.details && Object.keys(envelope.error.details).length > 0 ? `\n${canonicalJson(envelope.error.details).slice(0, 2000)}` : "";
+  return `${envelope.operation}: ${envelope.error.code}: ${envelope.error.message}${textDetails}\n`;
 }
 
 export function createLocalProjectEngine(options = {}) {

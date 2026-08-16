@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { renderEnvelope } from "../../packages/cli/index.mjs";
+import { KdlcEngine, renderEnvelope } from "../../packages/cli/index.mjs";
 
 const ingestEnvelope = {
   api_version: "kdlc.dev/engine-envelope/v1",
@@ -61,4 +61,19 @@ test("FEAT-028: claude-code setup prints the two-step marketplace install", asyn
   const install = instructions.find((line) => line.includes("claude plugin"));
   assert.match(install, /claude plugin marketplace add .+ && claude plugin install kdlc@kdlc/);
   assert.ok(!install.includes("claude plugin install /"), "no bare-path install instruction remains");
+});
+
+test("FEAT-031: governed refusals surface their real code and details through the envelope", async () => {
+  const { GovernanceError } = await import("../../packages/governance/index.mjs");
+  const engine = new KdlcEngine({ handlers: { status: () => { throw new GovernanceError("KDLC_MODEL_RECORDING_INVALID", "Recorded model output failed schema validation", { errors: [{ instancePath: "/claims/0/id" }] }); } } });
+  const envelope = await engine.envelope("status", {});
+  assert.equal(envelope.error.code, "KDLC_MODEL_RECORDING_INVALID");
+  assert.equal(envelope.error.details.errors[0].instancePath, "/claims/0/id");
+  assert.match(renderEnvelope(envelope, "human"), /Specifics: .*instancePath/);
+  assert.match(renderEnvelope(envelope, "text"), /KDLC_MODEL_RECORDING_INVALID: Recorded model output failed schema validation\n\{/);
+  // Unknown errors stay scrubbed.
+  const opaque = new KdlcEngine({ handlers: { status: () => { throw new Error("secret internals: /etc/passwd"); } } });
+  const masked = await opaque.envelope("status", {});
+  assert.equal(masked.error.code, "KDLC_INTERNAL");
+  assert.ok(!JSON.stringify(masked).includes("secret internals"));
 });
