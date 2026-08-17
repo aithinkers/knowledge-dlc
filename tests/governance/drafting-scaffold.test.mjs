@@ -439,3 +439,50 @@ test("FEAT-037: --show survives minimal frontmatter — omitted type/status/extr
   assert.match(shown.claims[0].source_excerpt, /nightly/);
   canonicalJson(shown); // the shown packet must render as a JSON envelope
 });
+
+test("FEAT-042: partial normalizations scaffold with honest coverage instead of vanishing (#144)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-partial-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "partial.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  const job = await completedIngest(engine, root, "big.md", "# Big\n\n## A\n\nRow one is retained.\n\n## B\n\nRow two is retained.\n");
+  // Rewrite the stored job to the real-world shape that was dropped live: a
+  // complete document plus a bounded (partial) spreadsheet normalization.
+  const jobPath = join(root, ".kdlc/jobs", `${job.id}.json`);
+  const stored = JSON.parse(await readFile(jobPath, "utf8"));
+  const base = stored.result.normalized[0];
+  stored.result.normalized = [
+    base,
+    { ...base, manifest: { ...base.manifest, source_id: "src_csv", status: "partial", coverage: { discovered: 268, emitted: 1381 } } },
+    { ...base, manifest: { ...base.manifest, source_id: "src_bad", status: "failed" } }
+  ];
+  stored.request.sources = ["big.md", "forecast.csv", "broken.bin"];
+  await writeFile(jobPath, JSON.stringify(stored));
+
+  const result = await engine.execute("proposal", { scaffold: { job_id: job.id, all_sources: true, access: "internal", license: "LicenseRef-Internal" } });
+  assert.equal(result.scaffolds.length, 2, "complete AND partial sources scaffold");
+  const partial = result.scaffolds.find(({ source }) => source === "forecast.csv");
+  assert.match(partial.coverage, /partial coverage: bounded intake — \d+ normalized units are draftable/, "the kit result discloses bounded coverage");
+  assert.match(await readFile(join(root, ".kdlc/drafting", partial.workflow_id, "README.md"), "utf8"), /partial coverage/, "the kit README leads with the disclosure");
+  const { context } = JSON.parse(await readFile(join(root, ".kdlc/governed/review-contexts", `${partial.workflow_id}.json`), "utf8"));
+  assert.equal(context.evidence[0].extraction_quality, "medium");
+  assert.match(context.evidence[0].warnings[0], /partial coverage/, "the governed record carries the disclosure");
+  // Undraftable sources are reported, never silently vanished.
+  assert.deepEqual(result.undraftable_sources, [{ source: "broken.bin", status: "failed" }]);
+  // Selecting the partial source by its ORIGINAL index works; the failed one refuses.
+  await engine.execute("proposal", { scaffold: { job_id: job.id, source: "1", access: "internal", license: "LicenseRef-Internal", workflow_id: "wf_partialpick11111" } })
+    .then((picked) => assert.equal(picked.source, "forecast.csv"));
+  await assert.rejects(
+    engine.execute("proposal", { scaffold: { job_id: job.id, source: "2", access: "internal", license: "LicenseRef-Internal" } }),
+    /did not normalize to a draftable state/
+  );
+});
+
+test("FEAT-042: sparse CLI input surfaces its real input error, not KDLC_CANONICAL_INVALID (#144)", async () => {
+  // parseCli must not plant undefined keys, and correlation must survive them.
+  const parsed = parseCli(["proposal", "--scaffold", "job_0123456789abcdef", "--all-sources", "--output", "json"]);
+  assert.ok(!("access" in parsed.input.scaffold), "no undefined access key");
+  assert.ok(!("license" in parsed.input.scaffold), "no undefined license key");
+  const envelope = await new KdlcEngine().envelope(parsed.operation, { scaffold: { job_id: "job_0123456789abcdef", access: undefined, license: undefined } });
+  assert.equal(envelope.ok, false);
+  assert.notEqual(envelope.error.code, "KDLC_CANONICAL_INVALID", "correlation survives sparse input");
+});

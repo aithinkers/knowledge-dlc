@@ -193,7 +193,10 @@ export class KdlcEngine {
     return JSON.parse(await readFile(path, "utf8"));
   }
   correlation(operation, input) {
-    return `cor_${digest({ operation, input }).slice(7, 23)}`;
+    // Strip undefined values first: correlation runs before the envelope's
+    // error handling, so a sparse input must never explode the whole CLI
+    // into KDLC_CANONICAL_INVALID (#144). Well-formed inputs hash unchanged.
+    return `cor_${digest(JSON.parse(JSON.stringify({ operation, input: input ?? null }))).slice(7, 23)}`;
   }
   async envelope(operation, input = {}) {
     const correlation_id = this.correlation(operation, input);
@@ -875,8 +878,8 @@ export function parseCli(argv) {
     } else {
       input.scaffold = {
         job_id: flag("--scaffold"),
-        access: flag("--access"),
-        license: flag("--license"),
+        ...(flag("--access") !== undefined ? { access: flag("--access") } : {}),
+        ...(flag("--license") !== undefined ? { license: flag("--license") } : {}),
         ...(flag("--workflow") ? { workflow_id: flag("--workflow") } : {}),
         ...(flag("--source") !== undefined ? { source: flag("--source") } : {}),
         ...(positionals.includes("--all-sources") ? { all_sources: true } : {}),
@@ -1551,22 +1554,32 @@ export function createLocalProjectEngine(options = {}) {
     if (!existsSync(jobPath)) throw missing("Requested job is unavailable");
     const job = JSON.parse(readFileSync(jobPath, "utf8"));
     if (job.operation !== "ingest" || job.state !== "completed") throw inputError(`scaffold needs a completed ingest job; ${jobId} is ${job.operation}/${job.state}`);
-    const artifacts = (job.result?.normalized ?? []).filter((entry) => entry?.manifest?.status === "complete");
+    // Partial normalizations (bounded intake of large sources) are draftable:
+    // their coverage is disclosed in the kit instead of the source being
+    // silently dropped (#144). Anything else is reported, never vanished.
+    const allEntries = job.result?.normalized ?? [];
+    const artifacts = allEntries.filter((entry) => ["complete", "partial"].includes(entry?.manifest?.status));
+    const undraftable = allEntries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => !["complete", "partial"].includes(entry?.manifest?.status))
+      .map(({ entry, index }) => ({ source: job.request?.sources?.[index] ?? entry?.manifest?.source_id ?? `source ${index}`, status: entry?.manifest?.status ?? "unknown" }));
     if (artifacts.length === 0) throw inputError("the job's normalization did not complete — nothing to draft from");
     // Fail closed on multi-document jobs: silently drafting only the first
     // file loses the rest. Each document gets its own workflow and kit.
+    const originalIndex = (artifact) => allEntries.indexOf(artifact);
     let selection;
     if (allSources) {
       if (requestedWorkflow) throw inputError("--workflow cannot combine with --all-sources (each document gets its own workflow)");
-      selection = artifacts.map((artifact, index) => ({ artifact, index }));
+      selection = artifacts.map((artifact) => ({ artifact, index: originalIndex(artifact) }));
     } else if (source !== undefined) {
       const index = Number(source);
-      if (!Number.isInteger(index) || index < 0 || index >= artifacts.length) throw inputError(`--source must be 0..${artifacts.length - 1} for this job`);
-      selection = [{ artifact: artifacts[index], index }];
+      if (!Number.isInteger(index) || index < 0 || index >= allEntries.length) throw inputError(`--source must be 0..${allEntries.length - 1} for this job`);
+      if (!artifacts.includes(allEntries[index])) throw inputError(`source ${index} did not normalize to a draftable state (${allEntries[index]?.manifest?.status ?? "unknown"})`);
+      selection = [{ artifact: allEntries[index], index }];
     } else if (artifacts.length === 1) {
-      selection = [{ artifact: artifacts[0], index: 0 }];
+      selection = [{ artifact: artifacts[0], index: originalIndex(artifacts[0]) }];
     } else {
-      const menu = artifacts.map((artifact, index) => `${index}: ${job.request?.sources?.[index] ?? artifact.manifest.source_id} (${artifact.units.length} units)`).join("; ");
+      const menu = artifacts.map((artifact) => `${originalIndex(artifact)}: ${job.request?.sources?.[originalIndex(artifact)] ?? artifact.manifest.source_id} (${artifact.units.length} units${artifact.manifest.status === "partial" ? ", partial coverage" : ""})`).join("; ");
       throw inputError(`this job ingested ${artifacts.length} documents — pick one with --source <n> or scaffold every document with --all-sources. Sources: ${menu}`);
     }
     let sliceBounds = null;
@@ -1593,14 +1606,19 @@ export function createLocalProjectEngine(options = {}) {
       }
     }
     if (allSources && scaffolded.length === 0 && skipped.length > 0) {
-      return { job_id: jobId, scaffolds: [], skipped, next: "every document is already scaffolded — fill the kits and submit with kdlc proposal --submit <workflow-id>" };
+      return { job_id: jobId, scaffolds: [], skipped, ...(undraftable.length ? { undraftable_sources: undraftable } : {}), next: "every document is already scaffolded — fill the kits and submit with kdlc proposal --submit <workflow-id>" };
     }
     return withDefaultsNote(
-      selection.length === 1 ? scaffolded[0] : { job_id: jobId, scaffolds: scaffolded, ...(skipped.length ? { skipped } : {}), next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" },
+      selection.length === 1
+        ? { ...scaffolded[0], ...(undraftable.length ? { undraftable_sources: undraftable } : {}) }
+        : { job_id: jobId, scaffolds: scaffolded, ...(skipped.length ? { skipped } : {}), ...(undraftable.length ? { undraftable_sources: undraftable } : {}), next: "fill each kit's recording template, then submit each with kdlc proposal --submit <workflow-id>" },
       usedDefaults, access, license,
     );
   };
   const scaffoldOneSource = async ({ artifact, workflowId, access, license, sliceBounds, sourceName }) => {
+    const coverageNote = artifact.manifest.status === "partial"
+      ? `partial coverage: bounded intake — ${artifact.units.length} normalized units are draftable, coverage record ${JSON.stringify(artifact.manifest.coverage ?? {})}; claims must not present this as a full read of the source`
+      : null;
     let units = artifact.units.filter((unit) => typeof unit.text === "string" && unit.text.trim().length > 0)
       .map((unit) => ({ locator: unit.locator, text: unit.text }));
     const totalUnits = units.length;
@@ -1624,8 +1642,8 @@ export function createLocalProjectEngine(options = {}) {
         authority: principal.actor,
         access: { classification: access },
         rights,
-        extraction_quality: "high",
-        warnings: [],
+        extraction_quality: artifact.manifest.status === "partial" ? "medium" : "high",
+        warnings: coverageNote ? [coverageNote] : [],
       }],
       // The base profile requires exactly this sensor; its check (every claim
       // anchored to a persisted normalized unit) is re-executed deterministically
@@ -1661,6 +1679,7 @@ export function createLocalProjectEngine(options = {}) {
     await writeFile(resolve(kitDirectory, "README.md"), [
       `# Drafting kit — workflow ${workflowId}`,
       "",
+      ...(coverageNote ? [`> **${coverageNote}**`, ""] : []),
       "Fill `recording-template.json`, then submit it — the runtime verifies every hash and anchor:",
       "",
       "1. Add claims: each needs `id` matching clm_<lowercase letters and digits only>, `text`, `source_id` and",
@@ -1701,6 +1720,7 @@ export function createLocalProjectEngine(options = {}) {
       review_context: contextRecordPath,
       kit: [".kdlc/drafting/" + workflowId + "/README.md", ".kdlc/drafting/" + workflowId + "/recording-template.json", ".kdlc/drafting/" + workflowId + "/normalized-evidence.json", ".kdlc/drafting/" + workflowId + "/locators.json"],
       units: units.length,
+      ...(coverageNote ? { coverage: coverageNote } : {}),
       ...(sliceBounds ? { slice: `${sliceBounds[0]}-${sliceBounds[1]} of ${totalUnits} text units` } : {}),
       access: { classification: access },
       rights,

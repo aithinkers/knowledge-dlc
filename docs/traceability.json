@@ -1236,6 +1236,24 @@
           "tests/governance/human-surfaces.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-042",
+      "title": "Partial normalizations scaffold with honest coverage; sparse CLI input never masks its error",
+      "issue": 144,
+      "specification_sections": [
+        "14",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }
