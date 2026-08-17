@@ -1606,7 +1606,7 @@ export function createLocalProjectEngine(options = {}) {
       }
     }
     if (allSources && scaffolded.length === 0 && skipped.length > 0) {
-      return { job_id: jobId, scaffolds: [], skipped, next: "every document is already scaffolded — fill the kits and submit with kdlc proposal --submit <workflow-id>" };
+      return { job_id: jobId, scaffolds: [], skipped, ...(undraftable.length ? { undraftable_sources: undraftable } : {}), next: "every document is already scaffolded — fill the kits and submit with kdlc proposal --submit <workflow-id>" };
     }
     return withDefaultsNote(
       selection.length === 1
@@ -1617,7 +1617,7 @@ export function createLocalProjectEngine(options = {}) {
   };
   const scaffoldOneSource = async ({ artifact, workflowId, access, license, sliceBounds, sourceName }) => {
     const coverageNote = artifact.manifest.status === "partial"
-      ? `partial coverage: bounded intake emitted ${artifact.units.length} units (coverage ${JSON.stringify(artifact.manifest.coverage ?? {})}); claims must not present this as a full read of the source`
+      ? `partial coverage: bounded intake — ${artifact.units.length} normalized units are draftable, coverage record ${JSON.stringify(artifact.manifest.coverage ?? {})}; claims must not present this as a full read of the source`
       : null;
     let units = artifact.units.filter((unit) => typeof unit.text === "string" && unit.text.trim().length > 0)
       .map((unit) => ({ locator: unit.locator, text: unit.text }));

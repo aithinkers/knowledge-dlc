@@ -461,7 +461,7 @@ test("FEAT-042: partial normalizations scaffold with honest coverage instead of 
   const result = await engine.execute("proposal", { scaffold: { job_id: job.id, all_sources: true, access: "internal", license: "LicenseRef-Internal" } });
   assert.equal(result.scaffolds.length, 2, "complete AND partial sources scaffold");
   const partial = result.scaffolds.find(({ source }) => source === "forecast.csv");
-  assert.match(partial.coverage, /partial coverage: bounded intake/, "the kit result discloses bounded coverage");
+  assert.match(partial.coverage, /partial coverage: bounded intake — \d+ normalized units are draftable/, "the kit result discloses bounded coverage");
   assert.match(await readFile(join(root, ".kdlc/drafting", partial.workflow_id, "README.md"), "utf8"), /partial coverage/, "the kit README leads with the disclosure");
   const { context } = JSON.parse(await readFile(join(root, ".kdlc/governed/review-contexts", `${partial.workflow_id}.json`), "utf8"));
   assert.equal(context.evidence[0].extraction_quality, "medium");
