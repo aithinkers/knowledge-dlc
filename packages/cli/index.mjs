@@ -1357,7 +1357,7 @@ export function createLocalProjectEngine(options = {}) {
           ? `the concept frontmatter lacks access.classification (e.g. "${kbAccess}")`
           : (frontmatter.sources ?? []).filter((source) => typeof source.resource !== "string" || !source.access?.classification || !source.rights?.license)
               .map((source) => `source "${source.id}" lacks resource/access/rights`).join("; ") || (editorialGaps.length
-            ? `a stable concept requires ${editorialGaps.join(", ")} (§14.2) — declare status: "draft" if it is not ready for the stable tier`
+            ? `a stable concept requires ${editorialGaps.join(", ")} (§14.2) — declare status: "draft" (lowercase; any other spelling counts as stable) if it is not ready for the stable tier`
             : null);
         if (missingMetadata) {
           return { materialized: false, reason: `${missingMetadata} — retrieval binds to these reviewed fields, so the intent is recorded but the concept was not published to the knowledge base; add them in the drafting template and re-review` };
@@ -1529,6 +1529,22 @@ export function createLocalProjectEngine(options = {}) {
         if (rationale.ratified) throw new EngineError("KDLC_STATE_CONFLICT", `${proposalId} is already ratified`, EXIT.conflict);
         const original = await store.get(`workflow/runs/${workflowId}/proposals/${proposalId}.json`);
         if (original.concept.after.frontmatter.status !== "draft") throw inputError(`${proposalId} is not a draft-tier concept`);
+        // FEAT-048 (#156): ratification promotes to stable, so the §14.2
+        // editorial bar applies — check BEFORE minting the promotion
+        // workflow, or a refused promotion wedges the deterministic proposal
+        // id against an orphaned run (review MEDIUM).
+        const draftFrontmatter = original.concept.after.frontmatter;
+        const ratifyToday = new Date().toISOString().slice(0, 10);
+        const ratifyGaps = [
+          ...(typeof draftFrontmatter.type === "string" && draftFrontmatter.type.trim() ? [] : ["type"]),
+          ...(typeof draftFrontmatter.title === "string" && draftFrontmatter.title.trim() ? [] : ["title"]),
+          ...(typeof draftFrontmatter.description === "string" && draftFrontmatter.description.trim() ? [] : ["description"]),
+          ...(draftFrontmatter.freshness === "timeless" || (typeof draftFrontmatter.stale_after === "string" && draftFrontmatter.stale_after > ratifyToday)
+            ? [] : ["stale_after (a future YYYY-MM-DD, or freshness: timeless)"]),
+        ];
+        if (ratifyGaps.length > 0) {
+          throw inputError(`ratifying ${proposalId} would promote it to stable, but the draft lacks ${ratifyGaps.join(", ")} (§14.2) — re-draft the concept with the missing metadata (kdlc proposal --scaffold from its evidence) and publish the update, then ratify`);
+        }
         const evidence = await store.get(`workflow/runs/${workflowId}/state/normalized-evidence.json`);
         const claims = [];
         for (const claimId of original.claim_ids) claims.push(await store.get(`workflow/runs/${workflowId}/claims/${claimId}.json`));

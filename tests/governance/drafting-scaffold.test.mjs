@@ -578,7 +578,7 @@ test("FEAT-048: stable publication enforces the §14.2 editorial metadata; draft
   await new KdlcEngine({ root }).execute("init", { project_id: "editorial.fixture" });
   const engine = createLocalProjectEngine({ root });
   const rights = { license: "LicenseRef-Internal", redistribution: "prohibited", derivative_use: "allowed", commercial_use: "prohibited" };
-  const submitOne = async (filename, marker, proposalId, frontmatterExtra) => {
+  const submitOne = async (filename, marker, proposalId, frontmatterExtra, { auto = false } = {}) => {
     const job = await completedIngest(engine, root, filename, `# S\n\n## Fact\n\n${marker} is recorded here.\n`);
     const scaffold = await engine.execute("proposal", { scaffold: { job_id: job.id, access: "internal", license: "LicenseRef-Internal" } });
     const kit = join(root, ".kdlc/drafting", scaffold.workflow_id);
@@ -590,7 +590,11 @@ test("FEAT-048: stable publication enforces the §14.2 editorial metadata; draft
     template.claims = [{ id: claimId, text: unit.text, source_id: evidence.source_id, source_hash: evidence.source_hash, locator: unit.locator, extraction: "explicit", status: "accepted", access: { classification: "internal" }, rights }];
     template.proposals = [{ api_version: "kdlc.dev/concept-proposal/v1alpha1", id: proposalId, workflow_id: scaffold.workflow_id, task: "ingest", state: "review_pending", target: { knowledge_base_id: "local.editorial", revision: "rev-1", subject: `kb://local.editorial/notes/${proposalId.slice(3)}` }, concept: { before: null, after: { frontmatter: { title: marker, access: { classification: "internal" }, generated: { by: "kdlc-integrator/0.2.0", at: "2026-08-16T20:30:00Z" }, sources: [{ id: "s", resource: `file:${filename}`, source_hash: evidence.source_hash, access: { classification: "internal" }, rights }], ...frontmatterExtra }, body: `# ${marker}\n\nBody.\n` } }, claim_ids: [claimId], claim_decisions: [{ claim_id: claimId, disposition: "accepted", rationale: "explicit" }], created_by: "kdlc-integrator/0.2.0" }];
     await writeFile(join(kit, "recording-template.json"), JSON.stringify(template));
-    const submitted = await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id } });
+    if (auto) {
+      const submitted = await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id, auto: true } });
+      return { published: submitted.published ?? submitted.publications?.[0]?.published ?? submitted };
+    }
+    await engine.execute("proposal", { submit: { workflow_id: scaffold.workflow_id } });
     return engine.execute("publish", { proposal_id: proposalId, decide: "approved", reason: "test" });
   };
   // Stable (default status) without type/description/stale_after: approval
@@ -600,8 +604,19 @@ test("FEAT-048: stable publication enforces the §14.2 editorial metadata; draft
   assert.match(refused.published.reason, /§14\.2/);
   assert.match(refused.published.reason, /type, description, stale_after/);
   // Draft tier stays lenient: same gaps, but declared draft — it lands.
-  const draft = await submitOne("b.md", "BetaFact", "pr_betafact", { status: "draft" });
-  assert.equal(draft.published.materialized, true);
+  const draft = await submitOne("b.md", "BetaFact", "pr_betafact", { status: "draft" }, { auto: true });
+  assert.ok(draft.published, "auto submit publishes the draft");
+  // Ratifying a metadata-poor draft refuses BEFORE minting the promotion
+  // workflow — with re-draft guidance, and retryable (review MEDIUM).
+  await assert.rejects(
+    engine.execute("revisit", { proposal_id: "pr_betafact", reason: "ratify it" }),
+    /would promote it to stable, but the draft lacks type, description, stale_after/
+  );
+  await assert.rejects(
+    engine.execute("revisit", { proposal_id: "pr_betafact", reason: "ratify again" }),
+    /would promote it to stable/,
+    "the refusal is retryable — no orphaned promotion workflow wedges the id"
+  );
   // Full editorial metadata (with timeless freshness) lands at stable.
   const full = await submitOne("c.md", "GammaFact", "pr_gammafact", { type: "Note", description: "A complete note.", freshness: "timeless", tags: ["gamma", "editorial"] });
   assert.equal(full.published.materialized, true);
