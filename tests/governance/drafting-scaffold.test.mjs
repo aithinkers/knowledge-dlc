@@ -103,6 +103,10 @@ test("FEAT-030: scaffold → fill → submit → review → publish runs end to 
   assert.match(await readFile(join(root, "knowledge/primary/index.md"), "utf8"), /\[Concepts\]\(concepts\/\)/);
   const directoryIndex = await readFile(join(root, "knowledge/primary/concepts/policies/index.md"), "utf8");
   assert.match(directoryIndex, /\[API token lifetime\]\(token-lifetime\.md\) - Token lifetime policy\./);
+  // The published indexes must be byte-identical to the lint sensor's
+  // canonical rebuild — publish must never leave lint red (review MAJOR).
+  const lintReport = await engine.execute("lint", {});
+  assert.ok(!lintReport.findings.some(({ rule, sensor_id: sensorId }) => `${rule ?? ""}${sensorId ?? ""}`.includes("INDEX")), "no index drift after publish");
   // …republish is idempotent…
   const again = await engine.execute("publish", { proposal_id: "pr_token", receipt_id: "rr_token", current });
   assert.equal(again.published.already_published, true);

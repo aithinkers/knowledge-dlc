@@ -1401,7 +1401,10 @@ export function createLocalProjectEngine(options = {}) {
           targets: [
             { path: `${base}/${conceptRelative}`, expectedToken: proposal.concept.before === null ? null : existingConceptToken, content: conceptContent },
             ...await Promise.all([...indexFiles].map(async ([relativePath, content]) => ({
-              path: `${base}/${relativePath}`, expectedToken: await priorToken(`${base}/${relativePath}`), content: `${content}\n`,
+              // canonicalText already ends with \n — appending another made
+              // every publish fail the index-reproducibility lint sensor
+              // (review MAJOR).
+              path: `${base}/${relativePath}`, expectedToken: await priorToken(`${base}/${relativePath}`), content,
             }))),
             { path: catalogPath, expectedToken: await priorToken(catalogPath), content: catalogContent },
           ],
@@ -1922,7 +1925,7 @@ export function createLocalProjectEngine(options = {}) {
             }
           }
           const payload = JSON.stringify({ nodes, edges }).replace(/</g, "\\u003c");
-          const html = `<!doctype html><meta charset="utf-8"><title>${String(project.id)} knowledge map</title>
+          const html = `<!doctype html><meta charset="utf-8"><title>${String(project.id).replace(/[<>&]/g, "")} knowledge map</title>
 <style>body{margin:0;font:14px system-ui;display:flex;height:100vh}svg{flex:1;background:#fafafa}aside{width:320px;overflow:auto;border-left:1px solid #ddd;padding:12px}circle{fill:#4a7bd0;cursor:pointer}circle.draft{fill:#d0a04a}circle.deprecated{fill:#999}line{stroke:#bbb}text{font-size:11px;pointer-events:none}</style>
 <svg></svg><aside><h2>Knowledge map</h2><p>Click a node.</p><div id=d></div></aside>
 <script>const DATA=${payload};
