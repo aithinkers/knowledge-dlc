@@ -42,6 +42,7 @@ async function kiroSurface(harness, commands) {
   // The FEAT-035 front-door skill is generated outside CLI_COMMANDS — install
   // it explicitly, rebound like every other skill.
   files.set(".kiro/skills/kdlc-start/SKILL.md", rebind(await readFile(resolve(distribution, ".kiro/skills/kdlc-start/SKILL.md"), "utf8")));
+  files.set(".kiro/skills/kdlc-auto/SKILL.md", rebind(await readFile(resolve(distribution, ".kiro/skills/kdlc-auto/SKILL.md"), "utf8")));
   const instructions = [`Kiro skills invoke the governed runner at ${runner}; keep this package installed at that path (reinstall/upgrade re-runs setup).`];
   if (harness === "kiro-ide") {
     // The protective parity tier (FEAT-040): dual-registered hooks and the

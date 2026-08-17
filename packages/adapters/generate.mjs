@@ -137,6 +137,40 @@ const COMMAND_GUIDANCE = {
   },
 };
 
+const AUTO_SURFACE = `**When to use:** You have a folder (or a big drop) of documents and want them
+taken all the way to published draft knowledge without a conversation per
+file. This is batch auto mode: machine-approved, draft-tier, ratified later.
+
+**What you give it:** a directory or file list, e.g. \`/kdlc:auto docs/\`.
+
+**What you get back:** one summary — documents processed, concepts published
+as drafts, anything skipped or failed with reasons — and a ratification queue
+(\`revisit\`) you review on your own schedule.
+
+Run the whole flow through the governed runner without stopping to report
+between documents (the conductor playbook's batch auto mode step governs the
+loop, including its circuit breaker):
+
+1. **Defaults first**: if \`.kdlc/source-defaults.json\` is missing, ask the
+   user ONCE for access classification and license, then persist them (the
+   \`init\` operation accepts \`--access\`/\`--license\`, or add
+   \`--save-defaults\` on the first scaffold). Never ask again mid-batch.
+2. **Ingest the folder**: run the \`ingest\` operation with the directory
+   path — it expands to every supported file underneath and automatically
+   skips files unchanged since their last ingest (\`--force\` re-normalizes).
+3. **Scaffold everything**: \`proposal\` with \`--scaffold <job-id>
+   --all-sources\` — one kit per document, resumable; already-scaffolded
+   documents skip, undraftable ones are reported.
+4. **Draft, submit, repeat**: for each open kit, fill the recording template
+   with proposals that EXPLICITLY declare \`status: "draft"\`, submit with
+   \`proposal --submit <workflow-id> --auto\` (it refuses non-draft), and
+   move to the next kit without reporting. If several consecutive documents
+   fail the same way, stop and report the pattern.
+5. **One summary**: processed / published-as-draft / skipped / failed, and
+   remind the user that \`revisit\` lists every machine approval awaiting
+   ratification, promotable with \`revisit <proposal-id> --ratify\`.
+`;
+
 const START_SURFACE = `**When to use:** You want to work on this knowledge base and don't want to
 learn the command palette — start here, or say "pick up where we left off".
 
@@ -461,6 +495,10 @@ generated.set(
   "distribution/claude-code/commands/start.md",
   `---\ndescription: Start or resume K-DLC work — assesses state and offers the right next step\nargument-hint: optional goal in plain language\n---\n\n${START_SURFACE.replace("through the governed runner.", 'by invoking ["node", "distribution/claude-code/run.mjs", <operation>, "--output", "json"] directly without a shell.')}`,
 );
+generated.set(
+  "distribution/claude-code/commands/auto.md",
+  `---\ndescription: Batch auto mode — a whole folder to published drafts, one summary, ratify later\nargument-hint: directory or files\n---\n\n${AUTO_SURFACE.replace("through the governed runner", 'by invoking ["node", "distribution/claude-code/run.mjs", <operation>, "--output", "json"] directly without a shell')}`,
+);
 generated.set("distribution/claude-code/hooks/hooks.json", CLAUDE_HOOKS_MANIFEST);
 generated.set("distribution/claude-code/hooks/orient.mjs", ORIENT_HOOK);
 generated.set("distribution/claude-code/hooks/guard.mjs", GUARD_HOOK);
@@ -596,6 +634,10 @@ for (const harness of ["kiro", "kiro-ide"]) {
       `distribution/${harness}/.kiro/skills/kdlc-${command}/SKILL.md`,
       `---\nname: kdlc-${command}\ndescription: Run the governed K-DLC ${command} operation\nuser-invocable: true\n---\n\n${guidanceBlock(command)}Interpret the user arguments as a JSON string array and invoke [\"node\", \"distribution/${harness}/run.mjs\", \"${command}\", \"--output\", \"json\", \"--host-args-json\", <arguments-json>] directly without a shell. Return the exact versioned envelope and do not infer success when \`ok\` is false.\n`,
     );
+  generated.set(
+    `distribution/${harness}/.kiro/skills/kdlc-auto/SKILL.md`,
+    `---\nname: kdlc-auto\ndescription: Batch auto mode — a whole folder to published drafts, one summary, ratify later\nuser-invocable: true\n---\n\n${AUTO_SURFACE.replace("through the governed runner", `by invoking ["node", "distribution/${harness}/run.mjs", <operation>, "--output", "json"] directly without a shell`)}`,
+  );
   generated.set(
     `distribution/${harness}/.kiro/skills/kdlc-start/SKILL.md`,
     `---\nname: kdlc-start\ndescription: Start or resume K-DLC work — assesses state and offers the right next step\nuser-invocable: true\n---\n\n${START_SURFACE.replace("through the governed runner.", `by invoking ["node", "distribution/${harness}/run.mjs", <operation>, "--output", "json"] directly without a shell.`)}`,

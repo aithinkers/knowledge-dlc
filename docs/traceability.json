@@ -1290,6 +1290,27 @@
           "tests/governance/human-surfaces.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-045",
+      "title": "Directory ingest with change detection, init governance defaults, and the auto front door",
+      "issue": 150,
+      "specification_sections": [
+        "14",
+        "25",
+        "34"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/adapters/generate.mjs",
+          "packages/cli/setup.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }
