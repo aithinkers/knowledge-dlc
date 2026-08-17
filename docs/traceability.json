@@ -1273,6 +1273,23 @@
           "tests/governance/lock-resilience.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-044",
+      "title": "Conductor batch auto mode: whole-backlog draft publishing with one summary",
+      "issue": 148,
+      "specification_sections": [
+        "34"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/agents/definitions/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/human-surfaces.test.mjs"
+        ]
+      }
     }
   ]
 }

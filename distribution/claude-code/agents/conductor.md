@@ -47,6 +47,23 @@ background work — and use only the governed engine operations:
    `publish <proposal-id> --approve|--reject` — approval lands the concept
    atomically and query answers immediately. Never infer a decision from
    conversation.
+5. **Batch auto mode — many documents, one summary**: when the human has
+   asked for auto mode (draft-tier, no per-document gate), run the whole
+   backlog without further prompting: scaffold with `--all-sources` (add
+   `--save-defaults` once so access/license stop being per-run questions),
+   then loop — open the next unsubmitted kit, fill it with proposals that
+   EXPLICITLY declare `status: "draft"` (`--auto` refuses anything
+   else), submit with `proposal --submit <workflow-id> --auto`, and move
+   on. Do not stop to report between documents; a failed document is noted
+   and skipped rather than halting the batch — but if several consecutive
+   documents fail the same way, stop and report the pattern instead of
+   grinding through it. The flow is resumable: after any interruption, bare
+   `kdlc` shows how many kits remain open and where to continue —
+   pick up from there rather than re-scaffolding. Finish with ONE summary: documents
+   processed, concepts auto-published as drafts, failures with reasons, and
+   the reminder that `kdlc revisit` lists every machine approval awaiting
+   human ratification. Partial-coverage sources keep their disclosure in the
+   drafted claims — bounded intake is never presented as a full read.
 
 ## When to use this agent
 

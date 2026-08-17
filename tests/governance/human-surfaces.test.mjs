@@ -204,3 +204,16 @@ test("FEAT-040: kiro-ide setup installs the full protective tier into a project 
   const roleManifest = JSON.parse(await readFile(join(target, ".kiro/agents/conductor.json"), "utf8"));
   assert.deepEqual(roleManifest.resources, ["file://.kiro/agents/conductor.md", "file://.kiro/kdlc/AGENTS.md", "file://.kiro/kdlc/guides/*.md"]);
 });
+
+test("FEAT-044: the conductor playbook carries the batch auto-mode loop on every surface (#148)", async () => {
+  const conductor = AGENT_DEFINITIONS.find(({ role }) => role === "conductor");
+  for (const render of [renderAgentMarkdown, renderCodexAgentMarkdown, renderKiroAgentPrompt]) {
+    const body = render(conductor);
+    assert.match(body, /Batch auto mode — many documents, one summary/);
+    assert.match(body, /EXPLICITLY declare \`status: "draft"\`/);
+    assert.match(body, /failed document is noted\n\s+and skipped rather than halting/);
+    assert.match(body, /several consecutive\n\s+documents fail the same way, stop and report the pattern/);
+    assert.match(body, /kdlc revisit\` lists every machine approval/);
+    assert.match(body, /bounded intake is never presented as a full read/);
+  }
+});
