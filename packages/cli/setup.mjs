@@ -32,10 +32,16 @@ async function kiroSurface(harness, commands) {
     files.set(`.kiro/agents/${agent.role}.md`, renderKiroAgentPrompt(agent));
   }
   const distribution = resolve(packageRoot, `distribution/${harness}`);
-  files.set(".kiro/kdlc/AGENTS.md", await readFile(resolve(distribution, "AGENTS.md"), "utf8"));
+  // Copied prose references the checkout-relative runner; installed projects
+  // must name the absolute one or the docs contradict the permission gate.
+  const rebind = (text) => text.replaceAll(`distribution/${harness}/run.mjs`, runner);
+  files.set(".kiro/kdlc/AGENTS.md", rebind(await readFile(resolve(distribution, "AGENTS.md"), "utf8")));
   for (const guide of ["asking-questions", "bringing-knowledge-in", "connecting-remote-sources", "keeping-it-healthy", "review-and-publish", "when-something-is-wrong"]) {
-    files.set(`.kiro/kdlc/guides/${guide}.md`, await readFile(resolve(distribution, `guides/${guide}.md`), "utf8"));
+    files.set(`.kiro/kdlc/guides/${guide}.md`, rebind(await readFile(resolve(distribution, `guides/${guide}.md`), "utf8")));
   }
+  // The FEAT-035 front-door skill is generated outside CLI_COMMANDS — install
+  // it explicitly, rebound like every other skill.
+  files.set(".kiro/skills/kdlc-start/SKILL.md", rebind(await readFile(resolve(distribution, ".kiro/skills/kdlc-start/SKILL.md"), "utf8")));
   const instructions = [`Kiro skills invoke the governed runner at ${runner}; keep this package installed at that path (reinstall/upgrade re-runs setup).`];
   if (harness === "kiro-ide") {
     // The protective parity tier (FEAT-040): dual-registered hooks and the
@@ -47,7 +53,7 @@ async function kiroSurface(harness, commands) {
     door.toolsSettings.execute_bash.allowedCommands = [`node ${escapeRegex(runner)} [a-z-]+( [A-Za-z0-9@=_"\\[\\],{}:. /-]*)?`];
     door.resources = ["file://.kiro/kdlc/AGENTS.md", "file://.kiro/kdlc/guides/*.md"];
     files.set(".kiro/agents/kdlc.json", `${canonicalJson(door)}\n`);
-    files.set(".kiro/agents/kdlc.md", await readFile(resolve(distribution, ".kiro/agents/kdlc.md"), "utf8"));
+    files.set(".kiro/agents/kdlc.md", rebind(await readFile(resolve(distribution, ".kiro/agents/kdlc.md"), "utf8")));
     instructions.push("Kiro IDE hooks installed (dual-registered for 0.12 and 1.x): session orientation and a guard blocking direct edits to governed knowledge state.");
   }
   return { files, instructions };

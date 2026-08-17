@@ -186,9 +186,15 @@ test("FEAT-040: kiro-ide setup installs the full protective tier into a project 
     ".kiro/agents/kdlc.json", ".kiro/agents/kdlc.md",
     ".kiro/hooks/kdlc-guard.mjs", ".kiro/hooks/kdlc-guard.kiro.hook", ".kiro/hooks/kdlc-guard.json",
     ".kiro/hooks/kdlc-orient.mjs", ".kiro/hooks/kdlc-orient.kiro.hook", ".kiro/hooks/kdlc-orient.json",
-    ".kiro/kdlc/AGENTS.md", ".kiro/kdlc/guides/review-and-publish.md"
+    ".kiro/kdlc/AGENTS.md", ".kiro/kdlc/guides/review-and-publish.md", ".kiro/skills/kdlc-start/SKILL.md"
   ]) {
     assert.ok(result.files.includes(file), `setup installs ${file}`);
+  }
+  // Installed prose must name the absolute runner, never the checkout-relative
+  // path its own permission gate would deny (review HIGH).
+  for (const doc of [".kiro/agents/kdlc.md", ".kiro/kdlc/AGENTS.md", ".kiro/skills/kdlc-start/SKILL.md"]) {
+    const text = await readFile(join(target, doc), "utf8");
+    assert.ok(!text.includes('"distribution/kiro-ide/run.mjs"'), `${doc} names the installed runner`);
   }
   // Installed manifests bind the runner absolutely and keep context under
   // .kiro/kdlc/ so setup never collides with the project's own root files.
