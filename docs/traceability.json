@@ -1163,6 +1163,24 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-038",
+      "title": "publish --show tolerates minimal frontmatter: shown packets always canonicalize",
+      "issue": 135,
+      "specification_sections": [
+        "14",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }
