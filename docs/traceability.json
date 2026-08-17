@@ -1326,6 +1326,27 @@
         ],
         "tests": []
       }
+    },
+    {
+      "id": "FEAT-047",
+      "title": "Hierarchical publish-time indexes and the self-contained knowledge map",
+      "issue": 154,
+      "specification_sections": [
+        "8",
+        "25",
+        "27"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/adapters/generate.mjs",
+          "docs/getting-started.md"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }

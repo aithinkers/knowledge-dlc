@@ -150,7 +150,8 @@ unauthenticated project server.
 ## Command reference
 
 Argument-free: `init`, `status`, `doctor`, `lint`, `jobs`, `revisit`, `conflicts`,
-`gaps`, `refresh`, `reconcile-edits`. Require arguments: `adopt <source...>`,
+`gaps`, `refresh`, `reconcile-edits`, `visualize` (writes a self-contained
+interactive map of the published knowledge base to `knowledge/<base>/viz.html`). Require arguments: `adopt <source...>`,
 `ingest <source...>`, `query <question>`, `trace <kb://...>`,
 `setup <tool>[,...] <project-dir>`, `review <proposal-id> <decision> <receipt-id>`,
 `publish <proposal-id> <receipt-id>`, `proposal <json>`, `migrate <json>`.

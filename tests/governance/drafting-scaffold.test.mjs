@@ -97,7 +97,16 @@ test("FEAT-030: scaffold → fill → submit → review → publish runs end to 
   const conceptText = await readFile(join(root, publication.published.concept), "utf8");
   assert.match(conceptText, /^---\n/);
   assert.match(conceptText, /Production API tokens expire after 60 minutes\./);
-  assert.match(await readFile(join(root, "knowledge/primary/index.md"), "utf8"), /API token lifetime/);
+  // FEAT-047: hierarchical progressive-disclosure indexes — the root lists
+  // directories; the concept's own directory index carries its reviewed
+  // title and description.
+  assert.match(await readFile(join(root, "knowledge/primary/index.md"), "utf8"), /\[Concepts\]\(concepts\/\)/);
+  const directoryIndex = await readFile(join(root, "knowledge/primary/concepts/policies/index.md"), "utf8");
+  assert.match(directoryIndex, /\[API token lifetime\]\(token-lifetime\.md\) - Token lifetime policy\./);
+  // The published indexes must be byte-identical to the lint sensor's
+  // canonical rebuild — publish must never leave lint red (review MAJOR).
+  const lintReport = await engine.execute("lint", {});
+  assert.ok(!lintReport.findings.some(({ rule, sensor_id: sensorId }) => `${rule ?? ""}${sensorId ?? ""}`.includes("INDEX")), "no index drift after publish");
   // …republish is idempotent…
   const again = await engine.execute("publish", { proposal_id: "pr_token", receipt_id: "rr_token", current });
   assert.equal(again.published.already_published, true);
@@ -539,4 +548,27 @@ test("FEAT-045: directory ingest expands, skips unchanged files, and init persis
   assert.deepEqual(changed.result.skipped_unchanged, ["docs/sub/two.md"]);
   const forced = await runToCompletion(engine, await engine.execute("ingest_start", { sources: ["docs"], force: true, idempotency_key: "dir-4" }));
   assert.equal(forced.result.normalized.length, 2, "--force renormalizes unchanged files");
+});
+
+test("FEAT-047: visualize renders a self-contained knowledge map from the catalog (#154)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-viz-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "viz.fixture" });
+  const engine = createLocalProjectEngine({ root });
+  await assert.rejects(engine.execute("visualize", {}).then((r) => { if (r.nodes === 0) throw new Error("empty ok"); }), /empty ok/);
+  // Seed a published concept directly through the catalog contract shape.
+  const concept = "---\ntype: Policy\ntitle: Viz Policy\ndescription: A mapped policy.\nstatus: stable\naccess: { classification: internal }\nrelationships:\n  - { type: derives-from, target: \"kb://viz.fixture/concepts/other/thing\" }\n---\n\nBody.\n";
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(join(root, "knowledge/primary/concepts/policies"), { recursive: true });
+  await writeFile(join(root, "knowledge/primary/concepts/policies/viz-policy.md"), concept);
+  await writeFile(join(root, "knowledge/primary/retrieval-catalog.json"), JSON.stringify({
+    version: "kdlc-retrieval-catalog-1",
+    concepts: [{ id: "concepts/policies/viz-policy", path: "concepts/policies/viz-policy.md", byte_hash: "sha256:" + "a".repeat(64), access: { classification: "internal" } }]
+  }));
+  const result = await engine.execute("visualize", {});
+  assert.equal(result.nodes, 1);
+  assert.equal(result.edges, 1);
+  const html = await readFile(join(root, "knowledge/primary/viz.html"), "utf8");
+  assert.match(html, /Viz Policy/);
+  assert.match(html, /A mapped policy\./);
+  assert.ok(!/https?:\/\//.test(html.replace(/http:\/\/www\.w3\.org\/2000\/svg/g, "")), "no external dependencies");
 });

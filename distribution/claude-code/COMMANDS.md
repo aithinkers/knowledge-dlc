@@ -20,6 +20,7 @@ palette entry are invoked through the governed runner
 - /kdlc:lint → `kdlc lint --output json`
 - /kdlc:refresh → `kdlc refresh --output json`
 - /kdlc:trace → `kdlc trace --output json`
+- /kdlc:visualize → `kdlc visualize --output json`
 - /kdlc:conflicts → `kdlc conflicts --output json`
 - /kdlc:gaps → `kdlc gaps --output json`
 - /kdlc:migrate → `kdlc migrate --output json`
