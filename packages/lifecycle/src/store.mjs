@@ -266,7 +266,9 @@ export class NodeFileStore {
         }
         if (stale) {
           const claimPath = `${relativePath}.reclaim`;
-          const recovery = `${relativePath}.recovery-${encodeURIComponent(owner)}`;
+          // Hash the owner: it embeds the resource name, and appending it
+          // verbatim can overflow the filename component limit (#146).
+          const recovery = `${relativePath}.recovery-${this.token(owner).slice(7, 39)}`;
           let ownsClaim = false;
           try {
             const claim = await this.safePath(claimPath);
