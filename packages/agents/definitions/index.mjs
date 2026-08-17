@@ -342,9 +342,20 @@ export function renderKiroAgentManifest(definition, { harness }) {
       toolsSettings: {
         // Argument tail excludes every shell metacharacter so a prompt-injected
         // "; extra-command" can never ride through the allowlist (§5.7).
-        execute_bash: { allowedCommands: [`node (\\./)?distribution/${harness}/run\\.mjs [a-z-]+( [A-Za-z0-9@=_"\\[\\],{}:. /-]*)?`] },
+        execute_bash: {
+          allowedCommands: [`node (\\./)?distribution/${harness}/run\\.mjs [a-z-]+( [A-Za-z0-9@=_"\\[\\],{}:. /-]*)?`],
+          // Defense-in-depth mirroring the aidlc-workflows kiro surface:
+          // recursive deletes and git push never belong to an agent turn.
+          deniedCommands: ["([^\\s]*/)?rm( [^\\s]+)* -[A-Za-z]*[rR][A-Za-z]*( .*)?", "([^\\s]*/)?git( [^\\s]+)* push( .*)?"],
+        },
+        // Direct writes stay inside K-DLC runtime state (drafting kits,
+        // workspace); canonical knowledge changes go through the engine.
+        fs_write: { allowedPaths: [".kdlc/**", "workspace/**"] },
       },
     }),
+    // Load the agent's own prompt, the harness contract, and the shipped
+    // plain-language guides into context (parity with aidlc dist/kiro-ide).
+    resources: [`file://.kiro/agents/${role}.md`, "file://AGENTS.md", "file://guides/*.md"],
   };
   return manifest;
 }

@@ -1,0 +1,1 @@
+{"description":"Blocks direct edits to governed knowledge state so changes flow through proposal and review.","enabled":true,"name":"kdlc-guard","then":{"command":"node .kiro/hooks/kdlc-guard.mjs","type":"runCommand"},"version":"1.0.0","when":{"toolTypes":["write"],"type":"preToolUse"}}

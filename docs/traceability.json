@@ -1199,6 +1199,25 @@
           "tests/governance/cli-hints.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-040",
+      "title": "Kiro IDE distribution parity: front-door agent, native hooks, resources, hardened toolsSettings",
+      "issue": 140,
+      "specification_sections": [
+        "5.7",
+        "36"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/adapters/generate.mjs",
+          "packages/agents/definitions/index.mjs"
+        ],
+        "tests": [
+          "tests/governance/human-surfaces.test.mjs"
+        ]
+      }
     }
   ]
 }
