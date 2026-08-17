@@ -1341,10 +1341,24 @@ export function createLocalProjectEngine(options = {}) {
         // Concepts reviewed without them keep the pre-FEAT-033 contract —
         // authorization recorded, nothing materialized — with the reason
         // stated so the drafter can fix and re-review.
+        // FEAT-048 (#156): §14.2 stable-publication requirements. Draft-tier
+        // concepts stay lenient (that is their point); anything else must
+        // carry the editorial metadata the spec requires before it lands.
+        const stableTier = frontmatter.status !== "draft";
+        const today = new Date().toISOString().slice(0, 10);
+        const editorialGaps = !stableTier ? [] : [
+          ...(typeof frontmatter.type === "string" && frontmatter.type.trim() ? [] : ["type"]),
+          ...(typeof frontmatter.title === "string" && frontmatter.title.trim() ? [] : ["title"]),
+          ...(typeof frontmatter.description === "string" && frontmatter.description.trim() ? [] : ["description"]),
+          ...(frontmatter.freshness === "timeless" || (typeof frontmatter.stale_after === "string" && frontmatter.stale_after > today)
+            ? [] : ["stale_after (a future YYYY-MM-DD, or freshness: timeless)"]),
+        ];
         const missingMetadata = !frontmatter.access || typeof frontmatter.access.classification !== "string"
           ? `the concept frontmatter lacks access.classification (e.g. "${kbAccess}")`
           : (frontmatter.sources ?? []).filter((source) => typeof source.resource !== "string" || !source.access?.classification || !source.rights?.license)
-              .map((source) => `source "${source.id}" lacks resource/access/rights`).join("; ") || null;
+              .map((source) => `source "${source.id}" lacks resource/access/rights`).join("; ") || (editorialGaps.length
+            ? `a stable concept requires ${editorialGaps.join(", ")} (§14.2) — declare status: "draft" if it is not ready for the stable tier`
+            : null);
         if (missingMetadata) {
           return { materialized: false, reason: `${missingMetadata} — retrieval binds to these reviewed fields, so the intent is recorded but the concept was not published to the knowledge base; add them in the drafting template and re-review` };
         }
@@ -1798,7 +1812,11 @@ export function createLocalProjectEngine(options = {}) {
       "2. Add proposals: `kdlc.dev/concept-proposal/v1alpha1` entries with `id` matching pr_<lowercase+digits>,",
       "   `workflow_id: \"" + workflowId + "\"`, `task: \"ingest\"`, `state: \"review_pending\"`, a `target`",
       "   (knowledge_base_id/revision/subject), the OKF `concept` ({before: null, after: {frontmatter, body}}) —",
-      "   frontmatter MUST include `access: {classification: \"" + access + "\"}` (retrieval binds to it) and",
+      "   frontmatter MUST include `access: {classification: \"" + access + "\"}` (retrieval binds to it);",
+      "   a STABLE concept additionally requires `type`, `title`, `description`, and a future `stale_after`",
+      "   (or `freshness: \"timeless\"`) — publication refuses stable concepts without them (§14.2); declare",
+      "   `status: \"draft\"` while content is not ready for that bar. `tags: [..]` are recommended —",
+      "   retrieval ranks tag matches and the knowledge map shows them — and",
       "   each `sources` entry MUST carry `id`, `resource` (e.g. \"file:sources/<name>\"), `source_hash`,",
       "   `access` and `rights` matching this kit's declarations (answers are withheld unless the requester",
       "   may see the concept AND every disclosed source),",
@@ -1918,7 +1936,7 @@ export function createLocalProjectEngine(options = {}) {
           for (const entry of catalog.concepts) {
             let fm = {};
             try { fm = parseYaml((await catalogStore.readText(`${base}/${entry.path}`)).split(/^---$/m)[1] ?? "") ?? {}; } catch { /* node still renders */ }
-            nodes.push({ id: entry.id, title: String(fm.title ?? entry.id), description: String(fm.description ?? ""), type: String(fm.type ?? "Concept"), status: String(fm.status ?? "stable"), access: entry.access?.classification ?? "internal" });
+            nodes.push({ id: entry.id, title: String(fm.title ?? entry.id), description: String(fm.description ?? ""), type: String(fm.type ?? "Concept"), status: String(fm.status ?? "stable"), access: entry.access?.classification ?? "internal", tags: Array.isArray(fm.tags) ? fm.tags.map(String) : [] });
             for (const relationship of fm.relationships ?? []) {
               const target = String(relationship?.target ?? "").replace(/^kb:\/\/[^/]+\//, "");
               if (target) edges.push({ from: entry.id, to: `concepts/${target}`.replace(/^concepts\/concepts\//, "concepts/"), kind: String(relationship?.type ?? "related") });
@@ -1938,7 +1956,7 @@ for(let t=0;t<300;t++){for(let i=0;i<pos.length;i++)for(let j=i+1;j<pos.length;j
 for(const e of DATA.edges){const a=pos[idx.get(e.from)],b=pos[idx.get(e.to)];if(!a||!b)continue;const dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+0.01,f=(d-120)*0.01;a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
 for(const q of pos){q.vx+=(W()/2-q.x)*0.002;q.vy+=(H()/2-q.y)*0.002;q.x+=q.vx*=0.85;q.y+=q.vy*=0.85;}}
 for(const e of DATA.edges){const a=pos[idx.get(e.from)],b=pos[idx.get(e.to)];if(!a||!b)continue;const l=document.createElementNS(ns,"line");l.setAttribute("x1",a.x);l.setAttribute("y1",a.y);l.setAttribute("x2",b.x);l.setAttribute("y2",b.y);svg.appendChild(l);}
-DATA.nodes.forEach((n,i)=>{const g=document.createElementNS(ns,"g");const c=document.createElementNS(ns,"circle");c.setAttribute("cx",pos[i].x);c.setAttribute("cy",pos[i].y);c.setAttribute("r",9);c.setAttribute("class",n.status);c.addEventListener("click",()=>{detail.innerHTML="";const h=document.createElement("h3");h.textContent=n.title;const meta=document.createElement("p");meta.textContent=n.type+" · "+n.status+" · "+n.access;const p=document.createElement("p");p.textContent=n.description;const code=document.createElement("code");code.textContent="kb://"+n.id;detail.append(h,meta,p,code);});
+DATA.nodes.forEach((n,i)=>{const g=document.createElementNS(ns,"g");const c=document.createElementNS(ns,"circle");c.setAttribute("cx",pos[i].x);c.setAttribute("cy",pos[i].y);c.setAttribute("r",9);c.setAttribute("class",n.status);c.addEventListener("click",()=>{detail.innerHTML="";const h=document.createElement("h3");h.textContent=n.title;const meta=document.createElement("p");meta.textContent=n.type+" · "+n.status+" · "+n.access+(n.tags.length?" · #"+n.tags.join(" #"):"");const p=document.createElement("p");p.textContent=n.description;const code=document.createElement("code");code.textContent="kb://"+n.id;detail.append(h,meta,p,code);});
 const t=document.createElementNS(ns,"text");t.setAttribute("x",pos[i].x+11);t.setAttribute("y",pos[i].y+4);t.textContent=n.title.slice(0,28);g.append(c,t);svg.appendChild(g);});
 </script>`;
           await writeFile(resolve(root, base, "viz.html"), html);

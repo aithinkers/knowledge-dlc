@@ -25,7 +25,10 @@ function stale(frontmatter, today) { return frontmatter.stale_after !== undefine
 function list(value) { return Array.isArray(value) ? value : []; }
 function rawScore(query, concept) {
   const title = terms(concept.frontmatter.title ?? concept.id); const description = terms(concept.frontmatter.description ?? ""); const body = terms(concept.body);
-  return query.reduce((score, term) => score + (title.includes(term) ? 5 : 0) + (description.includes(term) ? 3 : 0) + (body.includes(term) ? 1 : 0), 0);
+  // Tags are curated signals: a tag match outranks prose mentions but not
+  // the title itself (FEAT-048).
+  const tags = terms((Array.isArray(concept.frontmatter.tags) ? concept.frontmatter.tags : []).join(" "));
+  return query.reduce((score, term) => score + (title.includes(term) ? 5 : 0) + (tags.includes(term) ? 4 : 0) + (description.includes(term) ? 3 : 0) + (body.includes(term) ? 1 : 0), 0);
 }
 function noDisclosure() {
   return { status: "not_found", results: [], citations: [], conflicts: [], warnings: [], timing_class: "bounded-floor" };
