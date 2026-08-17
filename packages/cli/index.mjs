@@ -216,7 +216,7 @@ export class KdlcEngine {
       const coded =
         typeof error?.code === "string" &&
         error.code.startsWith("KDLC_") &&
-        ["GovernanceError", "AgentPolicyError"].includes(error?.name);
+        ["GovernanceError", "AgentPolicyError", "FederationError"].includes(error?.name);
       // Exit classes are a stable §25 contract: conflicts and missing
       // dependencies must not masquerade as policy refusals.
       const codedClass = !coded

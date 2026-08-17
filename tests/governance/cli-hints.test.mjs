@@ -78,6 +78,14 @@ test("FEAT-031: governed refusals surface their real code and details through th
   assert.ok(!JSON.stringify(masked).includes("secret internals"));
 });
 
+test("FEAT-031: federation refusals pass through with their real code instead of masking as internal (#138)", async () => {
+  const { FederationError } = await import("../../packages/federation/src/errors.mjs");
+  const engine = new KdlcEngine({ handlers: { status: () => { throw new FederationError("KDLC_PROJECT_INVALID", "Project manifest is invalid", { contract: [{ message: "must have required property 'priority'" }] }); } } });
+  const envelope = await engine.envelope("status", {});
+  assert.equal(envelope.error.code, "KDLC_PROJECT_INVALID");
+  assert.match(JSON.stringify(envelope.error.details), /priority/, "the actionable detail reaches the user");
+});
+
 test("FEAT-031: coded refusals keep the exit-class taxonomy and never break the envelope", async () => {
   const { GovernanceError } = await import("../../packages/governance/index.mjs");
   const make = (code, extra = {}) => new KdlcEngine({ handlers: { status: () => { throw Object.assign(new GovernanceError(code, "m"), extra); } } });
