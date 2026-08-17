@@ -346,7 +346,7 @@ export function renderKiroAgentManifest(definition, { harness }) {
           allowedCommands: [`node (\\./)?distribution/${harness}/run\\.mjs [a-z-]+( [A-Za-z0-9@=_"\\[\\],{}:. /-]*)?`],
           // Defense-in-depth mirroring the aidlc-workflows kiro surface:
           // recursive deletes and git push never belong to an agent turn.
-          deniedCommands: ["([^\\s]*/)?rm( [^\\s]+)* -[A-Za-z]*[rR][A-Za-z]*( .*)?", "([^\\s]*/)?git( [^\\s]+)* push( .*)?"],
+          deniedCommands: ["([^\\s]*/)?rm( [^\\s]+)* -[A-Za-z]*[rR][A-Za-z]*( .*)?", "([^\\s]*/)?rm( [^\\s]+)* --recursive( .*)?", "([^\\s]*/)?git( -[^\\s]+( (\"[^\"]*\"|'[^']*'|[^\\s]+))?)* push( .*)?"],
         },
         // Direct writes stay inside K-DLC runtime state (drafting kits,
         // workspace); canonical knowledge changes go through the engine.
