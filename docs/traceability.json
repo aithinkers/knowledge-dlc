@@ -1311,6 +1311,21 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-046",
+      "title": "README OKF reference links directly to the OKF specification document",
+      "issue": 152,
+      "specification_sections": [
+        "2"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "README.md"
+        ],
+        "tests": []
+      }
     }
   ]
 }
