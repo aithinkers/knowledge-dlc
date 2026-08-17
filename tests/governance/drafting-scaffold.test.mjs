@@ -505,6 +505,16 @@ test("FEAT-045: directory ingest expands, skips unchanged files, and init persis
   assert.equal(defaults.access, "internal");
   assert.equal(defaults.license, "LicenseRef-Internal");
 
+  // A bad flag pair fails BEFORE any disk write, so the corrective retry
+  // works instead of finding a half-scaffolded directory (review MEDIUM).
+  const half = await mkdtemp(join(tmpdir(), "kdlc-init-guard-"));
+  await assert.rejects(
+    new KdlcEngine({ root: half }).execute("init", { project_id: "guard.fixture", access: "internal" }),
+    /requires --license/
+  );
+  const retried = await new KdlcEngine({ root: half }).execute("init", { project_id: "guard.fixture", access: "internal", license: "LicenseRef-Internal" });
+  assert.ok(retried.project_id ?? retried, "the corrective retry succeeds cleanly");
+
   const { mkdir } = await import("node:fs/promises");
   await mkdir(join(root, "docs/sub"), { recursive: true });
   await writeFile(join(root, "docs/one.md"), "# One\n\nFact one lives here.\n");

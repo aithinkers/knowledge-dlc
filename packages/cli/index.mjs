@@ -387,6 +387,13 @@ export class KdlcEngine {
         .toLowerCase()
         .replace(/[^a-z0-9._-]+/g, "-");
     if (!portable(id)) throw inputError("Project ID must be portable");
+    // Governance-defaults validation must precede every disk write: failing
+    // after the scaffold landed left a directory that could neither init
+    // again nor pass "already initialized" (review MEDIUM, #150).
+    if (input.access !== undefined || input.license !== undefined) {
+      if (!["public", "internal", "restricted"].includes(input.access)) throw inputError("init --access must be public, internal, or restricted");
+      if (typeof input.license !== "string" || input.license.length === 0) throw inputError("init --access requires --license <spdx-or-LicenseRef> alongside it");
+    }
     const path = this.path("project.json");
     if (await exists(path))
       throw new EngineError(
@@ -416,8 +423,6 @@ export class KdlcEngine {
     };
     await this.store.ensureDir(".kdlc/governed");
     if (input.access !== undefined || input.license !== undefined) {
-      if (!["public", "internal", "restricted"].includes(input.access)) throw inputError("init --access must be public, internal, or restricted");
-      if (typeof input.license !== "string" || input.license.length === 0) throw inputError("init --access requires --license <spdx-or-LicenseRef> alongside it");
       await this.store.ensureDir(".kdlc");
       await atomicJson(resolve(this.root, ".kdlc/source-defaults.json"), {
         api_version: "kdlc.dev/source-defaults/v1", access: input.access, license: input.license,
@@ -838,7 +843,7 @@ export function parseCli(argv) {
     if (flagValue("--project-id") !== undefined) input.project_id = flagValue("--project-id");
   }
   if (["adopt", "ingest", "refresh"].includes(operation)) {
-    if (positionals.includes("--force")) {
+    if (["adopt", "ingest"].includes(operation) && positionals.includes("--force")) {
       input.force = true;
       positionals.splice(positionals.indexOf("--force"), 1);
     }
@@ -1176,7 +1181,11 @@ export function createLocalProjectEngine(options = {}) {
     const skippedUnchanged = [];
     sources = [];
     for (const source of expandedSources) {
-      const bytes = await readFile(await realpath(resolve(root, source)));
+      const resolved = await realpath(resolve(root, source));
+      if (!(resolved === canonicalRoot || resolved.startsWith(`${canonicalRoot}/`))) {
+        throw new EngineError("KDLC_POLICY_DENIED", "Source escapes the project root", EXIT.policy);
+      }
+      const bytes = await readFile(resolved);
       const digestNow = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       // Remote descriptors align by index to explicit files, so skipping
       // would misalign them — remote ingests always process.
