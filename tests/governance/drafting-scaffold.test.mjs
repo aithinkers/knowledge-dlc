@@ -7,6 +7,16 @@ import test from "node:test";
 import { KdlcEngine, createLocalProjectEngine, parseCli } from "../../packages/cli/index.mjs";
 import { canonicalJson } from "../../packages/core/index.mjs";
 
+async function runToCompletion(engine, started) {
+  let job = started;
+  for (let attempt = 0; attempt < 100 && !["completed", "failed"].includes(job.state); attempt += 1) {
+    await new Promise((resolveSleep) => setTimeout(resolveSleep, 50));
+    job = await engine.execute("job_status", { id: started.id });
+  }
+  assert.equal(job.state, "completed");
+  return job;
+}
+
 async function completedIngest(engine, root, filename, content) {
   await writeFile(join(root, filename), content);
   const started = await engine.execute("ingest_start", { sources: [filename], idempotency_key: `fixture-${filename}` });
@@ -485,4 +495,38 @@ test("FEAT-042: sparse CLI input surfaces its real input error, not KDLC_CANONIC
   const envelope = await new KdlcEngine().envelope(parsed.operation, { scaffold: { job_id: "job_0123456789abcdef", access: undefined, license: undefined } });
   assert.equal(envelope.ok, false);
   assert.notEqual(envelope.error.code, "KDLC_CANONICAL_INVALID", "correlation survives sparse input");
+});
+
+test("FEAT-045: directory ingest expands, skips unchanged files, and init persists governance defaults (#150)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kdlc-dir-ingest-"));
+  await new KdlcEngine({ root }).execute("init", { project_id: "dir.fixture", access: "internal", license: "LicenseRef-Internal" });
+  // init --access/--license persists the FEAT-034 source defaults.
+  const defaults = JSON.parse(await readFile(join(root, ".kdlc/source-defaults.json"), "utf8"));
+  assert.equal(defaults.access, "internal");
+  assert.equal(defaults.license, "LicenseRef-Internal");
+
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(join(root, "docs/sub"), { recursive: true });
+  await writeFile(join(root, "docs/one.md"), "# One\n\nFact one lives here.\n");
+  await writeFile(join(root, "docs/sub/two.md"), "# Two\n\nFact two lives here.\n");
+  await writeFile(join(root, "docs/ignored.xyz"), "unsupported");
+  const engine = createLocalProjectEngine({ root });
+
+  const first = await runToCompletion(engine, await engine.execute("ingest_start", { sources: ["docs"], idempotency_key: "dir-1" }));
+  assert.equal(first.result.normalized.length, 2, "a directory expands to its supported files only");
+
+  // Unchanged re-ingest: everything skips, nothing renormalizes.
+  const again = await engine.execute("ingest_start", { sources: ["docs"], idempotency_key: "dir-2" });
+  const settled = again.state ? (await runToCompletion(engine, again)).result : again;
+  assert.deepEqual(settled.normalized, []);
+  assert.equal(settled.skipped_unchanged.length, 2);
+  assert.match(settled.note ?? "", /--force/);
+
+  // A changed file re-ingests alone; --force renormalizes everything.
+  await writeFile(join(root, "docs/one.md"), "# One\n\nFact one CHANGED.\n");
+  const changed = await runToCompletion(engine, await engine.execute("ingest_start", { sources: ["docs"], idempotency_key: "dir-3" }));
+  assert.equal(changed.result.normalized.length, 1);
+  assert.deepEqual(changed.result.skipped_unchanged, ["docs/sub/two.md"]);
+  const forced = await runToCompletion(engine, await engine.execute("ingest_start", { sources: ["docs"], force: true, idempotency_key: "dir-4" }));
+  assert.equal(forced.result.normalized.length, 2, "--force renormalizes unchanged files");
 });

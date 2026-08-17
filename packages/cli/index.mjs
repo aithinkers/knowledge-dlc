@@ -10,7 +10,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, extname, relative, resolve } from "node:path";
 
 import {
   artifactHash,
@@ -415,6 +415,15 @@ export class KdlcEngine {
       ],
     };
     await this.store.ensureDir(".kdlc/governed");
+    if (input.access !== undefined || input.license !== undefined) {
+      if (!["public", "internal", "restricted"].includes(input.access)) throw inputError("init --access must be public, internal, or restricted");
+      if (typeof input.license !== "string" || input.license.length === 0) throw inputError("init --access requires --license <spdx-or-LicenseRef> alongside it");
+      await this.store.ensureDir(".kdlc");
+      await atomicJson(resolve(this.root, ".kdlc/source-defaults.json"), {
+        api_version: "kdlc.dev/source-defaults/v1", access: input.access, license: input.license,
+        saved_by: "init", saved_at: new Date().toISOString()
+      });
+    }
     await atomicJson(resolve(this.root, "knowledge/primary/retrieval-catalog.json"), { version: "kdlc-retrieval-catalog-1", concepts: [] });
     await atomicJson(path, project);
     await atomicJson(this.path("principal-policy.json"), {
@@ -817,7 +826,22 @@ export function parseCli(argv) {
       throw inputError("--remote-json must be a JSON array of remote source descriptors (null entries for local sources)");
     }
   }
+  if (operation === "init" || operation === "project_init") {
+    const flagValue = (name) => {
+      const at = positionals.indexOf(name);
+      return at === -1 ? undefined : positionals[at + 1];
+    };
+    // FEAT-045 (#150): governance defaults may be settled once at init so
+    // batch flows never stop to ask per document.
+    if (flagValue("--access") !== undefined) input.access = flagValue("--access");
+    if (flagValue("--license") !== undefined) input.license = flagValue("--license");
+    if (flagValue("--project-id") !== undefined) input.project_id = flagValue("--project-id");
+  }
   if (["adopt", "ingest", "refresh"].includes(operation)) {
+    if (positionals.includes("--force")) {
+      input.force = true;
+      positionals.splice(positionals.indexOf("--force"), 1);
+    }
     if (["adopt", "ingest"].includes(operation) && positionals.length === 0)
       throw inputError(`${operation} requires at least one source`);
     input.sources = positionals;
@@ -1110,10 +1134,58 @@ export function createLocalProjectEngine(options = {}) {
     return result;
   };
   const ingest = async (
-    { sources, remote },
+    { sources, remote, force },
     { durableIdempotencyKey, cancellationPoint },
   ) => {
     const canonicalRoot = await realpath(root);
+    // FEAT-045 (#150): a directory source expands to every supported file
+    // under it (K-DLC runtime and knowledge trees excluded), so "ingest
+    // docs/" replaces listing a hundred files by hand.
+    const { descriptors: normalizerDescriptors } = await import("../normalizers/index.mjs");
+    const supportedExtensions = new Set(Object.values(normalizerDescriptors).flatMap((entry) => entry.accepted?.extensions ?? []));
+    const expandedSources = [];
+    let expandedDirectories = 0;
+    for (const source of sources) {
+      const candidate = await realpath(resolve(root, source));
+      if (!(candidate === canonicalRoot || candidate.startsWith(`${canonicalRoot}/`))) {
+        throw new EngineError("KDLC_POLICY_DENIED", "Source escapes the project root", EXIT.policy);
+      }
+      if (!(await stat(candidate)).isDirectory()) { expandedSources.push(source); continue; }
+      expandedDirectories += 1;
+      const walk = async (directory) => {
+        const found = [];
+        for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+          if (entry.name.startsWith(".")) continue;
+          const full = resolve(directory, entry.name);
+          if (entry.isDirectory()) {
+            if (["node_modules", "knowledge", "workflow", "mounts"].includes(entry.name)) continue;
+            found.push(...await walk(full));
+          } else if (supportedExtensions.has(extname(entry.name).toLowerCase())) {
+            found.push(relative(canonicalRoot, full));
+          }
+        }
+        return found;
+      };
+      expandedSources.push(...await walk(candidate));
+    }
+    if (expandedDirectories > 0 && remote !== undefined) throw inputError("directory sources cannot combine with --remote-json (remote descriptors align to explicit files)");
+    // Change detection: byte-identical files already ingested skip unless
+    // --force. The ledger records the hash of every successful normalization.
+    const ledgerPath = resolve(root, ".kdlc/ingest-ledger.json");
+    const ledger = existsSync(ledgerPath) ? JSON.parse(readFileSync(ledgerPath, "utf8")) : {};
+    const skippedUnchanged = [];
+    sources = [];
+    for (const source of expandedSources) {
+      const bytes = await readFile(await realpath(resolve(root, source)));
+      const digestNow = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      // Remote descriptors align by index to explicit files, so skipping
+      // would misalign them — remote ingests always process.
+      if (!force && remote === undefined && ledger[source] === digestNow) { skippedUnchanged.push(source); continue; }
+      sources.push(source);
+    }
+    if (sources.length === 0 && skippedUnchanged.length > 0) {
+      return { normalized: [], skipped_unchanged: skippedUnchanged, note: "every source is unchanged since its last ingest — pass --force to re-normalize" };
+    }
     // FEAT-021: optional remote descriptors, aligned by index with sources.
     if (remote !== undefined && (!Array.isArray(remote) || remote.length !== sources.length)) {
       throw inputError("remote descriptors must be an array aligned one-to-one with sources");
@@ -1141,6 +1213,7 @@ export function createLocalProjectEngine(options = {}) {
           EXIT.policy,
         );
       const bytes = await readFile(candidate);
+      ledger[source] = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const sourceId = `src_${createHash("sha256").update(`${durableIdempotencyKey}:${index}:${source}`).digest("hex").slice(0, 16)}`;
       const result = await normalize({
         bytes,
@@ -1166,7 +1239,9 @@ export function createLocalProjectEngine(options = {}) {
       }
       normalized.push(result);
     }
-    return { idempotency_key: durableIdempotencyKey, normalized };
+    await mkdir(dirname(ledgerPath), { recursive: true });
+    await writeFile(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`);
+    return { idempotency_key: durableIdempotencyKey, normalized, ...(skippedUnchanged.length ? { skipped_unchanged: skippedUnchanged } : {}) };
   };
   const sourceExcerpt = async ({ source_id: sourceId, locator }) => {
     if (typeof sourceId !== "string" || !portable(sourceId) || !locator || typeof locator !== "object" || Array.isArray(locator)) throw inputError("A portable source_id and locator object are required");
