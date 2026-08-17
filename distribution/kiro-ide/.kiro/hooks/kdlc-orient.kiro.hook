@@ -1,0 +1,1 @@
+{"description":"Orients the assistant in a K-DLC governed project (at most once per few hours).","enabled":true,"name":"kdlc-orient","then":{"command":"node .kiro/hooks/kdlc-orient.mjs","type":"runCommand"},"version":"1.0.0","when":{"type":"promptSubmit"}}

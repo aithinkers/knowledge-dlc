@@ -464,6 +464,118 @@ generated.set(
 generated.set("distribution/claude-code/hooks/hooks.json", CLAUDE_HOOKS_MANIFEST);
 generated.set("distribution/claude-code/hooks/orient.mjs", ORIENT_HOOK);
 generated.set("distribution/claude-code/hooks/guard.mjs", GUARD_HOOK);
+// FEAT-040 (#140): Kiro IDE parity — native hooks, front-door agent.
+const KIRO_ORIENT_HOOK = `#!/usr/bin/env node
+// K-DLC session orientation for Kiro IDE (FEAT-040). Fires on promptSubmit,
+// so a marker file dedupes it to at most once per 4 hours. Best-effort: it
+// never fails the session.
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+try {
+  const marker = ".kdlc/tmp/kiro-oriented";
+  try {
+    if (Date.now() - Number(readFileSync(marker, "utf8")) < 4 * 3600 * 1000) process.exit(0);
+  } catch { /* not yet oriented */ }
+  const lines = [];
+  if (existsSync("knowledge-bases") || existsSync(".kdlc")) {
+    lines.push("This project is governed by K-DLC.");
+    try {
+      const runs = readdirSync("workflow/runs").length;
+      if (runs > 0) lines.push(\`Workflow runs on record: \${runs} — "kdlc status --output human" shows where they stand.\`);
+    } catch { /* no runs yet */ }
+    lines.push("Knowledge changes flow through proposals and review — never edit files under knowledge-bases/ directly; use the kdlc skills or agents.");
+    lines.push("New here? The distribution ships plain-language guides (guides/) covering bringing knowledge in, reviewing, querying, and upkeep.");
+  } else {
+    lines.push("No K-DLC project detected in this directory. The kdlc-init skill starts one; kdlc-adopt brings existing documents under governance.");
+  }
+  try { mkdirSync(".kdlc/tmp", { recursive: true }); writeFileSync(marker, String(Date.now())); } catch { /* dedup is best-effort */ }
+  process.stdout.write(lines.join("\\n") + "\\n");
+} catch { /* orientation is best-effort */ }
+`;
+const KIRO_GUARD_HOOK = `#!/usr/bin/env node
+// K-DLC guard for Kiro IDE (FEAT-040): blocks direct edits to governed state
+// so all changes flow through the reviewed pipeline. Exit 2 + stderr = block.
+// Channel handling follows the empirically captured contract (aidlc-workflows
+// docs/reference/kiro-ide-hook-payload.md): IDE 0.12 delivers camelCase
+// { toolName, toolArgs } via USER_PROMPT with a stdin that never closes, so
+// the read is raced against a timeout; IDE 1.x writes snake_case
+// { tool_name, tool_input } to stdin and closes it. Unknown payloads fail
+// open — the deterministic engine remains the real enforcement.
+import { relative, resolve, sep } from "node:path";
+async function readPayload() {
+  const legacy = process.env.USER_PROMPT ?? "";
+  if (legacy.trim().length > 0) return legacy;
+  const read = (async () => {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    return Buffer.concat(chunks).toString("utf8");
+  })();
+  const timeout = new Promise((settle) => setTimeout(settle, 2000, "").unref?.());
+  return Promise.race([read, timeout]);
+}
+let input = {};
+try { input = JSON.parse(await readPayload()); } catch { process.exit(0); }
+const toolInput = input.tool_input ?? input.toolArgs ?? {};
+const raw = String(toolInput?.file_path ?? toolInput?.path ?? toolInput?.notebook_path ?? "");
+if (!raw) process.exit(0);
+const cleaned = raw.replaceAll("\\\\", "/").replace(/\\/{2,}/g, "/");
+const path = relative(process.cwd(), resolve(process.cwd(), cleaned)).split(sep).join("/");
+const judged = path.toLowerCase();
+const inside = (root) => judged === root || judged.startsWith(root + "/");
+if (!path.startsWith("..") && (inside("knowledge-bases") || inside("workflow"))) {
+  process.stderr.write(
+    \`Direct edits to \${path} are not allowed: this file is governed K-DLC state, and hand edits would bypass review and break provenance. \` +
+    "Use the kdlc skills instead (kdlc-proposal to change content, kdlc-review to decide, kdlc-reconcile-edits for edits that already happened outside the flow).\\n",
+  );
+  process.exit(2);
+}
+process.exit(0);
+`;
+generated.set("distribution/kiro-ide/.kiro/hooks/kdlc-orient.mjs", KIRO_ORIENT_HOOK);
+generated.set("distribution/kiro-ide/.kiro/hooks/kdlc-guard.mjs", KIRO_GUARD_HOOK);
+// Dual registration (kiro-ide-hook-payload.md): IDE 1.x reads only the v2
+// .json schema and silently ignores .kiro.hook; 0.12 reads only .kiro.hook.
+generated.set("distribution/kiro-ide/.kiro/hooks/kdlc-orient.kiro.hook", `${canonicalJson({
+  version: "1.0.0", enabled: true, name: "kdlc-orient",
+  description: "Orients the assistant in a K-DLC governed project (at most once per few hours).",
+  when: { type: "promptSubmit" },
+  then: { type: "runCommand", command: "node .kiro/hooks/kdlc-orient.mjs" }
+})}\n`);
+generated.set("distribution/kiro-ide/.kiro/hooks/kdlc-orient.json", `${canonicalJson({
+  version: "v1",
+  hooks: [{ name: "kdlc-orient", trigger: "UserPromptSubmit",
+    description: "Orients the assistant in a K-DLC governed project (at most once per few hours).",
+    action: { type: "command", command: "node .kiro/hooks/kdlc-orient.mjs" } }]
+})}\n`);
+generated.set("distribution/kiro-ide/.kiro/hooks/kdlc-guard.kiro.hook", `${canonicalJson({
+  version: "1.0.0", enabled: true, name: "kdlc-guard",
+  description: "Blocks direct edits to governed knowledge state so changes flow through proposal and review.",
+  when: { type: "preToolUse" },
+  then: { type: "runCommand", command: "node .kiro/hooks/kdlc-guard.mjs" }
+})}\n`);
+generated.set("distribution/kiro-ide/.kiro/hooks/kdlc-guard.json", `${canonicalJson({
+  version: "v1",
+  hooks: [{ name: "kdlc-guard", trigger: "PreToolUse",
+    description: "Blocks direct edits to governed knowledge state so changes flow through proposal and review.",
+    action: { type: "command", command: "node .kiro/hooks/kdlc-guard.mjs" } }]
+})}\n`);
+generated.set("distribution/kiro-ide/.kiro/agents/kdlc.json", `${canonicalJson({
+  $schema: "https://raw.githubusercontent.com/aws/amazon-q-developer-cli/refs/heads/main/schemas/agent-v1.json",
+  name: "kdlc",
+  description: "K-DLC front door — start or resume governed knowledge work; assesses state and offers the right next step.",
+  prompt: "file://kdlc.md",
+  tools: ["fs_read", "fs_write", "execute_bash", "thinking"],
+  allowedTools: ["fs_read", "thinking"],
+  toolsSettings: {
+    execute_bash: {
+      allowedCommands: [`node (\\./)?distribution/kiro-ide/run\\.mjs [a-z-]+( [A-Za-z0-9@=_"\\[\\],{}:. /-]*)?`],
+      deniedCommands: ["([^\\s]*/)?rm( [^\\s]+)* -[A-Za-z]*[rR][A-Za-z]*( .*)?", "([^\\s]*/)?rm( [^\\s]+)* --recursive( .*)?", "([^\\s]*/)?git( -[^\\s]+( (\"[^\"]*\"|'[^']*'|[^\\s]+))?)* push( .*)?"]
+    },
+    fs_write: { allowedPaths: [".kdlc/**", "workspace/**"] }
+  },
+  resources: ["file://AGENTS.md", "file://guides/*.md"]
+})}\n`);
+generated.set("distribution/kiro-ide/.kiro/agents/kdlc.md", `<!-- generated: packages/adapters/generate.mjs -->\n${START_SURFACE.replace("through the governed runner.", 'by invoking ["node", "distribution/kiro-ide/run.mjs", <operation>, "--output", "json"] directly without a shell.')}`);
+
 for (const harness of ["claude-code", "codex", "kiro", "kiro-ide"]) {
   for (const [slug, body] of Object.entries(WORKFLOW_GUIDES))
     generated.set(`distribution/${harness}/guides/${slug}.md`, `<!-- generated: packages/adapters/generate.mjs -->\n${body}`);

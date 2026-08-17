@@ -1,0 +1,1 @@
+{"hooks":[{"action":{"command":"node .kiro/hooks/kdlc-guard.mjs","type":"command"},"description":"Blocks direct edits to governed knowledge state so changes flow through proposal and review.","name":"kdlc-guard","trigger":"PreToolUse"}],"version":"v1"}

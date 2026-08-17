@@ -108,3 +108,70 @@ test("FEAT-017: json and text envelope rendering are byte-identical to the pre-h
   assert.match(renderEnvelope(envelope, "json"), /^\{.*\}\n$/s);
   assert.equal(renderEnvelope(envelope, "text").split("\n")[0], "status: ok");
 });
+
+test("FEAT-040: the Kiro IDE surface carries the protective parity tier — hooks, front door, hardened manifests", async () => {
+  // Native hooks: orientation and the pre-write guard, wired as .kiro.hook.
+  for (const hook of ["kdlc-orient", "kdlc-guard"]) {
+    const manifest = JSON.parse(await readFile(join(root, `distribution/kiro-ide/.kiro/hooks/${hook}.kiro.hook`), "utf8"));
+    assert.equal(manifest.enabled, true);
+    assert.equal(manifest.then.command, `node .kiro/hooks/${hook}.mjs`);
+  }
+  assert.equal(JSON.parse(await readFile(join(root, "distribution/kiro-ide/.kiro/hooks/kdlc-guard.kiro.hook"), "utf8")).when.type, "preToolUse");
+  // IDE 1.x silently ignores .kiro.hook — the v2 .json registration is the
+  // live one there, so both hooks must be dual-registered (review CRITICAL).
+  const guardV2 = JSON.parse(await readFile(join(root, "distribution/kiro-ide/.kiro/hooks/kdlc-guard.json"), "utf8"));
+  assert.equal(guardV2.version, "v1");
+  assert.equal(guardV2.hooks[0].trigger, "PreToolUse");
+  assert.equal(guardV2.hooks[0].action.command, "node .kiro/hooks/kdlc-guard.mjs");
+  const orientV2 = JSON.parse(await readFile(join(root, "distribution/kiro-ide/.kiro/hooks/kdlc-orient.json"), "utf8"));
+  assert.equal(orientV2.hooks[0].trigger, "UserPromptSubmit");
+  // The guard blocks governed paths and fails open on unknown payloads.
+  const { execFileSync } = await import("node:child_process");
+  const guard = join(root, "distribution/kiro-ide/.kiro/hooks/kdlc-guard.mjs");
+  const run = (payload) => {
+    try {
+      execFileSync("node", [guard], { input: payload, stdio: ["pipe", "pipe", "pipe"] });
+      return { code: 0, stderr: "" };
+    } catch (error) {
+      return { code: error.status, stderr: String(error.stderr) };
+    }
+  };
+  const blocked = run(JSON.stringify({ tool_name: "fs_write", tool_input: { path: "knowledge-bases/x/concepts/y.md" } }));
+  assert.equal(blocked.code, 2);
+  assert.match(blocked.stderr, /bypass review/);
+  assert.equal(run("not json").code, 0, "unknown payloads fail open");
+  assert.equal(run(JSON.stringify({ tool_name: "fs_write", tool_input: { path: "notes/todo.md" } })).code, 0, "ungoverned paths pass");
+  // 0.12 channel: payload rides USER_PROMPT (camelCase toolArgs), stdin never
+  // closes — the guard must still block without hanging (review CRITICAL).
+  const legacy = (() => {
+    try {
+      execFileSync("node", [guard], {
+        input: "", stdio: ["pipe", "pipe", "pipe"], timeout: 10_000,
+        env: { ...process.env, USER_PROMPT: JSON.stringify({ toolName: "fs_write", toolArgs: { path: "knowledge-bases/x/y.md" } }) }
+      });
+      return { code: 0, stderr: "" };
+    } catch (error) {
+      return { code: error.status, stderr: String(error.stderr) };
+    }
+  })();
+  assert.equal(legacy.code, 2, "legacy USER_PROMPT channel still blocks");
+  assert.match(legacy.stderr, /bypass review/);
+  // Front-door agent routes to the start routine with confined tools.
+  const door = JSON.parse(await readFile(join(root, "distribution/kiro-ide/.kiro/agents/kdlc.json"), "utf8"));
+  assert.equal(door.name, "kdlc");
+  assert.deepEqual(door.toolsSettings.fs_write.allowedPaths, [".kdlc/**", "workspace/**"]);
+  // The front door's regexes must be byte-identical to the role agents'
+  // (an over-escaped copy once shipped broken patterns — review round 2).
+  const conductorManifest = JSON.parse(await readFile(join(root, "distribution/kiro-ide/.kiro/agents/conductor.json"), "utf8"));
+  assert.deepEqual(door.toolsSettings.execute_bash, conductorManifest.toolsSettings.execute_bash);
+  assert.ok(door.toolsSettings.execute_bash.deniedCommands.some((rule) => new RegExp(`^(?:${rule})$`).test("rm subdir --recursive")), "long-form recursive delete is denied");
+  // Every role manifest declares resources and the hardened settings.
+  for (const definition of AGENT_DEFINITIONS) {
+    const manifest = JSON.parse(await readFile(join(root, `distribution/kiro-ide/.kiro/agents/${definition.role}.json`), "utf8"));
+    assert.deepEqual(manifest.resources, [`file://.kiro/agents/${definition.role}.md`, "file://AGENTS.md", "file://guides/*.md"], definition.role);
+    if (manifest.toolsSettings) {
+      assert.ok(manifest.toolsSettings.execute_bash.deniedCommands.some((rule) => rule.includes("push")), `${definition.role} denies git push`);
+      assert.deepEqual(manifest.toolsSettings.fs_write.allowedPaths, [".kdlc/**", "workspace/**"], `${definition.role} confines writes`);
+    }
+  }
+});
