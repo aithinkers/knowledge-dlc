@@ -83,9 +83,11 @@ background work — and use only the governed engine operations:
    EXPLICITLY declare \`status: "draft"\` (\`--auto\` refuses anything
    else), submit with \`proposal --submit <workflow-id> --auto\`, and move
    on. Do not stop to report between documents; a failed document is noted
-   and skipped, never a reason to halt the batch. The flow is resumable:
-   after any interruption, bare \`kdlc\` names the open kits — continue
-   from there rather than re-scaffolding. Finish with ONE summary: documents
+   and skipped rather than halting the batch — but if several consecutive
+   documents fail the same way, stop and report the pattern instead of
+   grinding through it. The flow is resumable: after any interruption, bare
+   \`kdlc\` shows how many kits remain open and where to continue —
+   pick up from there rather than re-scaffolding. Finish with ONE summary: documents
    processed, concepts auto-published as drafts, failures with reasons, and
    the reminder that \`kdlc revisit\` lists every machine approval awaiting
    human ratification. Partial-coverage sources keep their disclosure in the
