@@ -89,7 +89,7 @@ async function runGitBytes(args, cwd) {
 }
 
 function gitUrl(uri) {
-  if (!uri.startsWith("git+")) federationFail("KDLC_MOUNT_SCHEME", `Unsupported mount URI scheme: ${uri}`);
+  if (!uri.startsWith("git+")) federationFail("KDLC_MOUNT_SCHEME", `Unsupported mount URI scheme: ${uri.split(":", 1)[0]}`);
   const value = uri.slice(4);
   if (!/^(?:file|https|ssh):\/\//.test(value)) federationFail("KDLC_MOUNT_SCHEME", "Git mounts require git+file, git+https, or git+ssh");
   let parsed; try { parsed = new URL(value); } catch { federationFail("KDLC_MOUNT_SCHEME", "Git mount URI is invalid"); }

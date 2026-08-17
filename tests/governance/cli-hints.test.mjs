@@ -78,6 +78,28 @@ test("FEAT-031: governed refusals surface their real code and details through th
   assert.ok(!JSON.stringify(masked).includes("secret internals"));
 });
 
+test("FEAT-031: federation refusals pass through with their real code instead of masking as internal (#138)", async () => {
+  const { FederationError } = await import("../../packages/federation/src/errors.mjs");
+  const engine = new KdlcEngine({ handlers: { status: () => { throw new FederationError("KDLC_PROJECT_INVALID", "Project manifest is invalid", { contract: [{ message: "must have required property 'priority'" }] }); } } });
+  const envelope = await engine.envelope("status", {});
+  assert.equal(envelope.error.code, "KDLC_PROJECT_INVALID");
+  assert.match(JSON.stringify(envelope.error.details), /priority/, "the actionable detail reaches the user");
+});
+
+test("FEAT-039: a mistyped mount URI never echoes an embedded credential through the envelope (review MEDIUM)", async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { FederationResolver } = await import("../../packages/federation/src/resolver.mjs");
+  const resolver = new FederationResolver({ projectRoot: await mkdtemp(join(tmpdir(), "kdlc-scheme-")) });
+  for (const uri of ["git+ftp://user:supersecrettoken@host/repo.git", "https://user:supersecrettoken@host/repo.git"]) {
+    await assert.rejects(
+      resolver.resolveMount({ name: "oops", uri, ref: "main", mode: "read-only" }),
+      (error) => typeof error.code === "string" && error.code.startsWith("KDLC_") && !error.message.includes("supersecrettoken") && !JSON.stringify(error.details ?? {}).includes("supersecrettoken")
+    );
+  }
+});
+
 test("FEAT-031: coded refusals keep the exit-class taxonomy and never break the envelope", async () => {
   const { GovernanceError } = await import("../../packages/governance/index.mjs");
   const make = (code, extra = {}) => new KdlcEngine({ handlers: { status: () => { throw Object.assign(new GovernanceError(code, "m"), extra); } } });
