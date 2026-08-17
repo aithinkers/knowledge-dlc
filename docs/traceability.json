@@ -1254,6 +1254,25 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-043",
+      "title": "Lock names survive deep target paths; orphaned leases reclaim with audit",
+      "issue": 146,
+      "specification_sections": [
+        "25",
+        "27"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/lifecycle/src/locks.mjs",
+          "packages/lifecycle/src/store.mjs"
+        ],
+        "tests": [
+          "tests/governance/lock-resilience.test.mjs"
+        ]
+      }
     }
   ]
 }

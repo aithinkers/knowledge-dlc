@@ -4,9 +4,16 @@ import { conflict, denied } from "./errors.mjs";
 
 export class LeaseLockManager {
   constructor({ store, clock, audit, ids, coordination = {} }) { Object.assign(this, { store, clock, audit, ids }); this.coordination = coordination; }
-  path(resource) { return `workflow/locks/${encodeURIComponent(resource)}`; }
+  // Deep target paths must never overflow a filesystem's 255-byte filename
+  // component: long encoded resources keep a readable prefix and bind the
+  // full identity through a content hash (#146).
+  fileName(resource) {
+    const encoded = encodeURIComponent(resource);
+    return encoded.length <= 150 ? encoded : `${encoded.slice(0, 96)}...${this.store.token(resource).slice(7, 39)}`;
+  }
+  path(resource) { return `workflow/locks/${this.fileName(resource)}`; }
   recordPath(resource) { return `${this.path(resource)}/lease.json`; }
-  adminPath(resource) { return `workflow/lock-admin/${encodeURIComponent(resource)}`; }
+  adminPath(resource) { return `workflow/lock-admin/${this.fileName(resource)}`; }
   owner(operation, resource) { return `${operation}:${resource}:${this.ids?.next?.("coord") ?? `${process.pid}-${Date.now()}`}`; }
   coordinated(resource, operation, action) {
     return this.store.withMutex(this.adminPath(resource), { owner: this.owner(operation, resource), clock: this.clock, ...this.coordination }, action);
@@ -14,11 +21,27 @@ export class LeaseLockManager {
   async acquire(resource, { owner, process, leaseMs, recovery = {} }) {
     return this.coordinated(resource, "acquire", async () => {
       const lockPath = this.path(resource);
-      try { await this.store.createDirectoryExclusive(lockPath); }
+      const tryCreate = async () => { await this.store.createDirectoryExclusive(lockPath); };
+      try { await tryCreate(); }
       catch (error) {
         if (error.code !== "EEXIST") throw error;
         const held = await this.store.exists(this.recordPath(resource)) ? await this.store.readJson(this.recordPath(resource)) : null;
-        throw conflict("Resource is locked", { resource, owner: held?.owner, expires_at: held?.expires_at, empty: !held });
+        // A lease whose owner process is provably dead and whose lease has
+        // expired is an orphan (e.g. a holder that crashed before writing a
+        // journal): break it with an audit record instead of wedging every
+        // future publish on this target (#146). Live or unverifiable owners
+        // still conflict fail-closed.
+        const orphaned = held
+          ? Date.parse(held.expires_at) <= this.clock.millis() && this.store.processIsAlive(held.process_id) === false
+          : (this.clock.millis() - (await stat(await this.store.safePath(lockPath))).mtimeMs) >= (this.coordination.emptyGraceMs ?? 30_000);
+        if (!orphaned) throw conflict("Resource is locked", { resource, owner: held?.owner, expires_at: held?.expires_at, empty: !held });
+        if (this.audit && held?.recovery?.workflow_id) await this.audit.append(held.recovery.workflow_id, {
+          actor: owner, action: "lock.broken", subject: resource, result: "stale", reason: "expired lease with dead owner process",
+          prior_owner: held.owner, idempotency_key: `lock-orphan:${this.store.token(JSON.stringify([resource, held.owner, held.lease_id]))}`
+        });
+        if (held) await this.store.remove(this.recordPath(resource)).catch(() => {});
+        await this.store.removeDirectory(lockPath);
+        await tryCreate();
       }
       const processId = Number(process);
       if (!Number.isSafeInteger(processId) || processId <= 0) throw conflict("Lock requires a valid local process ID", { resource });
