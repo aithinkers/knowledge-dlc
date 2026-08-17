@@ -5,7 +5,7 @@ already has — wikis, PDFs, Word docs, emails, spreadsheets, decks, diagrams,
 web pages, and pages living in **Confluence, SharePoint, OneDrive, or Google
 Drive** — into durable, provenance-bearing knowledge that AI agents can
 actually trust: curated, linked Markdown concepts in the
-[Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf)
+[Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
 (schemas vendored at [core/schemas/okf-0.2/](core/schemas/okf-0.2/)), produced through a
 governed lifecycle with explicit human approval gates. Think of it as a
 governed knowledge base builder for the agent era: every answer cites the
