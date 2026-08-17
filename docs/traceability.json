@@ -1347,6 +1347,26 @@
           "tests/governance/drafting-scaffold.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-048",
+      "title": "Stable-tier editorial metadata enforced; tags ranked and rendered",
+      "issue": 156,
+      "specification_sections": [
+        "2",
+        "14.2",
+        "25"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/index.mjs",
+          "packages/retrieval/src/retriever.mjs"
+        ],
+        "tests": [
+          "tests/governance/drafting-scaffold.test.mjs"
+        ]
+      }
     }
   ]
 }
