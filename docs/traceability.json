@@ -1218,6 +1218,24 @@
           "tests/governance/human-surfaces.test.mjs"
         ]
       }
+    },
+    {
+      "id": "FEAT-041",
+      "title": "kiro-ide setup installs the full protective tier with rewritten paths",
+      "issue": 142,
+      "specification_sections": [
+        "5.7",
+        "36"
+      ],
+      "status": "implemented",
+      "evidence": {
+        "implementation": [
+          "packages/cli/setup.mjs"
+        ],
+        "tests": [
+          "tests/governance/human-surfaces.test.mjs"
+        ]
+      }
     }
   ]
 }

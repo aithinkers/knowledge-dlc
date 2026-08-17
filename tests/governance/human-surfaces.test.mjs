@@ -175,3 +175,26 @@ test("FEAT-040: the Kiro IDE surface carries the protective parity tier — hook
     }
   }
 });
+
+test("FEAT-040: kiro-ide setup installs the full protective tier into a project (#142)", async () => {
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { runSetup } = await import("../../packages/cli/setup.mjs");
+  const target = await mkdtemp(join(tmpdir(), "kdlc-setup-kiro-"));
+  const result = await runSetup({ tool: "kiro-ide", project: target });
+  for (const file of [
+    ".kiro/agents/kdlc.json", ".kiro/agents/kdlc.md",
+    ".kiro/hooks/kdlc-guard.mjs", ".kiro/hooks/kdlc-guard.kiro.hook", ".kiro/hooks/kdlc-guard.json",
+    ".kiro/hooks/kdlc-orient.mjs", ".kiro/hooks/kdlc-orient.kiro.hook", ".kiro/hooks/kdlc-orient.json",
+    ".kiro/kdlc/AGENTS.md", ".kiro/kdlc/guides/review-and-publish.md"
+  ]) {
+    assert.ok(result.files.includes(file), `setup installs ${file}`);
+  }
+  // Installed manifests bind the runner absolutely and keep context under
+  // .kiro/kdlc/ so setup never collides with the project's own root files.
+  const door = JSON.parse(await readFile(join(target, ".kiro/agents/kdlc.json"), "utf8"));
+  assert.match(door.toolsSettings.execute_bash.allowedCommands[0], /^node \/.*run\\\.mjs /);
+  assert.deepEqual(door.resources, ["file://.kiro/kdlc/AGENTS.md", "file://.kiro/kdlc/guides/*.md"]);
+  const roleManifest = JSON.parse(await readFile(join(target, ".kiro/agents/conductor.json"), "utf8"));
+  assert.deepEqual(roleManifest.resources, ["file://.kiro/agents/conductor.md", "file://.kiro/kdlc/AGENTS.md", "file://.kiro/kdlc/guides/*.md"]);
+});
