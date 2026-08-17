@@ -43,7 +43,7 @@ test("FEAT-017: every generated command surface carries guidance above an unchan
   // plugin-namespace-friendly names; other operations remain runner-invocable
   // and are exercised through the kiro surfaces below.
   assert.ok((await readFile(join(root, "distribution/claude-code/commands/start.md"), "utf8")).includes("pick up where we left off"));
-  for (const command of ["init", "ingest", "query", "publish", "revisit", "status", "doctor"]) {
+  for (const command of ["init", "ingest", "query", "publish", "revisit", "status", "doctor", "visualize"]) {
     const claude = await readFile(join(root, "distribution/claude-code/commands", `${command}.md`), "utf8");
     assert.ok(!claude.startsWith("---\ndescription: Run the governed"), `${command}: description is plain language`);
     for (const marker of ["**When to use:**", "**What you give it:**", "**What you get back:**", "**Usually next:**"]) {

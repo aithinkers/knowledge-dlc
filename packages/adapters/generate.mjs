@@ -15,6 +15,12 @@ const surfaceCommands = definition.cli_commands.filter((command) => command !== 
 // for the humans invoking the command — knowledge owners, analysts, reviewers
 // — not for engineers; the binding line below it remains the contract.
 const COMMAND_GUIDANCE = {
+  visualize: {
+    when: "You want to see the knowledge base as a map — every published concept and its relationships on one self-contained page.",
+    give: "Nothing — it reads the published retrieval catalog.",
+    get: "knowledge/<base>/viz.html: an interactive graph (reviewed titles, descriptions, status, access) that opens in any browser with no dependencies.",
+    next: "Open the file in a browser; publish more concepts and re-run to refresh it.",
+  },
   init: {
     when: "You're starting a brand-new K-DLC project in this repository.",
     give: "A project name and, optionally, a scope profile.",
@@ -479,7 +485,7 @@ const generated = new Map([
 // every other operation stays invocable through the governed runner (agents
 // use it directly) and documented in COMMANDS.md. Files are named without
 // the kdlc- prefix: the plugin namespace already provides it.
-const claudePalette = ["init", "ingest", "query", "publish", "revisit", "status", "doctor"];
+const claudePalette = ["init", "ingest", "query", "publish", "revisit", "status", "doctor", "visualize"];
 // Pinned release-corpus compatibility: the distribution test reads this exact
 // legacy filename. It stays as a thin alias of /kdlc:query.
 generated.set(
