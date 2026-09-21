@@ -80,14 +80,14 @@
   "dependencies": {
     "acorn": "8.18.0",
     "ajv-formats": "3.0.1",
-    "canonicalize": "4.0.0",
+    "canonicalize": "5.0.0",
     "csv-parse": "7.0.2",
     "fflate": "0.8.3",
     "gifuct-js": "2.1.2",
-    "pdfjs-dist": "6.2.108",
+    "pdfjs-dist": "6.3.289",
     "saxes": "6.0.0",
     "semver": "7.8.5",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "ajv": "8.20.0"
